@@ -23,8 +23,18 @@ export function ViewerHud({ onExit }: { onExit: () => void }) {
   const helpOpen = useViewerStore((s) => s.helpOpen);
   const setHelpOpen = useViewerStore((s) => s.setHelpOpen);
   const requestTeleport = useViewerStore((s) => s.requestTeleport);
+  const requestOrbitReset = useViewerStore((s) => s.requestOrbitReset);
   const isPointerLocked = useViewerStore((s) => s.isPointerLocked);
   const [variantMenuOpen, setVariantMenuOpen] = useState(false);
+
+  // Reset means different things per mode: in dollhouse it restores the
+  // elevated overview; otherwise it returns the walker to the entry room.
+  // (A first-person teleport in dollhouse would drop the camera to eye height
+  // inside the building and collapse the overview.)
+  const handleResetView = () => {
+    if (mode === 'orbit') requestOrbitReset();
+    else requestTeleport(ENTRY_ROOM_ID);
+  };
 
   return (
     <>
@@ -54,7 +64,7 @@ export function ViewerHud({ onExit }: { onExit: () => void }) {
           </div>
           <button
             type="button"
-            onClick={() => requestTeleport(ENTRY_ROOM_ID)}
+            onClick={handleResetView}
             className="rounded-full border border-limestone/60 bg-ivory/90 px-4 py-2 text-xs font-semibold tracking-wide text-charcoal shadow-lg backdrop-blur-sm hover:bg-ivory"
           >
             ⟲ Reset View

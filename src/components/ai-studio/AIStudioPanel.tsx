@@ -75,20 +75,20 @@ export function AIStudioPanel() {
 
   const videoAvailableForRoom = VIDEO_CAPABLE_ROOMS.has(roomId);
   const isLiveForOutput = outputType === 'image' ? liveStatus?.nanoBanana : liveStatus?.higgsfield;
+  const approvedForCurrentRoom = approvedSource !== null && approvedSource.roomId === roomId;
+  // A live (billed) Higgsfield clip must animate a real approved concept — not
+  // the placeholder still — so it stays disabled until an image is approved.
+  const liveVideoNeedsApproval = Boolean(isLiveForOutput) && outputType === 'video' && !approvedForCurrentRoom;
 
   function handleRoomChange(nextRoomId: RoomId) {
     setRoomId(nextRoomId);
     if (!VIDEO_CAPABLE_ROOMS.has(nextRoomId) && outputType === 'video') setOutputType('image');
     setConfirmingLiveRun(false);
-    // Invalidate any in-flight generation: bumping the token makes the pending
-    // poll drop its result, so a job started for the previous room can never be
-    // rendered or approved under the newly selected room.
-    pollTokenRef.current += 1;
-    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    // The room selector is disabled while a generation is in flight, so no
+    // active (possibly billed) job is ever discarded here — just clear the
+    // shown result and its approval, which belong to the room being left.
     setJob(null);
-    setSubmitting(false);
     setError(null);
-    // An approved concept belongs to one room; leaving it drops the approval.
     setApproved(false);
     setApprovedSource(null);
   }
@@ -101,6 +101,7 @@ export function AIStudioPanel() {
 
   function handleGenerateClick() {
     if (liveStatus === null) return;
+    if (liveVideoNeedsApproval) return;
     if (isLiveForOutput && !confirmingLiveRun) {
       setConfirmingLiveRun(true);
       return;
@@ -217,7 +218,8 @@ export function AIStudioPanel() {
           <select
             value={roomId}
             onChange={(e) => handleRoomChange(e.target.value as RoomId)}
-            className="rounded-xl border border-limestone/60 bg-ivory px-3 py-2 text-charcoal"
+            disabled={submitting}
+            className="rounded-xl border border-limestone/60 bg-ivory px-3 py-2 text-charcoal disabled:cursor-not-allowed disabled:opacity-60"
           >
             {houseModel.rooms.map((room) => (
               <option key={room.id} value={room.id}>
@@ -248,14 +250,15 @@ export function AIStudioPanel() {
             <button
               type="button"
               onClick={() => handleOutputTypeChange('image')}
-              className={`flex-1 px-3 py-2 text-xs font-semibold ${outputType === 'image' ? 'bg-bronze text-ivory' : 'bg-ivory text-charcoal'}`}
+              disabled={submitting}
+              className={`flex-1 px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${outputType === 'image' ? 'bg-bronze text-ivory' : 'bg-ivory text-charcoal'}`}
             >
               Photorealistic image (Nano Banana)
             </button>
             <button
               type="button"
               onClick={() => handleOutputTypeChange('video')}
-              disabled={!videoAvailableForRoom}
+              disabled={submitting || !videoAvailableForRoom}
               className={`flex-1 px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${outputType === 'video' ? 'bg-bronze text-ivory' : 'bg-ivory text-charcoal'}`}
               title={videoAvailableForRoom ? undefined : 'Cinematic clips are limited to the principal rooms.'}
             >
@@ -321,7 +324,7 @@ export function AIStudioPanel() {
         <button
           type="button"
           onClick={handleGenerateClick}
-          disabled={submitting || liveStatus === null}
+          disabled={submitting || liveStatus === null || liveVideoNeedsApproval}
           className="mt-5 w-full rounded-full bg-bronze px-4 py-3 text-sm font-semibold text-ivory shadow disabled:opacity-60 md:w-auto"
         >
           {liveStatus === null
@@ -330,6 +333,12 @@ export function AIStudioPanel() {
               ? 'Working…'
               : `Generate ${outputType === 'image' ? 'concept image' : 'cinematic clip'}`}
         </button>
+      )}
+      {liveVideoNeedsApproval && (
+        <p className="mt-2 text-xs font-semibold text-bronze">
+          Generate a concept image for this room and Approve it first — a live cinematic clip animates the approved
+          still, not a placeholder.
+        </p>
       )}
       <p className="mt-2 text-xs text-charcoal/50">
         {outputType === 'video'

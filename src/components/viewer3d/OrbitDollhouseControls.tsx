@@ -13,18 +13,20 @@ const OVERVIEW_TARGET: [number, number, number] = [HOUSE_CENTER.x, 1.2, HOUSE_CE
 export function OrbitDollhouseControls() {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const reducedMotion = useViewerStore((s) => s.reducedMotion);
+  const orbitResetToken = useViewerStore((s) => s.orbitResetToken);
   const camera = useThree((s) => s.camera);
 
   // On entering dollhouse mode from Walk the camera is wherever first-person
   // left it — at eye height inside a room, where walls and ceilings hide the
-  // whole-house view. Lift it to an elevated exterior 3/4 pose on mount so the
-  // dollhouse overview is visible immediately, then let OrbitControls take over.
+  // whole-house view. Lift it to an elevated exterior 3/4 pose on mount, and
+  // again whenever Reset View is pressed in this mode (orbitResetToken), so the
+  // dollhouse overview is restored, then let OrbitControls take over.
   useEffect(() => {
     camera.position.set(HOUSE_CENTER.x + 9, 15, HOUSE_CENTER.z + 17);
     camera.lookAt(OVERVIEW_TARGET[0], OVERVIEW_TARGET[1], OVERVIEW_TARGET[2]);
     camera.updateProjectionMatrix();
     controlsRef.current?.update();
-  }, [camera]);
+  }, [camera, orbitResetToken]);
 
   return (
     <OrbitControls

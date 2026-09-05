@@ -44,6 +44,12 @@ interface ViewerState {
   requestTeleport: (roomId: RoomId) => void;
   consumeTeleport: () => void;
 
+  // Bumped to ask the orbit/dollhouse camera to return to its elevated
+  // overview pose — kept separate from teleportToken so a Reset in dollhouse
+  // mode does not also trigger the always-mounted first-person teleport.
+  orbitResetToken: number;
+  requestOrbitReset: () => void;
+
   reducedMotion: boolean;
   setReducedMotion: (v: boolean) => void;
 
@@ -90,6 +96,9 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   teleportToken: 0,
   requestTeleport: (roomId) => set((s) => ({ teleportTarget: roomId, teleportToken: s.teleportToken + 1 })),
   consumeTeleport: () => set({ teleportTarget: null }),
+
+  orbitResetToken: 0,
+  requestOrbitReset: () => set((s) => ({ orbitResetToken: s.orbitResetToken + 1 })),
 
   reducedMotion: false,
   setReducedMotion: (v) => set({ reducedMotion: v }),

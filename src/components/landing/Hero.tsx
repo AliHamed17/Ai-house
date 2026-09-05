@@ -6,7 +6,7 @@ export function Hero({ onEnter3D }: { onEnter3D: () => void }) {
   return (
     <section className="relative flex min-h-[92vh] items-end overflow-hidden bg-charcoal">
       <Image
-        src="/evidence/frames/00-00-16_open-social-zone.jpg"
+        src="/evidence/frames/00-00-14_open-social-zone.jpg"
         alt="Unfinished open social zone of the house, evidence frame from the walkthrough video"
         fill
         priority

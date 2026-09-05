@@ -25,9 +25,26 @@ export default defineConfig({
     baseURL: 'http://localhost:3000',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
-    launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
-      ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
-      : undefined,
+    launchOptions: {
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
+        : {}),
+      // This suite drives dozens of real WebGL contexts in sequence. On a
+      // CI runner the browser renders with software GL (SwiftShader) and
+      // shares memory through /dev/shm, which defaults to a tiny 64 MB and
+      // fills up under sustained WebGL load — the browser process then dies
+      // mid-test with "Internal server error, session closed". These flags
+      // keep software WebGL deterministic and move shared memory to /tmp so
+      // the process survives the whole run. They are harmless locally (both
+      // environments are software-rendered anyway).
+      args: [
+        '--disable-dev-shm-usage',
+        '--use-gl=angle',
+        '--use-angle=swiftshader',
+        '--enable-unsafe-swiftshader',
+        '--disable-gpu-sandbox',
+      ],
+    },
   },
   projects: [
     {

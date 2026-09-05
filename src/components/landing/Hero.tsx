@@ -1,14 +1,15 @@
 'use client';
 
 import Image from 'next/image';
+import { interiorRenders } from '@/data/interiors';
 import { roomEvidenceFrame } from '@/data/evidenceFrames';
 
 export function Hero({ onEnter3D }: { onEnter3D: () => void }) {
   return (
     <section className="relative flex min-h-[92vh] items-end overflow-hidden bg-charcoal">
       <Image
-        src={roomEvidenceFrame.living.path}
-        alt="Unfinished open social zone of the house, evidence frame from the walkthrough video"
+        src={interiorRenders.living?.path ?? roomEvidenceFrame.living.path}
+        alt="Warm-modern-luxury concept for the open social zone of the house"
         fill
         priority
         sizes="100vw"

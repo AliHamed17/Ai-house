@@ -8,12 +8,10 @@ const GALLERY_ROOMS: Array<keyof typeof roomEvidenceFrame> = [
   'stair_landing',
   'entry_hall',
   'living',
-  'terrace_south',
   'bath_family',
   'corridor',
   'mamad',
   'bedroom_twin',
-  'bath_ensuite',
   'bedroom_parents',
 ];
 

@@ -11,10 +11,31 @@ minimap, and AI prompts are all derived from that one file.
 See `analysis/house-evidence.json` for the full machine-readable version of
 this list, including the 14 corrections applied when the model was rebuilt.
 
+## Owner corrections applied
+
+The map below was rebuilt from the drawing and the walkthrough, then corrected
+on site by the owner. Three rooms the drawing implies **do not exist** in the
+built house and have been deleted:
+
+- **South terrace** — not built. The dining bay's south wall is exterior glazing.
+- **MAMAD entry recess** — not built. The protected door opens straight onto the
+  corridor, which is now a plain rectangle.
+- **Second shower room** — not built. The plan's two compartments (170 and 150)
+  are one shower room, and its only door opens off the parents' bedroom.
+
+Three more corrections changed how the open plan works:
+
+- The living room is **open to the kitchen**, separated only by a ~0.5 m wall
+  stub at the west end.
+- The dining bay is **part of the kitchen volume** — one continuous space, no
+  dividing wall.
+- The guest WC has **two doors**, one from the entry hall and one from the
+  dining bay.
+
 ## What the model is
 
 A **15.00 m × 8.72 m east-west bar**, aspect 1.72:1, plus a north terrace and
-stair strip and a south terrace. Both of the architect's dimension chains
+stair strip. Twelve rooms. Both of the architect's dimension chains
 close exactly on those figures:
 
 - across the top: `760 + 740 = 1500`
@@ -49,34 +70,30 @@ the entry hall rather than forcing closure.
    The floor is marked `+6.20 / 18.52` while site levels around it read
    12.03–12.19 m, and the video never shows an interior stair or a second
    storey, so the storey context is unresolved.
-2. **South terrace depth** (`terrace_south`). The weakest room in the model.
-   Never entered in the walkthrough; readers split between the printed 270,
-   a nearby 300, and a ~55 cm French-balcony reading. Confirmed as a walkable
-   terrace by the owner and modelled at 2.70 m, but not measured.
-3. **Guest WC width** (`wc`). The one compartment the architect never
+2. **Guest WC width** (`wc`). The one compartment the architect never
    dimensioned — the lower chain reads `232 | 10 | blank | 10 | 170 | 10 | 150`.
    ~100 cm clear is a scaled measurement against the adjacent printed values,
    not a transcription.
-4. **Corridor length** (`corridor`, 3.07 m east-west). Not dimensioned. It is
+3. **Corridor length** (`corridor`, 3.07 m east-west). Not dimensioned. It is
    derived from two dimensioned ends rather than measured, so it inherits the
    accumulated chain error.
-5. **East facade step** (`bedroom_parents`). 0.68 m by chain arithmetic but
+4. **East facade step** (`bedroom_parents`). 0.68 m by chain arithmetic but
    0.84 m by naive pixel differencing. The chain value is kept because it
    closes; a site measurement would settle it.
 
 ## Everything else carried as an assumption
 
 - **Which bedroom is which.** `bedroom_parents` is the room filmed at
-  t=43–46.8 s solely because the camera walks from it straight into the
-  en-suite, and the en-suite has exactly one door. Both rooms are corner rooms
+  t=43–46.8 s solely because the camera walks from it straight into the shower
+  room, and the shower room has exactly one door. Both rooms are corner rooms
   with windows on adjacent walls, and every east window is blown out in the
   video, so the imagery alone does not disambiguate them.
 - **Wall thickness** (`WALL_THICKNESS_M`, 0.20 m) — matches the plan's
   repeated "20" (cm) markings, but was not independently verified. Interior
   partitions in the wet block are drawn at 10 cm.
-- **MAMAD recess width** (`mamad_recess`, 1.00 m clear) — the depth is the
-  printed 100 on the central chain; the width is inferred from the drawn
-  extent of the reinforced stub.
+- **Shower room width** (`bath_family`, 3.30 m clear) — the plan draws two
+  compartments here; the owner confirms one room. The merged clear width is
+  derived from the two printed values plus the removed partition.
 - **Structural columns** — eleven piers, each traced to a discrete blue blob
   on the plan and cross-checked against the walkthrough. The plan draws them
   as rectangular piers and blades; the video reads several as rounded
@@ -104,13 +121,15 @@ the room and on its one door and one window in `src/data/house.ts`) and are
 validated by `tests/unit/house-validation.test.ts` and
 `tests/unit/house-geometry-invariants.test.ts`.
 
-It has **exactly one door, in its south wall**, opening into a reinforced
-recess (`mamad_recess`) that gives the outward-swinging blast door a clear
-arc. It has **no opening onto the entry hall** — an earlier model placed the
-door in the west wall, which is drawn as unbroken reinforced concrete. No
-material variant, lighting mode, or AI-generated concept alters any of this;
-material variants only ever change floor/wall colours
-(`src/data/materials.ts`), never geometry.
+It has **exactly one door, in its south wall**, opening onto the corridor. It
+has **no opening onto the entry hall** — an earlier model placed the door in the
+west wall, which is drawn as unbroken reinforced concrete. No material variant,
+lighting mode, or AI-generated concept alters any of this; material variants
+only ever change floor/wall colours (`src/data/materials.ts`), never geometry.
+
+The generated interior concepts in `public/generated/interiors/` are prompted to
+hold the blast door, blast window and filtration penetration fixed and visible.
+Treat any render that hides or restyles them as invalid.
 
 ## Remaining limitation
 

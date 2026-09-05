@@ -14,16 +14,20 @@ import { withTimeout } from './resilience.server';
  */
 const NANO_BANANA_MODEL = process.env.NANO_BANANA_MODEL || 'gemini-3-pro-image';
 
+function apiKey(): string | undefined {
+  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+}
+
 function getClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured. Nano Banana generation is unavailable in this environment.');
+  const key = apiKey();
+  if (!key) {
+    throw new Error('Set GEMINI_API_KEY (or GOOGLE_API_KEY). Nano Banana generation is unavailable in this environment.');
   }
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenAI({ apiKey: key });
 }
 
 export function isNanoBananaConfigured(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return Boolean(apiKey());
 }
 
 /**

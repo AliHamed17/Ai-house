@@ -42,10 +42,10 @@ describe('evidence frame references', () => {
     }
   });
 
-  it('marks the two rooms the walkthrough never entered as low confidence', () => {
-    for (const roomId of ['wc', 'terrace_south'] as const) {
-      expect(roomEvidence[roomId].confidence, roomId).toBe('low');
-      expect(roomEvidence[roomId].caption.toLowerCase(), roomId).toContain('never entered');
+  it('gives every room real footage rather than a borrowed still', () => {
+    for (const [roomId, e] of Object.entries(roomEvidence)) {
+      expect(e.shots.length, roomId).toBeGreaterThanOrEqual(3);
+      expect(e.caption.toLowerCase(), roomId).not.toContain('never entered');
     }
   });
 

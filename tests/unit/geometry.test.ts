@@ -9,7 +9,7 @@ describe('wall panel geometry', () => {
     const wallSpec = mamad.walls.find((w) => w.id === 'mamad_s')!;
     const built = buildWall(wallSpec, mamad, houseModel.openings);
     expect(built.voids).toHaveLength(1);
-    expect(built.voids[0].openingId).toBe('door_recess_mamad');
+    expect(built.voids[0].openingId).toBe('door_corridor_mamad');
     expect(built.voids[0].isProtected).toBe(true);
     // A door void produces a floor-level gap, so the wall should render at
     // least two solid panels: below/beside nothing (door starts at floor)
@@ -45,9 +45,9 @@ describe('wall panel geometry', () => {
   });
 
   it('builds a solid, gapless wall for a wall with no openings', () => {
-    const bath = getRoom('bath_family')!;
-    const wallSpec = bath.walls.find((w) => w.id === 'bathfamily_e')!;
-    const built = buildWall(wallSpec, bath, houseModel.openings);
+    const corridor = getRoom('corridor')!;
+    const wallSpec = corridor.walls.find((w) => w.id === 'corridor_s')!;
+    const built = buildWall(wallSpec, corridor, houseModel.openings);
     expect(built.voids).toHaveLength(0);
     expect(built.renderPanels).toHaveLength(1);
     expect(built.collisionSolidSpans).toEqual([{ t0: 0, t1: built.length }]);

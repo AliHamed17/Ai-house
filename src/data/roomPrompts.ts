@@ -21,12 +21,10 @@ const roomPromptSpecs: RoomPromptSpec[] = [
   { roomId: 'living', furniturePlan: 'a low curved warm-beige modular sofa, two sculptural lounge chairs, a textured wool rug, nested stone/oak coffee tables, and one calm textured-plaster media wall with concealed storage' },
   { roomId: 'kitchen', furniturePlan: 'full-height oak and taupe cabinetry on the solid wall, integrated appliances, a light quartzite-look worktop and backsplash, and discreet under-cabinet task lighting, preserving the drawn L-shaped counter layout' },
   { roomId: 'dining', furniturePlan: 'a 6-seat oak or stone-top oval table, upholstered dining chairs, and one centered sculptural warm pendant light' },
-  { roomId: 'terrace_south', furniturePlan: 'compact weather-resistant outdoor seating, restrained planters, and one warm wall light under the covered recess' },
   { roomId: 'mamad', furniturePlan: 'a sofa bed or bed, a compact desk, and closed storage that leaves the protected door, window, and required clearances completely unobstructed' },
   { roomId: 'bedroom_twin', furniturePlan: 'two equivalent single beds, balanced closed storage, and a long shared study surface, keeping the central floor area open' },
   { roomId: 'corridor', furniturePlan: 'a slim runner rug and a single discreet console or linen closet that does not narrow the circulation path' },
   { roomId: 'bath_family', furniturePlan: 'continuous warm stone-look porcelain, a floating oak/taupe vanity, a recessed niche, frameless glass, and face lighting at the mirror' },
-  { roomId: 'bath_ensuite', furniturePlan: 'a compact floating vanity, frameless glass shower screen, and warm face lighting at the mirror' },
   { roomId: 'wc', furniturePlan: 'a compact sculptural basin, a richer restrained stone texture, and one warm wall light' },
   { roomId: 'bedroom_parents', furniturePlan: 'a broad upholstered headboard wall, oak bedside tables, integrated wardrobes, and layered linen curtains' },
 ];

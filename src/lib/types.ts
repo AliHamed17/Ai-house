@@ -13,12 +13,9 @@ export type RoomId =
   | 'entry_hall'
   | 'kitchen'
   | 'dining'
-  | 'terrace_south'
   | 'mamad'
-  | 'mamad_recess'
   | 'corridor'
   | 'bath_family'
-  | 'bath_ensuite'
   | 'wc'
   | 'bedroom_twin'
   | 'bedroom_parents';

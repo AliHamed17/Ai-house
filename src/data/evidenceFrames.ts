@@ -88,20 +88,12 @@ export const roomEvidence: Record<RoomId, RoomEvidence> = {
   dining: {
     hero: 18.6,
     confidence: 'medium',
-    caption: "South across the open strip to the glazed sliding panel \u2014 dining, kitchen and living read as one room.",
+    caption: "Looking south across the open volume \u2014 dining, kitchen and living read as one room.",
     shots: [
       { path: '/evidence/frames/dining/00_t018.9.jpg', seconds: 18.9, timestamp: '00:18', sharpness: 212 },
       { path: '/evidence/frames/dining/01_t019.4.jpg', seconds: 19.4, timestamp: '00:19', sharpness: 409 },
       { path: '/evidence/frames/dining/02_t020.0.jpg', seconds: 20.0, timestamp: '00:20', sharpness: 414 },
       { path: '/evidence/frames/dining/03_t020.8.jpg', seconds: 20.8, timestamp: '00:20', sharpness: 500 },
-    ],
-  },
-  terrace_south: {
-    hero: 20.8,
-    confidence: 'low',
-    caption: "Never entered in the walkthrough. Nearest evidence is the glazed south opening it sits behind.",
-    shots: [
-      { path: '/evidence/frames/terrace_south/00_t020.8.jpg', seconds: 20.8, timestamp: '00:20', sharpness: 500 },
     ],
   },
   mamad: {
@@ -115,58 +107,41 @@ export const roomEvidence: Record<RoomId, RoomEvidence> = {
       { path: '/evidence/frames/mamad/03_t041.6.jpg', seconds: 41.6, timestamp: '00:41', sharpness: 2383 },
     ],
   },
-  mamad_recess: {
-    hero: 36.1,
-    confidence: 'medium',
-    caption: "Ceiling downstand and switch bank, metal MAMAD door frame straight ahead.",
-    shots: [
-      { path: '/evidence/frames/mamad_recess/00_t036.0.jpg', seconds: 36.0, timestamp: '00:36', sharpness: 652 },
-      { path: '/evidence/frames/mamad_recess/01_t036.5.jpg', seconds: 36.5, timestamp: '00:36', sharpness: 241 },
-      { path: '/evidence/frames/mamad_recess/02_t037.2.jpg', seconds: 37.2, timestamp: '00:37', sharpness: 737 },
-      { path: '/evidence/frames/mamad_recess/03_t037.7.jpg', seconds: 37.7, timestamp: '00:37', sharpness: 810 },
-    ],
-  },
   corridor: {
     hero: 33.6,
     confidence: 'high',
-    caption: "Windowless distribution band \u2014 two bare doorways plus the metal MAMAD frame.",
+    caption: "Windowless distribution band \u2014 bedroom doorways plus the metal MAMAD frame.",
     shots: [
       { path: '/evidence/frames/corridor/00_t033.8.jpg', seconds: 33.8, timestamp: '00:33', sharpness: 485 },
       { path: '/evidence/frames/corridor/01_t025.8.jpg', seconds: 25.8, timestamp: '00:25', sharpness: 6275 },
       { path: '/evidence/frames/corridor/02_t026.9.jpg', seconds: 26.9, timestamp: '00:26', sharpness: 2927 },
       { path: '/evidence/frames/corridor/03_t034.2.jpg', seconds: 34.2, timestamp: '00:34', sharpness: 1424 },
-      { path: '/evidence/frames/corridor/04_t050.4.jpg', seconds: 50.4, timestamp: '00:50', sharpness: 9 },
-      { path: '/evidence/frames/corridor/05_t051.5.jpg', seconds: 51.5, timestamp: '00:51', sharpness: 13 },
+      { path: '/evidence/frames/corridor/04_t036.0.jpg', seconds: 36.0, timestamp: '00:36', sharpness: 652 },
+      { path: '/evidence/frames/corridor/05_t037.7.jpg', seconds: 37.7, timestamp: '00:37', sharpness: 810 },
+      { path: '/evidence/frames/corridor/06_t050.4.jpg', seconds: 50.4, timestamp: '00:50', sharpness: 9 },
+      { path: '/evidence/frames/corridor/07_t051.5.jpg', seconds: 51.5, timestamp: '00:51', sharpness: 13 },
     ],
   },
   bath_family: {
-    hero: 30.6,
-    confidence: 'high',
-    caption: "Tanked wet room, high square window taking hard direct sun, bitumen to ~0.9 m.",
-    shots: [
-      { path: '/evidence/frames/bath_family/00_t030.6.jpg', seconds: 30.6, timestamp: '00:30', sharpness: 207 },
-      { path: '/evidence/frames/bath_family/01_t028.5.jpg', seconds: 28.5, timestamp: '00:28', sharpness: 397 },
-      { path: '/evidence/frames/bath_family/02_t029.8.jpg', seconds: 29.8, timestamp: '00:29', sharpness: 447 },
-      { path: '/evidence/frames/bath_family/03_t031.3.jpg', seconds: 31.3, timestamp: '00:31', sharpness: 29 },
-    ],
-  },
-  bath_ensuite: {
     hero: 48.3,
     confidence: 'medium-high',
-    caption: "Entered through the parents' bedroom \u2014 bare block reveal, dark tanking.",
+    caption: "Tanked shower room entered straight from the parents' bedroom \u2014 bare block reveal, dark bitumen.",
     shots: [
-      { path: '/evidence/frames/bath_ensuite/00_t048.3.jpg', seconds: 48.3, timestamp: '00:48', sharpness: 557 },
-      { path: '/evidence/frames/bath_ensuite/01_t047.3.jpg', seconds: 47.3, timestamp: '00:47', sharpness: 348 },
-      { path: '/evidence/frames/bath_ensuite/02_t047.5.jpg', seconds: 47.5, timestamp: '00:47', sharpness: 241 },
-      { path: '/evidence/frames/bath_ensuite/03_t049.3.jpg', seconds: 49.3, timestamp: '00:49', sharpness: 59 },
+      { path: '/evidence/frames/bath_family/00_t048.3.jpg', seconds: 48.3, timestamp: '00:48', sharpness: 557 },
+      { path: '/evidence/frames/bath_family/01_t047.3.jpg', seconds: 47.3, timestamp: '00:47', sharpness: 348 },
+      { path: '/evidence/frames/bath_family/02_t047.5.jpg', seconds: 47.5, timestamp: '00:47', sharpness: 241 },
+      { path: '/evidence/frames/bath_family/03_t049.3.jpg', seconds: 49.3, timestamp: '00:49', sharpness: 59 },
     ],
   },
   wc: {
-    hero: 26.0,
-    confidence: 'low',
-    caption: "Never entered in the walkthrough. Shown here is the adjacent circulation, not the WC itself.",
+    hero: 30.6,
+    confidence: 'medium',
+    caption: "Small tanked compartment off the circulation, high square window taking hard direct sun.",
     shots: [
-      { path: '/evidence/frames/wc/00_t026.0.jpg', seconds: 26.0, timestamp: '00:26', sharpness: 6361 },
+      { path: '/evidence/frames/wc/00_t030.6.jpg', seconds: 30.6, timestamp: '00:30', sharpness: 207 },
+      { path: '/evidence/frames/wc/01_t028.5.jpg', seconds: 28.5, timestamp: '00:28', sharpness: 397 },
+      { path: '/evidence/frames/wc/02_t029.8.jpg', seconds: 29.8, timestamp: '00:29', sharpness: 447 },
+      { path: '/evidence/frames/wc/03_t031.3.jpg', seconds: 31.3, timestamp: '00:31', sharpness: 29 },
     ],
   },
   bedroom_twin: {
@@ -184,7 +159,7 @@ export const roomEvidence: Record<RoomId, RoomEvidence> = {
   bedroom_parents: {
     hero: 45.1,
     confidence: 'medium-high',
-    caption: "Corner room with east and south openings in frame, just before the camera turns into the en-suite.",
+    caption: "Corner room with east and south openings in frame, just before the camera turns into the shower room.",
     shots: [
       { path: '/evidence/frames/bedroom_parents/00_t045.0.jpg', seconds: 45.0, timestamp: '00:45', sharpness: 168 },
       { path: '/evidence/frames/bedroom_parents/01_t043.0.jpg', seconds: 43.0, timestamp: '00:43', sharpness: 5710 },

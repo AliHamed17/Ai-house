@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "generatedBy": "plan+walkthrough reconciliation, adversarially verified",
   "units": "meters unless a printed value is quoted in cm",
-  "notice": "Rebuilt from scratch after the previous model was found to describe a 15.73 x 15.35 m near-square with a detached stair tower, two transposed bedrooms and a fabricated corridor. The building is a 15.00 x 8.72 m east-west bar. Both of the architect's dimension chains close exactly on those figures: 760+740=1500 across, and 30+300+20+100+20+137+10+235+20=872 down. Where the plan and the video conflict on topology the video wins; where they conflict on metric dimensions the plan wins.",
+  "notice": "Rebuilt from scratch after the previous model was found to describe a 15.73 x 15.35 m near-square with a detached stair tower, two transposed bedrooms and a fabricated corridor. The building is a 15.00 x 8.72 m east-west bar. Both of the architect's dimension chains close exactly on those figures: 760+740=1500 across, and 30+300+20+100+20+137+10+235+20=872 down. Where the plan and the video conflict on topology the video wins; where they conflict on metric dimensions the plan wins. Subsequently corrected by the owner on site: the south terrace, the MAMAD entry recess and the second shower room do not exist; the living/kitchen/dining volume is fully open apart from a 0.5 m stub; the guest WC opens from both the entry hall and the dining bay. See ownerCorrections.",
   "frame": {
     "origin": "west outer wall face (x=0) by the north outer face of the east block (z=0)",
     "axes": "+x east, +z south, 1 unit = 1 m",
@@ -50,10 +50,9 @@
     {
       "id": "terrace_nw",
       "nameEn": "North-West Terrace",
-      "nameHe": "מרפסת",
       "floorPolygon": [
         [
-          0,
+          0.0,
           -0.93
         ],
         [
@@ -65,25 +64,22 @@
           1.14
         ],
         [
-          0,
+          0.0,
           1.14
         ]
       ],
+      "dimensionsM": {
+        "width": 2.32,
+        "depth": 2.07
+      },
+      "dimensionSource": "plan labels 232 / 207 (cm)",
       "connectedRoomIds": [
         "living"
-      ],
-      "dimensionSource": "Plan printed 232 (horizontal dim line, E-W) x 207 (vertical dim line, N-S). Polygon is exactly 2.32 x 2.07. Its west parapet is flush with the living-room west facade (x=0); its south edge is the west block's north facade outer face (z=1.14). Only opening is the ~1.22 m glazed panel in the living room's north wall at x 0.93-2.15 (measured plan px 227-377).",
-      "videoTimestamps": [
-        21.3,
-        22.6,
-        24.3
-      ],
-      "evidenceConfidence": "medium-high"
+      ]
     },
     {
       "id": "stair_landing",
       "nameEn": "Exterior Stair & Covered Entry Landing",
-      "nameHe": null,
       "floorPolygon": [
         [
           2.32,
@@ -102,27 +98,21 @@
           1.14
         ]
       ],
+      "dimensionsM": {
+        "width": 5.17,
+        "depth": 2.05
+      },
+      "dimensionSource": "plan labels 517 / 205 (cm)",
       "connectedRoomIds": [
         "entry_hall"
-      ],
-      "dimensionSource": "Plan printed 517 (between the two flights) x 205 (vertical dim line). Polygon is 5.18 x 2.05 — the printed 517 closes to within 1 cm once the strip is bounded west by the terrace's east edge (2.32) and east by the MAMAD west-wall centreline (7.50). Two parallel flights of ~10 bays at ~29.8 cm going, separated by a stairwell spine, arrival landing at the EAST end over the front door. Runs east-west hard against the west block's north face — NOT a north-projecting tower.",
-      "videoTimestamps": [
-        0.1,
-        1.6,
-        2.1,
-        2.7,
-        5,
-        7.2
-      ],
-      "evidenceConfidence": "high"
+      ]
     },
     {
       "id": "living",
       "nameEn": "Living Room",
-      "nameHe": "סלון",
       "floorPolygon": [
         [
-          0,
+          0.0,
           1.14
         ],
         [
@@ -134,32 +124,25 @@
           5.35
         ],
         [
-          0,
+          0.0,
           5.35
         ]
       ],
+      "dimensionsM": {
+        "width": 4.67,
+        "depth": 3.96
+      },
+      "dimensionSource": "plan labels 467 / 396 (cm)",
       "connectedRoomIds": [
         "terrace_nw",
         "entry_hall",
         "kitchen",
         "dining"
-      ],
-      "dimensionSource": "Plan printed 467 (horizontal) x 396 (west vertical chain). Polygon 4.92 x 4.21 measured to wall centrelines/outer faces reduces to exactly 4.67 clear (4.92 - 0.20 west exterior wall - 0.05 half of the 10 cm fin wall) x 3.96 clear (4.21 - 0.20 north exterior wall - 0.05 half of the living/kitchen wall). NW corner is SQUARE — the 1.3 m chamfer in the current model is invented (paper curl).",
-      "videoTimestamps": [
-        10.5,
-        12.6,
-        15.1,
-        19.4,
-        20.2,
-        59.4,
-        61.2
-      ],
-      "evidenceConfidence": "high"
+      ]
     },
     {
       "id": "entry_hall",
       "nameEn": "Entry Hall & Central Circulation",
-      "nameHe": null,
       "floorPolygon": [
         [
           4.92,
@@ -174,8 +157,16 @@
           6.12
         ],
         [
-          6.07,
+          7.17,
           6.12
+        ],
+        [
+          7.17,
+          6.92
+        ],
+        [
+          6.07,
+          6.92
         ],
         [
           6.07,
@@ -186,24 +177,22 @@
           5.35
         ]
       ],
+      "dimensionsM": {
+        "width": 2.43,
+        "depth": 3.96
+      },
+      "dimensionSource": "plan label 249 (cm) on the mid chain, less half the flanking walls",
       "connectedRoomIds": [
         "stair_landing",
         "living",
         "dining",
-        "corridor"
-      ],
-      "dimensionSource": "Plan printed 249 on the mid chain between the living-room fin wall and the MAMAD west wall; depth shares the living room's 396. Polygon width 2.58 reduces to 2.43 clear (2.58 - 0.05 half fin - 0.10 half MAMAD west wall), i.e. the printed 249 closes the 760 top-chain segment exactly as 20+467+10+243+20. Only separated from the living room by a free-standing 10 cm fin wall ~1.9 m long at the north end (plan px x 696-703, y 504-738 = model z 1.34-3.35); open below that. Its south leg (x 6.07-7.50, z 5.35-6.12) is the open hinge onto the corridor. Front door ~0.85 m in its north wall at the extreme east end.",
-      "videoTimestamps": [
-        7.3,
-        9.1,
-        10.3
-      ],
-      "evidenceConfidence": "medium-high"
+        "corridor",
+        "wc"
+      ]
     },
     {
       "id": "kitchen",
       "nameEn": "Kitchen",
-      "nameHe": null,
       "floorPolygon": [
         [
           0.5,
@@ -222,22 +211,19 @@
           8.72
         ]
       ],
+      "dimensionsM": {
+        "width": 3.0,
+        "depth": 3.22
+      },
+      "dimensionSource": "plan labels 300 / 322 (cm)",
       "connectedRoomIds": [
         "living",
         "dining"
-      ],
-      "dimensionSource": "Plan printed 300 (horizontal) x 322 (vertical, at model x~2.9). Polygon 3.20 x 3.37 reduces to 3.00 clear (3.20 - 0.20 west exterior wall; east side is an open line, not a wall) x 3.22 clear (3.37 - 0.05 half living/kitchen wall - 0.10 half south wall). Its west OUTER face is at x=0.50, i.e. the facade steps ~50 cm east of the living room — confirmed by four independent pixel fixes against the wet-room chain (K = 0.41-0.49). The current model's 3.10 width is wrong.",
-      "videoTimestamps": [
-        12.6,
-        13.6,
-        14.6
-      ],
-      "evidenceConfidence": "medium"
+      ]
     },
     {
       "id": "dining",
       "nameEn": "Dining Bay",
-      "nameHe": null,
       "floorPolygon": [
         [
           3.7,
@@ -249,22 +235,6 @@
         ],
         [
           6.07,
-          6.12
-        ],
-        [
-          7.17,
-          6.12
-        ],
-        [
-          7.17,
-          6.92
-        ],
-        [
-          6.07,
-          6.92
-        ],
-        [
-          6.07,
           8.32
         ],
         [
@@ -272,62 +242,29 @@
           8.32
         ]
       ],
+      "dimensionsM": {
+        "width": 2.32,
+        "depth": 2.82
+      },
+      "dimensionSource": "plan label 232 (cm); depth inferred — the glazed south wall sits ~40 cm north of the kitchen's",
       "connectedRoomIds": [
         "living",
         "kitchen",
         "entry_hall",
-        "wc",
-        "terrace_south"
-      ],
-      "dimensionSource": "Width from plan printed 232: polygon 2.37 - 0.05 (half of the 10 cm WC west wall) = 2.32 clear. Depth INFERRED at 2.82 clear (polygon 2.97 - 0.05 - 0.10): the dining bay's glazed south wall is drawn ~40 cm NORTH of the kitchen's south wall (measured step of 56 px at plan x=554, at the blue RC pier that sits exactly on the kitchen/dining line x=3.70), so it does NOT share the kitchen's 322 depth as the brief assumed. The small north-east nub (x 6.07-7.17, z 6.12-6.92) is the open floor in front of the guest WC door.",
-      "videoTimestamps": [
-        10.5,
-        18.6,
-        20.2
-      ],
-      "evidenceConfidence": "medium"
-    },
-    {
-      "id": "terrace_south",
-      "nameEn": "South Terrace",
-      "nameHe": "מרפסת",
-      "floorPolygon": [
-        [
-          3.7,
-          8.32
-        ],
-        [
-          6.07,
-          8.32
-        ],
-        [
-          6.07,
-          11.02
-        ],
-        [
-          3.7,
-          11.02
-        ]
-      ],
-      "connectedRoomIds": [
-        "dining"
-      ],
-      "dimensionSource": "Depth from the printed 270 on the bottom chain; width INFERRED at 2.37 (2.32 clear) by making it exactly co-extensive with the dining bay's glazed south wall so the two share a full edge. Lowest-confidence room in the model: never entered in the walkthrough, the label bracket is ambiguous, and readers disagree between 270, 300 and a ~55 cm French-balcony reading.",
-      "videoTimestamps": [],
-      "evidenceConfidence": "low"
+        "wc"
+      ]
     },
     {
       "id": "mamad",
       "nameEn": "MAMAD (Protected Room)",
-      "nameHe": "מ.מ.ד",
       "floorPolygon": [
         [
           7.5,
-          0
+          0.0
         ],
         [
           11.2,
-          0
+          0.0
         ],
         [
           11.2,
@@ -338,58 +275,21 @@
           3.4
         ]
       ],
+      "dimensionsM": {
+        "width": 3.5,
+        "depth": 3.0
+      },
+      "dimensionSource": "plan labels 350 / 300 (cm)",
       "connectedRoomIds": [
-        "mamad_recess"
-      ],
-      "dimensionSource": "Plan printed 350 x 300, unchanged from the current model and correctly oriented. Polygon 3.70 x 3.40 reduces to 3.50 clear (3.70 - 0.10 - 0.10) x 3.00 clear (3.40 - 0.30 north RC wall, since z=0 is the outer facade face, - 0.10 half south wall). Walls 30 cm north / 20 cm elsewhere, all RC. Its north wall IS the building's north facade. Its ONE blast window stays in the north wall, centred at x=9.35 (measured plan gap px 1174-1329 = model 8.74-9.99). Its ONE protected door is in the SOUTH wall at its west end (measured gap px 1031-1146 = model 7.58-8.51, ~0.90 m), swinging out into the recess. It has NO opening onto the entry hall.",
-      "videoTimestamps": [
-        37.9,
-        39.6,
-        41.6
-      ],
-      "evidenceConfidence": "medium"
-    },
-    {
-      "id": "mamad_recess",
-      "nameEn": "MAMAD Protected Entry Recess",
-      "nameHe": null,
-      "floorPolygon": [
-        [
-          7.5,
-          3.4
-        ],
-        [
-          8.6,
-          3.4
-        ],
-        [
-          8.6,
-          4.6
-        ],
-        [
-          7.5,
-          4.6
-        ]
-      ],
-      "connectedRoomIds": [
-        "mamad",
         "corridor"
-      ],
-      "dimensionSource": "Depth from the printed 100 on the central vertical chain, flanked by two printed 20s (chain 300|20|100|20|137). Width INFERRED at 1.00 clear from the drawn extent of the 20 cm RC stub (plan px x 1010-1153 = 1.16 m centre-to-centre). Polygon 1.10 x 1.20 reduces to 1.00 x 1.00 clear. RC on west (MAMAD west wall continued south) and south (the stub); open EASTWARD into the corridor so the outward-opening blast door can swing clear.",
-      "videoTimestamps": [
-        32.6,
-        36.1,
-        37.8
-      ],
-      "evidenceConfidence": "medium"
+      ]
     },
     {
       "id": "corridor",
       "nameEn": "Bedroom Corridor",
-      "nameHe": null,
       "floorPolygon": [
         [
-          8.6,
+          7.5,
           3.4
         ],
         [
@@ -403,75 +303,26 @@
         [
           7.5,
           6.12
-        ],
-        [
-          7.5,
-          4.6
-        ],
-        [
-          8.6,
-          4.6
         ]
       ],
+      "dimensionsM": {
+        "width": 3.07,
+        "depth": 2.72
+      },
+      "dimensionSource": "plan label 137 (cm) at the wet-block wall; length derived between two dimensioned walls",
       "connectedRoomIds": [
         "entry_hall",
-        "mamad_recess",
-        "bath_family",
+        "mamad",
         "bedroom_twin",
         "bedroom_parents"
-      ],
-      "dimensionSource": "Depth from the printed 137 on the central vertical chain: polygon 1.52 - 0.10 (half the 20 cm recess stub) - 0.05 (half the wet-block north wall) = 1.37 exactly. East-west length INFERRED at 3.07 (7.50 to 10.57) — not dimensioned on the plan; it is fixed at both ends by dimensioned walls, so it is derived, not guessed. Steps north to z=3.40 (the MAMAD's south wall) east of x=8.60. Open on its west side into the entry hall; no doors at either end. This replaces the fabricated L-shaped hall_south entirely.",
-      "videoTimestamps": [
-        24.6,
-        29.4,
-        32.6,
-        33.6,
-        37.8,
-        50.4,
-        51.9
-      ],
-      "evidenceConfidence": "high"
+      ]
     },
     {
       "id": "bath_family",
       "nameEn": "Family Shower Room",
-      "nameHe": "מקלחת",
       "floorPolygon": [
         [
           7.17,
-          6.12
-        ],
-        [
-          8.97,
-          6.12
-        ],
-        [
-          8.97,
-          8.72
-        ],
-        [
-          7.17,
-          8.72
-        ]
-      ],
-      "connectedRoomIds": [
-        "corridor"
-      ],
-      "dimensionSource": "Plan printed 170 x 235. Polygon 1.80 x 2.60 reduces to 1.70 clear (1.80 - 0.05 - 0.05) x 2.35 clear (2.60 - 0.05 north wall - 0.20 south exterior wall). The current model gave this room the en-suite's 150. Its ~0.74 m door is in its NORTH wall off the corridor (measured gap plan px 1073-1163, hinged on the west jamb), centred at x=8.09.",
-      "videoTimestamps": [
-        29.4,
-        30.6,
-        32.4
-      ],
-      "evidenceConfidence": "high"
-    },
-    {
-      "id": "bath_ensuite",
-      "nameEn": "Parents' En-suite Shower Room",
-      "nameHe": "מקלחת",
-      "floorPolygon": [
-        [
-          8.97,
           6.12
         ],
         [
@@ -483,25 +334,22 @@
           8.72
         ],
         [
-          8.97,
+          7.17,
           8.72
         ]
       ],
+      "dimensionsM": {
+        "width": 3.3,
+        "depth": 2.35
+      },
+      "dimensionSource": "plan labels 170 + 150 (cm) merged into one room per owner correction; depth 235",
       "connectedRoomIds": [
         "bedroom_parents"
-      ],
-      "dimensionSource": "Plan printed 150 x 235. Polygon 1.60 x 2.60 reduces to 1.50 x 2.35 clear. Its north wall is unbroken (verified by direct crop: solid red from plan px 1192 to 1382 with no gap), so it CANNOT be entered from the corridor. Its ONLY door is ~0.75 m in its EAST wall at model z 6.94-7.60, opening off the parents' bedroom.",
-      "videoTimestamps": [
-        47.3,
-        48.6,
-        49.6
-      ],
-      "evidenceConfidence": "medium-high"
+      ]
     },
     {
       "id": "wc",
       "nameEn": "Guest WC",
-      "nameHe": null,
       "floorPolygon": [
         [
           6.07,
@@ -520,28 +368,30 @@
           8.72
         ]
       ],
+      "dimensionsM": {
+        "width": 1.0,
+        "depth": 1.55
+      },
+      "dimensionSource": "scaled from plan — the one compartment the architect never dimensioned",
       "connectedRoomIds": [
+        "entry_hall",
         "dining"
-      ],
-      "dimensionSource": "INFERRED — this is the one compartment with no printed dimension (the lower chain reads 232|10|blank|10|170|10|150|10). Width scaled to 1.00 clear: measured 134 px centre-to-centre against the adjacent printed 170 and 150, which both calibrate at 1.222 px/cm, giving 99.6 cm. Depth scaled to 1.55 clear: its north wall is set ~0.75 m south of the shower block's north wall (measured plan y~1163 vs 1060). Polygon 1.10 x 1.80. Door ~0.86 m in its NORTH wall (arc hinged on the west jamb at plan px 837,1155) onto the dining end of the open plan. The current model's 0.9 x 1.2 is too small in both directions.",
-      "videoTimestamps": [],
-      "evidenceConfidence": "low"
+      ]
     },
     {
       "id": "bedroom_twin",
-      "nameEn": "Twin Bedroom",
-      "nameHe": "ח.שינה",
+      "nameEn": "Twin / Children's Bedroom",
       "floorPolygon": [
         [
           11.2,
-          0
+          0.0
         ],
         [
-          15,
-          0
+          15.0,
+          0.0
         ],
         [
-          15,
+          15.0,
           4.6
         ],
         [
@@ -557,21 +407,18 @@
           3.4
         ]
       ],
+      "dimensionsM": {
+        "width": 3.5,
+        "depth": 4.39
+      },
+      "dimensionSource": "plan labels 350 (E-W) / 439 (N-S) (cm)",
       "connectedRoomIds": [
         "corridor"
-      ],
-      "dimensionSource": "Plan printed 350 (E-W, on the mid chain that reads 350|20|350|20 = the printed 740 east-half) x 439 (rotated on the vertical chain). Main body polygon 3.80 x 4.60 reduces to 3.50 clear (3.80 - 0.10 half MAMAD east wall - 0.20 east exterior wall) x 4.35 clear (4.60 - 0.20 north exterior wall - 0.05 half south wall) against a printed 439 — a 4 cm residual. The current model has width and depth TRANSPOSED. The L-shaped entry throat (x 10.57-11.20, z 3.40-4.60) tucks under the MAMAD's south-east corner and carries the ~0.77 m door in its west wall at z 3.76-4.53 (measured hinge at plan px 1392,791). Its east wall is the building's easternmost face at x=15.00.",
-      "videoTimestamps": [
-        52.8,
-        55.1,
-        57.5
-      ],
-      "evidenceConfidence": "medium-high"
+      ]
     },
     {
       "id": "bedroom_parents",
       "nameEn": "Parents' Bedroom",
-      "nameHe": "ח.הורים",
       "floorPolygon": [
         [
           10.57,
@@ -590,17 +437,15 @@
           8.72
         ]
       ],
+      "dimensionsM": {
+        "width": 3.5,
+        "depth": 3.83
+      },
+      "dimensionSource": "plan labels 350 (E-W) / 383 (N-S) (cm)",
       "connectedRoomIds": [
         "corridor",
-        "bath_ensuite"
-      ],
-      "dimensionSource": "Plan printed 350 (lower chain) x 383 (rotated on the vertical chain). Polygon 3.75 x 4.12 reduces to 3.50 clear (3.75 - 0.05 - 0.20) x 3.87 clear (4.12 - 0.05 - 0.20) against a printed 383. The current model has width and depth TRANSPOSED. Its east outer face is at x=14.32, i.e. the east facade steps IN 0.68 m relative to the twin bedroom — the opposite direction to the current model. That 0.68 m is derived, not assumed: anchoring at plan y=940 on the corridor/parents wall (px 1385.5 = model 10.57) puts the parents' east wall centreline at model 14.22, and the same anchoring at y=500 on the MAMAD west wall puts the twin's east wall at 15.02 against a modelled 14.90. TWO doors, both in its west wall: from the corridor at z 5.24-6.00, and into the en-suite at z 6.94-7.60.",
-      "videoTimestamps": [
-        43,
-        45.1,
-        46.8
-      ],
-      "evidenceConfidence": "medium-high"
+        "bath_family"
+      ]
     }
   ],
   "structuralColumns": [
@@ -906,5 +751,51 @@
     "The MAMAD has exactly one door, in its SOUTH wall, opening into a reinforced recess. It has no opening onto the entry hall.",
     "Ceiling height is unmeasurable in both sources; CEILING_HEIGHT_M stays a configurable placeholder, not a claimed dimension.",
     "True north is unconfirmed: there is no unambiguous north arrow on the sheet. All compass language here means up/down on the drawing."
-  ]
+  ],
+  "ownerCorrections": [
+    {
+      "id": "O01",
+      "summary": "The south terrace does not exist.",
+      "action": "Deleted terrace_south. The dining bay's south wall is now an exterior glazed wall."
+    },
+    {
+      "id": "O02",
+      "summary": "There is no MAMAD entry recess.",
+      "action": "Deleted mamad_recess and folded its area into the corridor, which is now a plain 3.07 x 2.72 m rectangle. The protected door opens straight onto the corridor."
+    },
+    {
+      "id": "O03",
+      "summary": "There is only one shower room, not two.",
+      "action": "Deleted bath_ensuite and merged its footprint into bath_family (now 3.30 x 2.35 m clear). Its single door opens off the parents' bedroom."
+    },
+    {
+      "id": "O04",
+      "summary": "The living room is open to the kitchen, separated only by a ~0.5 m wall stub.",
+      "action": "living_s_stub (0.50 m) is the only solid element on that boundary; the rest is an open threshold."
+    },
+    {
+      "id": "O05",
+      "summary": "The dining bay is part of the kitchen — one continuous open space, no dividing wall.",
+      "action": "kitchen and dining share a full-width open threshold; dining lost its separate nub, which now belongs to the entry hall."
+    },
+    {
+      "id": "O06",
+      "summary": "The guest WC needs a door, reachable from the entry hall and from the dining bay.",
+      "action": "Added door_entry_wc in its north wall and door_dining_wc in its west wall."
+    }
+  ],
+  "deletedRooms": {
+    "ids": [
+      "terrace_south",
+      "mamad_recess",
+      "bath_ensuite"
+    ],
+    "reason": "Confirmed by the owner on site as not existing in the built house."
+  },
+  "interiorConcepts": {
+    "generatedBy": "Nano Banana (Gemini native image generation)",
+    "method": "Each room's sharpest real walkthrough frame supplied as a hard architectural reference, so camera, walls, openings and the view out are preserved and only the design is applied.",
+    "output": "public/generated/interiors/<roomId>.png",
+    "constraint": "The MAMAD blast door, blast window and filtration penetration are held fixed in the prompt and must not be altered in construction."
+  }
 }

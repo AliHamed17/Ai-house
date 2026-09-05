@@ -15,8 +15,8 @@ describe('concept placeholder coverage', () => {
     expect(missing).toEqual([]);
   });
 
-  it('covers all 15 rooms', () => {
-    expect(houseModel.rooms).toHaveLength(15);
+  it('covers all 12 rooms', () => {
+    expect(houseModel.rooms).toHaveLength(12);
   });
 
   it('labels every placeholder as demo output, never as real AI', () => {

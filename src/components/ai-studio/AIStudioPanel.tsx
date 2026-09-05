@@ -80,6 +80,14 @@ export function AIStudioPanel() {
     setRoomId(nextRoomId);
     if (!VIDEO_CAPABLE_ROOMS.has(nextRoomId) && outputType === 'video') setOutputType('image');
     setConfirmingLiveRun(false);
+    // Invalidate any in-flight generation: bumping the token makes the pending
+    // poll drop its result, so a job started for the previous room can never be
+    // rendered or approved under the newly selected room.
+    pollTokenRef.current += 1;
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    setJob(null);
+    setSubmitting(false);
+    setError(null);
     // An approved concept belongs to one room; leaving it drops the approval.
     setApproved(false);
     setApprovedSource(null);

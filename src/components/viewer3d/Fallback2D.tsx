@@ -13,7 +13,11 @@ import { InteractiveFloorPlan } from '@/components/floorplan/InteractiveFloorPla
  */
 export function Fallback2D({ onExit }: { onExit: () => void }) {
   return (
-    <div className="absolute inset-0 z-10 overflow-y-auto bg-ivory p-6">
+    // Fixed to the viewport: this renders outside the explorer's modal
+    // container, and the body scroll is locked, so an absolute element would
+    // sit at the document origin (off-screen when the explorer was opened
+    // from lower down the page), hiding the Exit button from no-WebGL users.
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-ivory p-6" role="dialog" aria-modal aria-label="House explorer — 2D fallback">
       <div className="mx-auto max-w-5xl">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-2xl text-charcoal">House Explorer — 2D Mode</h2>

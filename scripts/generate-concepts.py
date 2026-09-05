@@ -53,6 +53,7 @@ FEATURED_ROOMS = ["living", "kitchen", "parents_bed", "bathroom_main"]
 # Mirror of the per-room furniture plans in src/data/roomPrompts.ts.
 FURNITURE = {
     "stair_landing": "slip-resistant pale stone stair treads, a slim dark-bronze handrail, and integrated warm step lighting",
+    "balcony_service": "compact weather-resistant seating and restrained planters, or ventilated utility cabinetry if used for service",
     "entry_hall": "a shallow natural-oak console, a full-height mirror, and concealed shoe storage without blocking circulation",
     "living": "a low curved warm-beige modular sofa, two sculptural lounge chairs, a textured wool rug, nested stone/oak coffee tables, and one calm textured-plaster media wall with concealed storage",
     "kitchen": "full-height oak and taupe cabinetry on the solid wall, integrated appliances, a light quartzite-look worktop and backsplash, and discreet under-cabinet task lighting, preserving the drawn L-shaped counter layout",
@@ -60,6 +61,7 @@ FURNITURE = {
     "terrace_social": "compact weather-resistant outdoor seating, restrained planters, and one warm wall light under the covered recess",
     "mamad": "a sofa bed or bed, a compact desk, and closed storage that leaves the protected door, window, and required clearances completely unobstructed",
     "twin_bed": "two equivalent single beds, balanced closed storage, and a long shared study surface, keeping the central floor area open",
+    "hall_south": "a slim runner rug and a single discreet console or linen closet that does not narrow the circulation path",
     "bathroom_main": "continuous warm stone-look porcelain, a floating oak/taupe vanity, a recessed niche, frameless glass, and face lighting at the mirror",
     "bathroom_ensuite": "a compact floating vanity, frameless glass shower screen, and warm face lighting at the mirror",
     "wc_guest": "a compact sculptural basin, a richer restrained stone texture, and one warm wall light",
@@ -70,6 +72,7 @@ FURNITURE = {
 # architectural + camera reference for each room).
 FRAME = {
     "stair_landing": "00-00-03_exterior-stair-landing.jpg",
+    "balcony_service": "00-00-03_exterior-stair-landing.jpg",
     "entry_hall": "00-00-09_entry-threshold.jpg",
     "living": "00-00-16_open-social-zone.jpg",
     "kitchen": "00-00-16_open-social-zone.jpg",
@@ -77,6 +80,7 @@ FRAME = {
     "terrace_social": "00-00-22_covered-terrace.jpg",
     "mamad": "00-00-40_bedroom-or-mamad.jpg",
     "twin_bed": "00-00-44_second-bedroom.jpg",
+    "hall_south": "00-00-35_bedroom-bathroom-junction.jpg",
     "bathroom_main": "00-00-29_hall-wetroom.jpg",
     "bathroom_ensuite": "00-00-49_second-shower.jpg",
     "wc_guest": "00-00-29_hall-wetroom.jpg",

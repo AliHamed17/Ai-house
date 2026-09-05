@@ -63,11 +63,17 @@ export const nanoBananaProvider: MediaGenerationProvider = {
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [{ text: input.prompt }];
     if (input.sourceAssetPath) {
       const source = await readSourceImage(input.sourceAssetPath);
-      if (source) parts.push({ inlineData: { mimeType: source.mimeType, data: source.base64 } });
+      // The prompt is written to refine a specific source image; if that
+      // source can't be loaded (e.g. an approved concept that expired from the
+      // store), fail before spending a paid generation on a text-only prompt.
+      if (!source) {
+        throw new Error('The source image for this generation could not be loaded (it may have expired). Please regenerate the concept and try again.');
+      }
+      parts.push({ inlineData: { mimeType: source.mimeType, data: source.base64 } });
     }
 
     const response = await withTimeout(
-      ai.models.generateContent({ model: NANO_BANANA_MODEL, contents: parts }),
+      (signal) => ai.models.generateContent({ model: NANO_BANANA_MODEL, contents: parts, config: { abortSignal: signal } }),
       45_000,
       'Nano Banana generation timed out after 45s',
     );

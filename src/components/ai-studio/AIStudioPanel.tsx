@@ -147,17 +147,31 @@ export function AIStudioPanel() {
     // Self-scheduling poll: the next status request is only queued after the
     // current one resolves, so a slow live poll never spawns overlapping
     // requests, and the token check drops any stale/out-of-order response.
+    // A live job keeps running provider-side, so a transient status error
+    // (a brief 502 or dropped connection) is retried a few times with backoff
+    // rather than abandoning a job that may already be billed.
+    const MAX_TRANSIENT_FAILURES = 5;
+    let transientFailures = 0;
+    const retryOrFail = (fallbackMessage: string, serverMessage?: string) => {
+      transientFailures += 1;
+      if (transientFailures > MAX_TRANSIENT_FAILURES) {
+        setError(serverMessage ?? fallbackMessage);
+        setSubmitting(false);
+        return;
+      }
+      pollTimerRef.current = setTimeout(poll, 1500);
+    };
     const poll = async () => {
       if (token !== pollTokenRef.current) return;
       try {
         const statusRes = await fetch(`/api/generation/status/${jobId}`);
-        const statusData = (await statusRes.json()) as GenerationJob & { error?: string };
+        const statusData = (await statusRes.json().catch(() => ({}))) as GenerationJob & { error?: string };
         if (token !== pollTokenRef.current) return;
         if (!statusRes.ok) {
-          setError(statusData.error ?? 'Could not fetch generation status.');
-          setSubmitting(false);
+          retryOrFail('Could not fetch generation status.', statusData.error);
           return;
         }
+        transientFailures = 0;
         setJob(statusData);
         if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
           setSubmitting(false);
@@ -166,8 +180,7 @@ export function AIStudioPanel() {
         pollTimerRef.current = setTimeout(poll, 1000);
       } catch {
         if (token !== pollTokenRef.current) return;
-        setError('Lost connection while checking generation status.');
-        setSubmitting(false);
+        retryOrFail('Lost connection while checking generation status.');
       }
     };
     void poll();

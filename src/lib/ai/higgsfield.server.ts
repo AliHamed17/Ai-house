@@ -77,15 +77,19 @@ export const higgsfieldProvider: MediaGenerationProvider = {
     config({ credentials });
 
     const imageUrl = toAbsoluteUrl(input.originUrl, input.sourceAssetPath);
+    // The subscribe client does not accept an AbortSignal, so the timeout can
+    // only reject here (it cannot cancel the in-flight submit) — hence submit()
+    // is never auto-retried, so a timed-out request never becomes a second job.
     const jobSet = (await withTimeout(
-      higgsfield.subscribe(HF_ENDPOINT, {
-        input: {
-          model: HF_MODEL,
-          prompt: input.prompt,
-          input_images: [{ type: 'image_url', image_url: imageUrl }],
-        },
-        withPolling: false,
-      }),
+      () =>
+        higgsfield.subscribe(HF_ENDPOINT, {
+          input: {
+            model: HF_MODEL,
+            prompt: input.prompt,
+            input_images: [{ type: 'image_url', image_url: imageUrl }],
+          },
+          withPolling: false,
+        }),
       30_000,
       'Higgsfield submission timed out after 30s',
     )) as unknown as HiggsfieldSubscribeResult;
@@ -121,7 +125,7 @@ export const higgsfieldProvider: MediaGenerationProvider = {
         ? payload.higgsfieldStatusUrl
         : `https://platform.higgsfield.ai/requests/${encodeURIComponent(payload.higgsfieldRequestId ?? '')}/status`;
     const res = await retryOnce(() =>
-      withTimeout(fetch(url, { headers: { Authorization: `Key ${credentials}` } }), 10_000, 'Higgsfield status check timed out'),
+      withTimeout((signal) => fetch(url, { headers: { Authorization: `Key ${credentials}` }, signal }), 10_000, 'Higgsfield status check timed out'),
     );
     if (!res.ok) {
       throw new Error(`Higgsfield status check failed with HTTP ${res.status}`);

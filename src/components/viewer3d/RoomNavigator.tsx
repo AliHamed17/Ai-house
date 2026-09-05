@@ -8,6 +8,7 @@ export function RoomNavigator() {
   const [open, setOpen] = useState(false);
   const activeRoomId = useViewerStore((s) => s.activeRoomId);
   const requestTeleport = useViewerStore((s) => s.requestTeleport);
+  const setMode = useViewerStore((s) => s.setMode);
 
   return (
     <div className="pointer-events-auto absolute left-4 top-20 z-20">
@@ -33,7 +34,13 @@ export function RoomNavigator() {
                   <button
                     type="button"
                     onClick={() => {
+                      // The teleport itself is only ever consumed by the
+                      // always-mounted first-person camera, so jumping from
+                      // Dollhouse or Floor Plan must also switch to Walk mode —
+                      // otherwise the camera moves underneath a still-selected
+                      // Dollhouse/Floor-Plan view instead of showing the room.
                       requestTeleport(room.id);
+                      setMode('first-person');
                       setOpen(false);
                     }}
                     className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors ${

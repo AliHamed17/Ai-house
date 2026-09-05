@@ -393,8 +393,12 @@ export function AIStudioPanel() {
                   onClick={() => {
                     setApproved(true);
                     // Keep the approved image so a later refinement or cinematic
-                    // clip is generated from it rather than the raw frame/placeholder.
-                    if (job.outputType === 'image' && job.resultUrl) {
+                    // clip is generated from it rather than the raw frame/placeholder —
+                    // but only when it is a genuine generated image (job.provider !==
+                    // 'mock'): otherwise, with Nano Banana in demo mode and Higgsfield
+                    // live, this placeholder SVG would satisfy the live-video approval
+                    // gate and let a real billed clip animate a fake concept.
+                    if (job.outputType === 'image' && job.resultUrl && job.provider !== 'mock') {
                       setApprovedSource({ path: job.resultUrl, roomId });
                     }
                   }}
@@ -407,7 +411,12 @@ export function AIStudioPanel() {
                   onClick={() => {
                     setJob(null);
                     setApproved(false);
-                    setApprovedSource(null);
+                    // Only drop the approved baseline if we're rejecting that exact
+                    // approved image; rejecting a later refinement or clip that was
+                    // generated FROM it must not lose the still-good baseline.
+                    if (approvedSource && approvedSource.path === job.resultUrl) {
+                      setApprovedSource(null);
+                    }
                   }}
                   className="rounded-full border border-limestone/60 px-4 py-2 text-xs font-semibold text-charcoal hover:bg-limestone/30"
                 >

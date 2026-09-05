@@ -56,6 +56,16 @@ test.describe('3D explorer', () => {
     await expect(page.getByRole('img', { name: 'Minimap' })).toContainText('Twin Bedroom');
   });
 
+  test('jumping to a room from Dollhouse mode switches to Walk (regression)', async ({ page }) => {
+    await enter3D(page);
+    await page.getByRole('button', { name: 'Dollhouse', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Dollhouse', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: /Rooms/i }).click();
+    await page.locator('#room-navigator-panel').getByRole('button', { name: /^Kitchen/ }).click();
+    await expect(page.getByRole('button', { name: 'Walk', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('img', { name: 'Minimap' })).toContainText('Kitchen');
+  });
+
   test('exiting the explorer restores normal page scrolling', async ({ page }) => {
     await enter3D(page);
 

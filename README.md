@@ -72,11 +72,32 @@ fill in only what you have:
 
 | Variable | Purpose |
 | --- | --- |
-| `GEMINI_API_KEY` | Enables real Nano Banana (Gemini) image generation. |
-| `NANO_BANANA_MODEL` | Overrides the model (default `gemini-3-pro-image`). |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Enables real Nano Banana (Gemini) image generation (either is accepted). |
+| `NANO_BANANA_MODEL` | Overrides the model (default `gemini-3-pro-image-preview`, i.e. Nano Banana Pro). |
 | `HF_CREDENTIALS` | Higgsfield credentials as `KEY_ID:KEY_SECRET`. |
 | `HF_API_KEY` / `HF_API_SECRET` | Alternative to `HF_CREDENTIALS`. |
 | `HF_IMAGE2VIDEO_ENDPOINT` / `HF_MODEL` | Override the Higgsfield endpoint/model. |
+
+### Generating the real interior concepts (Nano Banana)
+
+The before/after gallery ships with clearly-labeled placeholders and upgrades
+to real Nano Banana (Gemini) renders as soon as you generate them:
+
+```bash
+# Renders the four showcase rooms (living, kitchen, parents' bedroom, main bath)
+GEMINI_API_KEY=your_key uv run scripts/generate-concepts.py
+# …or every room the AI Studio exposes:
+GEMINI_API_KEY=your_key uv run scripts/generate-concepts.py --all
+```
+
+Each render uses the room's unfinished walkthrough frame as a hard
+architectural/camera reference and the exact prompt language in
+`src/data/roomPrompts.ts`. Outputs land in `public/generated/concepts/<room>.png`
+and are recorded in `public/generated/concepts/manifest.json`; the site
+(`src/data/generatedConcepts.ts`) then serves the real PNG for those rooms and
+the placeholder SVG for the rest — no code change needed. This spends real
+Gemini image credits, so it never runs automatically. The `.claude/skills/nano-banana/`
+skill documents the underlying Gemini image API.
 
 ### What works without any keys
 
@@ -106,8 +127,10 @@ src/components/ai-studio/       AI Design Studio UI
 src/app/api/                    Nano Banana / Higgsfield / generation-status route handlers
 tests/unit/                     Vitest — data integrity, geometry, collision, AI providers
 tests/e2e/                      Playwright — landing, floor plan, explorer, AI studio, responsive, mobile
-scripts/generate-placeholders.mjs  Regenerates the deterministic demo-mode placeholder images
+scripts/generate-placeholders.mjs  Regenerates the deterministic demo-mode placeholder images (all rooms)
+scripts/generate-concepts.py    Generates REAL Nano Banana concept renders (needs a Gemini key)
 scripts/smoke.mjs               Manual visual smoke script (screenshots every major flow)
+.claude/skills/nano-banana/     Nano Banana (Gemini image) skill used by scripts/generate-concepts.py
 ```
 
 ## Manual visual QA checklist

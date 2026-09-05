@@ -8,22 +8,29 @@ import { withTimeout } from './resilience.server';
 
 /**
  * Nano Banana = Google's Gemini native image-generation family.
- * NANO_BANANA_MODEL defaults to the high-fidelity "Pro" model for final
- * geometry-sensitive interior concepts; set it to a faster flash model for
- * quick iterative drafts. Never hardcode the model name anywhere else.
+ * NANO_BANANA_MODEL defaults to the high-fidelity "Pro" model (Nano Banana
+ * Pro) for final geometry-sensitive interior concepts; set it to the faster
+ * `gemini-2.5-flash-image` for quick iterative drafts. Never hardcode the
+ * model name anywhere else.
  */
-const NANO_BANANA_MODEL = process.env.NANO_BANANA_MODEL || 'gemini-3-pro-image';
+const NANO_BANANA_MODEL = process.env.NANO_BANANA_MODEL || 'gemini-3-pro-image-preview';
+
+// The google-genai SDK honors either variable; accept both so a key set as
+// GOOGLE_API_KEY (as the Nano Banana skill documents) works too.
+function nanoBananaApiKey(): string | undefined {
+  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+}
 
 function getClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = nanoBananaApiKey();
   if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured. Nano Banana generation is unavailable in this environment.');
+    throw new Error('No Gemini credentials configured (set GEMINI_API_KEY or GOOGLE_API_KEY). Nano Banana generation is unavailable in this environment.');
   }
   return new GoogleGenAI({ apiKey });
 }
 
 export function isNanoBananaConfigured(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return Boolean(nanoBananaApiKey());
 }
 
 /**

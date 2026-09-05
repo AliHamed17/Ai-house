@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "generate:placeholders": "node scripts/generate-placeholders.mjs"
+    "generate:placeholders": "node scripts/generate-placeholders.mjs",
+    "generate:concepts": "uv run scripts/generate-concepts.py"
   },
   "dependencies": {
     "@google/genai": "^2.21.0",

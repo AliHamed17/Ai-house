@@ -16,9 +16,27 @@ export function isProviderConfigured(id: GenerationProviderId): boolean {
   return true;
 }
 
-/** Picks the requested provider for a new submission, transparently falling back to the deterministic mock when credentials are absent. */
+/**
+ * A second, explicit switch that must be on for ANY billed generation to run.
+ * The client-side "Yes, generate (may incur cost)" confirmation only protects
+ * the UI — the API routes are directly reachable, so a configured key alone
+ * would let any unauthenticated caller spend credits. Requiring AI_ALLOW_LIVE
+ * keeps a key set for the offline generator or local dev from accidentally
+ * exposing a public billed endpoint. A public deployment that turns this on
+ * MUST put real authentication / quotas in front of the generate routes.
+ */
+export function liveGenerationEnabled(): boolean {
+  return process.env.AI_ALLOW_LIVE === 'true';
+}
+
+/** A provider is live (billed) only when it has credentials AND live generation is explicitly enabled. */
+export function providerLiveActive(id: GenerationProviderId): boolean {
+  return id !== 'mock' && isProviderConfigured(id) && liveGenerationEnabled();
+}
+
+/** Picks the requested provider for a new submission, transparently falling back to the deterministic mock unless the provider is live AND explicitly enabled. */
 export function resolveProviderForSubmit(requested: GenerationProviderId): { provider: MediaGenerationProvider; demoMode: boolean } {
-  if (requested !== 'mock' && isProviderConfigured(requested)) {
+  if (providerLiveActive(requested)) {
     return { provider: providersById[requested], demoMode: false };
   }
   return { provider: mockProvider, demoMode: true };

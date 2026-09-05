@@ -72,6 +72,7 @@ fill in only what you have:
 
 | Variable | Purpose |
 | --- | --- |
+| `AI_ALLOW_LIVE` | Master switch — must be exactly `true` for any billed generation to run. With a key set but this unset, the app stays in demo mode, so a key used only for the offline generator or local dev never exposes a public billed endpoint. **A public deployment that enables this must add real authentication/quotas in front of the `/api/*/generate` routes** — the client-side cost confirmation is not a server-side control. |
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Enables real Nano Banana (Gemini) image generation (either is accepted). |
 | `NANO_BANANA_MODEL` | Overrides the model (default `gemini-3-pro-image-preview`, i.e. Nano Banana Pro). |
 | `HF_CREDENTIALS` | Higgsfield credentials as `KEY_ID:KEY_SECRET`. |

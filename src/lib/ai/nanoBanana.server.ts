@@ -1,9 +1,9 @@
 import 'server-only';
-import { randomUUID } from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 import type { GenerationInput, GenerationJob, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
 import { readPublicFileAsBase64 } from './publicAsset.server';
+import { getStoredResult, putStoredResult, RESULT_URL_PREFIX, resultIdFromPath } from './resultStore.server';
 import { withTimeout } from './resilience.server';
 
 /**
@@ -34,49 +34,26 @@ export function isNanoBananaConfigured(): boolean {
 }
 
 /**
- * Nano Banana generates synchronously, so `submit` already holds the finished
- * image. We keep the bytes in a small bounded in-memory store keyed by a short
- * random id (that id — not the image — travels in the job id) so the status
- * poll URL stays short. Like the in-memory rate limiter, this store is
- * per-instance and does not survive a cold start: adequate for this prototype
- * (a poll follows submission within a second on the same instance); a
- * production deployment would use a shared object store or blob storage.
+ * Reads a source image for an image-to-image generation. Accepts either a
+ * public site asset (an evidence frame, a committed concept) or a previously
+ * generated result served from the in-memory store — the latter is how an
+ * *approved* concept is fed back in as the source for a refinement.
  */
-const RESULT_TTL_MS = 10 * 60_000;
-const MAX_RESULTS = 100;
-const resultStore = new Map<string, { dataUrl: string; createdAt: number }>();
-
-function putResult(dataUrl: string): string {
-  const now = Date.now();
-  for (const [key, value] of resultStore) {
-    if (now - value.createdAt > RESULT_TTL_MS) resultStore.delete(key);
+async function readSourceImage(sourceAssetPath: string): Promise<{ mimeType: string; base64: string } | null> {
+  const storedId = resultIdFromPath(sourceAssetPath);
+  if (storedId) {
+    const stored = getStoredResult(storedId);
+    return stored ? { mimeType: stored.mimeType, base64: stored.base64 } : null;
   }
-  while (resultStore.size >= MAX_RESULTS) {
-    const oldest = resultStore.keys().next().value;
-    if (oldest === undefined) break;
-    resultStore.delete(oldest);
-  }
-  const key = randomUUID();
-  resultStore.set(key, { dataUrl, createdAt: now });
-  return key;
-}
-
-function getResult(key: string | undefined): string | undefined {
-  if (!key) return undefined;
-  const entry = resultStore.get(key);
-  if (!entry) return undefined;
-  if (Date.now() - entry.createdAt > RESULT_TTL_MS) {
-    resultStore.delete(key);
-    return undefined;
-  }
-  return entry.dataUrl;
+  return readPublicFileAsBase64(sourceAssetPath);
 }
 
 /**
  * Gemini image generation is a single synchronous call (no provider-side job
- * queue), so `submit` does the full generation and encodes the finished
- * result into the job id; `status` just decodes and returns it. This keeps
- * the same submit-then-poll shape the UI uses for every provider.
+ * queue), so `submit` does the full generation, stores the bytes, and puts
+ * only the short store id into the job id; `status` returns a fetchable URL
+ * to those bytes. This keeps the same submit-then-poll shape the UI uses for
+ * every provider while keeping the (large) image out of the job id / poll URL.
  */
 export const nanoBananaProvider: MediaGenerationProvider = {
   id: 'nano-banana',
@@ -85,7 +62,7 @@ export const nanoBananaProvider: MediaGenerationProvider = {
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [{ text: input.prompt }];
     if (input.sourceAssetPath) {
-      const source = await readPublicFileAsBase64(input.sourceAssetPath);
+      const source = await readSourceImage(input.sourceAssetPath);
       if (source) parts.push({ inlineData: { mimeType: source.mimeType, data: source.base64 } });
     }
 
@@ -102,7 +79,7 @@ export const nanoBananaProvider: MediaGenerationProvider = {
     }
 
     const mimeType = imagePart.inlineData.mimeType || 'image/png';
-    const resultKey = putResult(`data:${mimeType};base64,${imagePart.inlineData.data}`);
+    const resultKey = putStoredResult(mimeType, imagePart.inlineData.data);
     const jobId = encodeJobId({
       provider: 'nano-banana',
       roomId: input.roomId,
@@ -117,7 +94,8 @@ export const nanoBananaProvider: MediaGenerationProvider = {
 
   async status(jobId: string): Promise<GenerationJob> {
     const payload = decodeJobId(jobId);
-    const resultUrl = getResult(payload.nanoBananaResultKey);
+    const stored = getStoredResult(payload.nanoBananaResultKey);
+    const resultUrl = stored ? `${RESULT_URL_PREFIX}${payload.nanoBananaResultKey}` : undefined;
     const job: GenerationJob = {
       jobId,
       provider: 'nano-banana',

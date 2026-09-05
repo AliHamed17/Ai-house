@@ -44,12 +44,17 @@ export function AIStudioPanel() {
   const [confirmingLiveRun, setConfirmingLiveRun] = useState(false);
   const [job, setJob] = useState<GenerationJob | null>(null);
   const [approved, setApproved] = useState(false);
+  const [approvedSource, setApprovedSource] = useState<{ path: string; roomId: RoomId } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Bumped on every new generation; each in-flight fetch captures the value and
+  // bails if a newer run has superseded it, so a slow/out-of-order status
+  // response can never overwrite the current job's state.
+  const pollTokenRef = useRef(0);
 
   useEffect(() => () => {
-    if (pollRef.current) clearInterval(pollRef.current);
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
   }, []);
 
   // One-time sync of which providers are live (billed) vs. demo, so the UI can
@@ -75,6 +80,9 @@ export function AIStudioPanel() {
     setRoomId(nextRoomId);
     if (!VIDEO_CAPABLE_ROOMS.has(nextRoomId) && outputType === 'video') setOutputType('image');
     setConfirmingLiveRun(false);
+    // An approved concept belongs to one room; leaving it drops the approval.
+    setApproved(false);
+    setApprovedSource(null);
   }
 
   function handleOutputTypeChange(nextOutputType: GenerationOutputType) {
@@ -94,15 +102,21 @@ export function AIStudioPanel() {
   }
 
   async function handleGenerate() {
+    const token = ++pollTokenRef.current;
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     setSubmitting(true);
     setError(null);
     setJob(null);
     setApproved(false);
-    if (pollRef.current) clearInterval(pollRef.current);
 
     const endpoint = outputType === 'image' ? '/api/nano-banana/generate' : '/api/higgsfield/generate';
-    const sourceAssetPath = outputType === 'image' ? roomEvidenceFrame[roomId]?.path : conceptImagePath(roomId);
+    // Once a concept for THIS room has been approved, both a refinement and a
+    // cinematic clip operate on that approved image; before then, an image
+    // starts from the room's evidence frame and a clip from its concept still.
+    const approvedForRoom = approvedSource && approvedSource.roomId === roomId ? approvedSource.path : undefined;
+    const sourceAssetPath = approvedForRoom ?? (outputType === 'image' ? roomEvidenceFrame[roomId]?.path : conceptImagePath(roomId));
 
+    let jobId: string;
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -116,36 +130,47 @@ export function AIStudioPanel() {
         }),
       });
       const data = await res.json();
+      if (token !== pollTokenRef.current) return; // a newer run superseded this one
       if (!res.ok) {
         setError(data.error ?? 'Generation request failed.');
         setSubmitting(false);
         return;
       }
-      pollRef.current = setInterval(async () => {
-        try {
-          const statusRes = await fetch(`/api/generation/status/${data.jobId}`);
-          const statusData = (await statusRes.json()) as GenerationJob & { error?: string };
-          if (!statusRes.ok) {
-            setError(statusData.error ?? 'Could not fetch generation status.');
-            if (pollRef.current) clearInterval(pollRef.current);
-            setSubmitting(false);
-            return;
-          }
-          setJob(statusData);
-          if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
-            if (pollRef.current) clearInterval(pollRef.current);
-            setSubmitting(false);
-          }
-        } catch {
-          setError('Lost connection while checking generation status.');
-          if (pollRef.current) clearInterval(pollRef.current);
-          setSubmitting(false);
-        }
-      }, 1000);
+      jobId = data.jobId;
     } catch {
+      if (token !== pollTokenRef.current) return;
       setError('Could not reach the generation service.');
       setSubmitting(false);
+      return;
     }
+
+    // Self-scheduling poll: the next status request is only queued after the
+    // current one resolves, so a slow live poll never spawns overlapping
+    // requests, and the token check drops any stale/out-of-order response.
+    const poll = async () => {
+      if (token !== pollTokenRef.current) return;
+      try {
+        const statusRes = await fetch(`/api/generation/status/${jobId}`);
+        const statusData = (await statusRes.json()) as GenerationJob & { error?: string };
+        if (token !== pollTokenRef.current) return;
+        if (!statusRes.ok) {
+          setError(statusData.error ?? 'Could not fetch generation status.');
+          setSubmitting(false);
+          return;
+        }
+        setJob(statusData);
+        if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
+          setSubmitting(false);
+          return;
+        }
+        pollTimerRef.current = setTimeout(poll, 1000);
+      } catch {
+        if (token !== pollTokenRef.current) return;
+        setError('Lost connection while checking generation status.');
+        setSubmitting(false);
+      }
+    };
+    void poll();
   }
 
   const activeRoom = houseModel.rooms.find((r) => r.id === roomId)!;
@@ -322,7 +347,7 @@ export function AIStudioPanel() {
                     fill
                     sizes="600px"
                     className="object-cover"
-                    unoptimized={job.resultUrl.startsWith('data:') || job.resultUrl.endsWith('.svg')}
+                    unoptimized={job.resultUrl.startsWith('data:') || job.resultUrl.endsWith('.svg') || job.resultUrl.startsWith('/api/')}
                   />
                 </div>
               )}
@@ -335,14 +360,25 @@ export function AIStudioPanel() {
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setApproved(true)}
+                  onClick={() => {
+                    setApproved(true);
+                    // Keep the approved image so a later refinement or cinematic
+                    // clip is generated from it rather than the raw frame/placeholder.
+                    if (job.outputType === 'image' && job.resultUrl) {
+                      setApprovedSource({ path: job.resultUrl, roomId });
+                    }
+                  }}
                   className={`rounded-full px-4 py-2 text-xs font-semibold ${approved ? 'bg-olive text-ivory' : 'border border-limestone/60 text-charcoal hover:bg-limestone/30'}`}
                 >
                   {approved ? '✓ Approved' : 'Approve'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setJob(null)}
+                  onClick={() => {
+                    setJob(null);
+                    setApproved(false);
+                    setApprovedSource(null);
+                  }}
                   className="rounded-full border border-limestone/60 px-4 py-2 text-xs font-semibold text-charcoal hover:bg-limestone/30"
                 >
                   Reject

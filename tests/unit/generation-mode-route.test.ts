@@ -13,14 +13,26 @@ describe('GET /api/generation/mode', () => {
     delete process.env.HF_CREDENTIALS;
     delete process.env.HF_API_KEY;
     delete process.env.HF_API_SECRET;
+    process.env.AI_ALLOW_LIVE = 'true';
     vi.resetModules();
     const { GET } = await import('@/app/api/generation/mode/route');
     const data = await (await GET()).json();
     expect(data).toEqual({ nanoBanana: false, higgsfield: false });
   });
 
-  it('reports nano-banana as live once GEMINI_API_KEY is set, independent of higgsfield', async () => {
+  it('keeps a configured provider in demo mode unless AI_ALLOW_LIVE is set', async () => {
     process.env.GEMINI_API_KEY = 'test-key-not-real';
+    process.env.HF_CREDENTIALS = 'test-id:test-secret';
+    delete process.env.AI_ALLOW_LIVE;
+    vi.resetModules();
+    const { GET } = await import('@/app/api/generation/mode/route');
+    const data = await (await GET()).json();
+    expect(data).toEqual({ nanoBanana: false, higgsfield: false });
+  });
+
+  it('reports nano-banana as live once GEMINI_API_KEY and AI_ALLOW_LIVE are set, independent of higgsfield', async () => {
+    process.env.GEMINI_API_KEY = 'test-key-not-real';
+    process.env.AI_ALLOW_LIVE = 'true';
     delete process.env.HF_CREDENTIALS;
     delete process.env.HF_API_KEY;
     delete process.env.HF_API_SECRET;
@@ -30,9 +42,10 @@ describe('GET /api/generation/mode', () => {
     expect(data).toEqual({ nanoBanana: true, higgsfield: false });
   });
 
-  it('reports higgsfield as live once HF_CREDENTIALS is set, independent of nano-banana', async () => {
+  it('reports higgsfield as live once HF_CREDENTIALS and AI_ALLOW_LIVE are set, independent of nano-banana', async () => {
     delete process.env.GEMINI_API_KEY;
     process.env.HF_CREDENTIALS = 'test-id:test-secret';
+    process.env.AI_ALLOW_LIVE = 'true';
     vi.resetModules();
     const { GET } = await import('@/app/api/generation/mode/route');
     const data = await (await GET()).json();

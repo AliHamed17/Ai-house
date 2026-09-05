@@ -28,8 +28,19 @@ describe('provider registry demo-mode fallback', () => {
     expect(provider.id).toBe('mock');
   });
 
-  it('would select the real nano-banana provider once GEMINI_API_KEY is set', async () => {
+  it('stays in demo mode when a key is set but live generation is not explicitly enabled', async () => {
     process.env.GEMINI_API_KEY = 'test-key-not-real';
+    delete process.env.AI_ALLOW_LIVE;
+    vi.resetModules();
+    const { resolveProviderForSubmit } = await import('@/lib/ai/registry.server');
+    const { provider, demoMode } = resolveProviderForSubmit('nano-banana');
+    expect(demoMode).toBe(true);
+    expect(provider.id).toBe('mock');
+  });
+
+  it('selects the real nano-banana provider only once GEMINI_API_KEY AND AI_ALLOW_LIVE are set', async () => {
+    process.env.GEMINI_API_KEY = 'test-key-not-real';
+    process.env.AI_ALLOW_LIVE = 'true';
     vi.resetModules();
     const { resolveProviderForSubmit } = await import('@/lib/ai/registry.server');
     const { provider, demoMode } = resolveProviderForSubmit('nano-banana');

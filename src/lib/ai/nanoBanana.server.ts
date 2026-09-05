@@ -1,4 +1,5 @@
 import 'server-only';
+import { randomUUID } from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 import type { GenerationInput, GenerationJob, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
@@ -23,6 +24,45 @@ function getClient(): GoogleGenAI {
 
 export function isNanoBananaConfigured(): boolean {
   return Boolean(process.env.GEMINI_API_KEY);
+}
+
+/**
+ * Nano Banana generates synchronously, so `submit` already holds the finished
+ * image. We keep the bytes in a small bounded in-memory store keyed by a short
+ * random id (that id — not the image — travels in the job id) so the status
+ * poll URL stays short. Like the in-memory rate limiter, this store is
+ * per-instance and does not survive a cold start: adequate for this prototype
+ * (a poll follows submission within a second on the same instance); a
+ * production deployment would use a shared object store or blob storage.
+ */
+const RESULT_TTL_MS = 10 * 60_000;
+const MAX_RESULTS = 100;
+const resultStore = new Map<string, { dataUrl: string; createdAt: number }>();
+
+function putResult(dataUrl: string): string {
+  const now = Date.now();
+  for (const [key, value] of resultStore) {
+    if (now - value.createdAt > RESULT_TTL_MS) resultStore.delete(key);
+  }
+  while (resultStore.size >= MAX_RESULTS) {
+    const oldest = resultStore.keys().next().value;
+    if (oldest === undefined) break;
+    resultStore.delete(oldest);
+  }
+  const key = randomUUID();
+  resultStore.set(key, { dataUrl, createdAt: now });
+  return key;
+}
+
+function getResult(key: string | undefined): string | undefined {
+  if (!key) return undefined;
+  const entry = resultStore.get(key);
+  if (!entry) return undefined;
+  if (Date.now() - entry.createdAt > RESULT_TTL_MS) {
+    resultStore.delete(key);
+    return undefined;
+  }
+  return entry.dataUrl;
 }
 
 /**
@@ -55,6 +95,7 @@ export const nanoBananaProvider: MediaGenerationProvider = {
     }
 
     const mimeType = imagePart.inlineData.mimeType || 'image/png';
+    const resultKey = putResult(`data:${mimeType};base64,${imagePart.inlineData.data}`);
     const jobId = encodeJobId({
       provider: 'nano-banana',
       roomId: input.roomId,
@@ -62,22 +103,23 @@ export const nanoBananaProvider: MediaGenerationProvider = {
       styleVariant: input.styleVariant,
       prompt: input.prompt,
       createdAt: Date.now(),
-      resultDataUrl: `data:${mimeType};base64,${imagePart.inlineData.data}`,
+      nanoBananaResultKey: resultKey,
     });
     return { jobId };
   },
 
   async status(jobId: string): Promise<GenerationJob> {
     const payload = decodeJobId(jobId);
-    return {
+    const resultUrl = getResult(payload.nanoBananaResultKey);
+    const job: GenerationJob = {
       jobId,
       provider: 'nano-banana',
       outputType: 'image',
       roomId: payload.roomId,
-      status: 'completed',
+      status: resultUrl ? 'completed' : 'failed',
       createdAt: new Date(payload.createdAt).toISOString(),
       updatedAt: new Date().toISOString(),
-      resultUrl: payload.resultDataUrl,
+      resultUrl,
       meta: {
         model: NANO_BANANA_MODEL,
         styleVariant: payload.styleVariant,
@@ -85,5 +127,9 @@ export const nanoBananaProvider: MediaGenerationProvider = {
         approved: false,
       },
     };
+    if (!resultUrl) {
+      job.error = 'This concept has expired from the server cache — please generate it again.';
+    }
+    return job;
   },
 };

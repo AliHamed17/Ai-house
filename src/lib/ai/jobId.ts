@@ -19,7 +19,11 @@ export interface JobIdPayload {
   simulate?: 'success' | 'failure' | 'moderated';
   higgsfieldRequestId?: string;
   higgsfieldStatusUrl?: string;
-  resultDataUrl?: string;
+  // A short key into the server-side Nano Banana result store. The generated
+  // image bytes are intentionally NOT encoded here: a base64 PNG/JPEG would
+  // push the job id (and therefore the /api/generation/status/<id> URL) past
+  // browser/proxy request-target limits and 414 the very first poll.
+  nanoBananaResultKey?: string;
   resultWidth?: number;
   resultHeight?: number;
 }

@@ -21,6 +21,14 @@ function conceptImagePath(roomId: RoomId): string | null {
   return VIDEO_CAPABLE_ROOMS.has(roomId) ? `/generated/concepts/${roomId}.svg` : null;
 }
 
+// A completed video job whose result is a real playable clip (a live
+// Higgsfield URL), as opposed to the demo mode's SVG still that we animate
+// with a CSS pan. Only the former should mount a <video> element.
+function isPlayableVideo(job: GenerationJob): boolean {
+  if (job.outputType !== 'video' || !job.resultUrl) return false;
+  return !job.resultUrl.endsWith('.svg') && !job.resultUrl.startsWith('data:image');
+}
+
 interface LiveStatus {
   nanoBanana: boolean;
   higgsfield: boolean;
@@ -296,17 +304,29 @@ export function AIStudioPanel() {
 
           {job.status === 'completed' && job.resultUrl && (
             <div className="mt-3">
-              <div className={`relative h-64 w-full overflow-hidden rounded-xl bg-limestone/30 ${job.outputType === 'video' ? 'animate-[kenburns_8s_ease-in-out_infinite_alternate]' : ''}`}>
-                <Image
+              {isPlayableVideo(job) ? (
+                // A live Higgsfield job returns an actual video URL, which an
+                // <img>/next-image element cannot decode — render it as video.
+                <video
                   src={job.resultUrl}
-                  alt={`Generated concept for ${activeRoom.hotspotLabel}`}
-                  fill
-                  sizes="600px"
-                  className="object-cover"
-                  unoptimized={job.resultUrl.startsWith('data:') || job.resultUrl.endsWith('.svg')}
+                  controls
+                  playsInline
+                  loop
+                  className="h-64 w-full rounded-xl bg-limestone/30 object-cover"
                 />
-              </div>
-              {job.outputType === 'video' && (
+              ) : (
+                <div className={`relative h-64 w-full overflow-hidden rounded-xl bg-limestone/30 ${job.outputType === 'video' ? 'animate-[kenburns_8s_ease-in-out_infinite_alternate]' : ''}`}>
+                  <Image
+                    src={job.resultUrl}
+                    alt={`Generated concept for ${activeRoom.hotspotLabel}`}
+                    fill
+                    sizes="600px"
+                    className="object-cover"
+                    unoptimized={job.resultUrl.startsWith('data:') || job.resultUrl.endsWith('.svg')}
+                  />
+                </div>
+              )}
+              {job.outputType === 'video' && !isPlayableVideo(job) && (
                 <p className="mt-2 text-xs italic text-charcoal/50">
                   Demo mode simulates the cinematic move with a gentle pan over the approved still; a live Higgsfield job
                   returns an actual video clip here instead.

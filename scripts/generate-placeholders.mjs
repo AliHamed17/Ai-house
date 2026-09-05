@@ -26,15 +26,24 @@ const PALETTE = {
   olive: '#73745F',
 };
 
+// Every selectable room in the AI Studio needs its own placeholder so a demo
+// generation never resolves to a 404/broken preview. Keep this list in sync
+// with the room ids in src/data/house.ts.
 const ROOMS = [
   { id: 'stair_landing', label: 'Exterior Approach', tone: PALETTE.limestone },
+  { id: 'balcony_service', label: 'Balcony / Landing', tone: PALETTE.limestone },
+  { id: 'entry_hall', label: 'Entry Hall', tone: PALETTE.limestone },
   { id: 'living', label: 'Living Room', tone: PALETTE.limestone },
   { id: 'kitchen', label: 'Kitchen', tone: PALETTE.limestone },
   { id: 'dining', label: 'Dining Area', tone: PALETTE.limestone },
+  { id: 'terrace_social', label: 'Terrace', tone: PALETTE.limestone },
   { id: 'mamad', label: 'MAMAD', tone: PALETTE.oak },
   { id: 'twin_bed', label: 'Twin Bedroom', tone: PALETTE.oak },
+  { id: 'hall_south', label: 'Private Corridor', tone: PALETTE.limestone },
   { id: 'parents_bed', label: "Parents' Bedroom", tone: PALETTE.oak },
   { id: 'bathroom_main', label: 'Main Bathroom', tone: '#C9C1B4' },
+  { id: 'bathroom_ensuite', label: "Parents' En-suite", tone: '#C9C1B4' },
+  { id: 'wc_guest', label: 'Guest WC', tone: '#C9C1B4' },
 ];
 
 function seededShapes(seed) {

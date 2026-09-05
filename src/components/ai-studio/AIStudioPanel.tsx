@@ -21,13 +21,19 @@ function conceptImagePath(roomId: RoomId): string | null {
   return VIDEO_CAPABLE_ROOMS.has(roomId) ? `/generated/concepts/${roomId}.svg` : null;
 }
 
+interface LiveStatus {
+  nanoBanana: boolean;
+  higgsfield: boolean;
+}
+
 export function AIStudioPanel() {
   const [roomId, setRoomId] = useState<RoomId>('living');
   const [styleVariant, setStyleVariant] = useState(materialVariants[0].id);
   const [outputType, setOutputType] = useState<GenerationOutputType>('image');
   const [editInstruction, setEditInstruction] = useState('');
   const [simulate, setSimulate] = useState<'success' | 'failure' | 'moderated'>('success');
-  const [demoMode, setDemoMode] = useState<boolean | null>(null);
+  const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
+  const [confirmingLiveRun, setConfirmingLiveRun] = useState(false);
   const [job, setJob] = useState<GenerationJob | null>(null);
   const [approved, setApproved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -38,11 +44,45 @@ export function AIStudioPanel() {
     if (pollRef.current) clearInterval(pollRef.current);
   }, []);
 
+  // One-time sync of which providers are live (billed) vs. demo, so the UI can
+  // require confirmation before a paid run instead of only learning the mode
+  // after the first submission already fired it.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/generation/mode')
+      .then((res) => (res.ok ? (res.json() as Promise<LiveStatus>) : null))
+      .then((data) => {
+        if (!cancelled && data) setLiveStatus(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const videoAvailableForRoom = VIDEO_CAPABLE_ROOMS.has(roomId);
+  const isLiveForOutput = outputType === 'image' ? liveStatus?.nanoBanana : liveStatus?.higgsfield;
 
   function handleRoomChange(nextRoomId: RoomId) {
     setRoomId(nextRoomId);
     if (!VIDEO_CAPABLE_ROOMS.has(nextRoomId) && outputType === 'video') setOutputType('image');
+    setConfirmingLiveRun(false);
+  }
+
+  function handleOutputTypeChange(nextOutputType: GenerationOutputType) {
+    if (nextOutputType === 'video' && !videoAvailableForRoom) return;
+    setOutputType(nextOutputType);
+    setConfirmingLiveRun(false);
+  }
+
+  function handleGenerateClick() {
+    if (liveStatus === null) return;
+    if (isLiveForOutput && !confirmingLiveRun) {
+      setConfirmingLiveRun(true);
+      return;
+    }
+    setConfirmingLiveRun(false);
+    void handleGenerate();
   }
 
   async function handleGenerate() {
@@ -73,8 +113,6 @@ export function AIStudioPanel() {
         setSubmitting(false);
         return;
       }
-      setDemoMode(Boolean(data.demoMode));
-
       pollRef.current = setInterval(async () => {
         try {
           const statusRes = await fetch(`/api/generation/status/${data.jobId}`);
@@ -108,9 +146,9 @@ export function AIStudioPanel() {
     <div className="rounded-3xl border border-limestone/60 bg-ivory p-6 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-display text-xl text-charcoal">AI Design Studio</h3>
-        {demoMode !== null && (
-          <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${demoMode ? 'bg-olive/15 text-olive' : 'bg-bronze/15 text-bronze'}`}>
-            {demoMode ? 'Demo mode — no API credentials' : 'Live provider'}
+        {liveStatus !== null && (
+          <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${isLiveForOutput ? 'bg-bronze/15 text-bronze' : 'bg-olive/15 text-olive'}`}>
+            {isLiveForOutput ? 'Live provider' : 'Demo mode — no API credentials'}
           </span>
         )}
       </div>
@@ -155,14 +193,14 @@ export function AIStudioPanel() {
           <div className="flex overflow-hidden rounded-xl border border-limestone/60">
             <button
               type="button"
-              onClick={() => setOutputType('image')}
+              onClick={() => handleOutputTypeChange('image')}
               className={`flex-1 px-3 py-2 text-xs font-semibold ${outputType === 'image' ? 'bg-bronze text-ivory' : 'bg-ivory text-charcoal'}`}
             >
               Photorealistic image (Nano Banana)
             </button>
             <button
               type="button"
-              onClick={() => videoAvailableForRoom && setOutputType('video')}
+              onClick={() => handleOutputTypeChange('video')}
               disabled={!videoAvailableForRoom}
               className={`flex-1 px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${outputType === 'video' ? 'bg-bronze text-ivory' : 'bg-ivory text-charcoal'}`}
               title={videoAvailableForRoom ? undefined : 'Cinematic clips are limited to the principal rooms.'}
@@ -172,7 +210,7 @@ export function AIStudioPanel() {
           </div>
         </fieldset>
 
-        {demoMode && (
+        {liveStatus !== null && !isLiveForOutput && (
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-semibold text-charcoal/80">Demo: simulate outcome</span>
             <select
@@ -202,14 +240,43 @@ export function AIStudioPanel() {
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={handleGenerate}
-        disabled={submitting}
-        className="mt-5 w-full rounded-full bg-bronze px-4 py-3 text-sm font-semibold text-ivory shadow disabled:opacity-60 md:w-auto"
-      >
-        {submitting ? 'Working…' : `Generate ${outputType === 'image' ? 'concept image' : 'cinematic clip'}`}
-      </button>
+      {confirmingLiveRun && isLiveForOutput ? (
+        <div className="mt-5 rounded-xl border border-bronze/40 bg-bronze/10 p-4">
+          <p className="text-sm font-semibold text-charcoal">
+            This runs a real, billed {outputType === 'image' ? 'Nano Banana' : 'Higgsfield'} generation using the
+            configured API credentials.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={handleGenerateClick}
+              className="rounded-full bg-bronze px-4 py-2 text-xs font-semibold text-ivory shadow"
+            >
+              Yes, generate (may incur cost)
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingLiveRun(false)}
+              className="rounded-full border border-limestone/60 px-4 py-2 text-xs font-semibold text-charcoal hover:bg-limestone/30"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={handleGenerateClick}
+          disabled={submitting || liveStatus === null}
+          className="mt-5 w-full rounded-full bg-bronze px-4 py-3 text-sm font-semibold text-ivory shadow disabled:opacity-60 md:w-auto"
+        >
+          {liveStatus === null
+            ? 'Checking provider status…'
+            : submitting
+              ? 'Working…'
+              : `Generate ${outputType === 'image' ? 'concept image' : 'cinematic clip'}`}
+        </button>
+      )}
       <p className="mt-2 text-xs text-charcoal/50">
         {outputType === 'video'
           ? 'Uses the approved concept still as its source — this triggers a real paid job when live credentials are configured.'

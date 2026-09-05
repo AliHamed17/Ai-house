@@ -2,6 +2,7 @@ import 'server-only';
 import type { GenerationInput, GenerationJob, GenerationStatus, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
 import { toAbsoluteUrl } from './publicAsset.server';
+import { getStoredResult, resultIdFromPath } from './resultStore.server';
 import { retryOnce, withTimeout } from './resilience.server';
 
 /**
@@ -43,6 +44,20 @@ export function isHiggsfieldConfigured(): boolean {
   return Boolean(process.env.HF_CREDENTIALS || (process.env.HF_API_KEY && process.env.HF_API_SECRET));
 }
 
+/**
+ * When the source is one of our own stored Nano Banana results (as opposed to
+ * a static public asset, which never expires), confirm it still exists before
+ * spending a paid Higgsfield call on a source that will 404 the moment
+ * Higgsfield's servers try to fetch it. A static asset path resolves no
+ * stored id and is always considered available.
+ */
+export function assertSourceStillAvailable(sourceAssetPath: string | undefined): void {
+  const storedId = resultIdFromPath(sourceAssetPath ?? '');
+  if (storedId && !getStoredResult(storedId)) {
+    throw new Error('The approved source image has expired from the server cache. Please regenerate and re-approve it, then try again.');
+  }
+}
+
 function mapStatus(raw: string | undefined): GenerationStatus {
   switch (raw) {
     case 'queued':
@@ -72,6 +87,7 @@ export const higgsfieldProvider: MediaGenerationProvider = {
     if (!input.sourceAssetPath) {
       throw new Error('Higgsfield image-to-video requires an approved source image.');
     }
+    assertSourceStillAvailable(input.sourceAssetPath);
     const credentials = getCredentials();
     const { config, higgsfield } = await import('@higgsfield/client/v2');
     config({ credentials });

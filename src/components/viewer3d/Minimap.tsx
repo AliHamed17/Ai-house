@@ -11,6 +11,7 @@ export function Minimap() {
   const activeRoomId = useViewerStore((s) => s.activeRoomId);
   const minimapOpen = useViewerStore((s) => s.minimapOpen);
   const requestTeleport = useViewerStore((s) => s.requestTeleport);
+  const setMode = useViewerStore((s) => s.setMode);
 
   const bounds = useMemo(() => {
     let minX = Infinity;
@@ -56,7 +57,14 @@ export function Minimap() {
               stroke="#4B4037"
               strokeWidth={0.05}
               opacity={isActive ? 0.95 : 0.85}
-              onClick={() => requestTeleport(room.id)}
+              onClick={() => {
+                // Same fix as the Rooms navigator and orbit labels: this
+                // teleport is only ever consumed by the always-mounted
+                // first-person camera, so clicking the minimap from
+                // Dollhouse or Floor Plan must also switch to Walk.
+                requestTeleport(room.id);
+                setMode('first-person');
+              }}
               style={{ cursor: 'pointer' }}
             >
               <title>{room.hotspotLabel}</title>

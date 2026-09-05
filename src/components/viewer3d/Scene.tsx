@@ -15,7 +15,10 @@ export function Scene() {
   return (
     <>
       <Lighting mode={lightingMode} />
-      <HouseGeometry variantId={materialVariantId} />
+      {/* Ceilings are hidden in Dollhouse mode: the elevated overview camera
+          looks straight down, so an opaque ceiling plane would block the view
+          into the room below it instead of showing the house's interior. */}
+      <HouseGeometry variantId={materialVariantId} hideCeilings={mode === 'orbit'} />
       <DoorHotspots />
       <RoomLabelHotspots />
       <FirstPersonControls />

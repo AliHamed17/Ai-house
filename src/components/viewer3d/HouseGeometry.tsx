@@ -111,7 +111,7 @@ function StructuralColumns() {
   );
 }
 
-export function HouseGeometry({ variantId }: { variantId: string }) {
+export function HouseGeometry({ variantId, hideCeilings }: { variantId: string; hideCeilings?: boolean }) {
   const protectedWallIds = useMemo(() => {
     const ids = new Set<string>();
     for (const w of builtWalls) {
@@ -125,7 +125,7 @@ export function HouseGeometry({ variantId }: { variantId: string }) {
       {houseModel.rooms.map((room) => (
         <group key={room.id}>
           <Floor room={room} variantId={variantId} />
-          <Ceiling room={room} variantId={variantId} />
+          {!hideCeilings && <Ceiling room={room} variantId={variantId} />}
         </group>
       ))}
       {builtWalls.map((wall) => (

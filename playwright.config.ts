@@ -10,8 +10,17 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
+  // Each 3D-explorer test drives its own real WebGL context; running many
+  // of those in parallel on a software-rendered/sandboxed GPU causes real
+  // timeouts that never happen for an actual user on real hardware. One
+  // worker trades wall-clock time for reliability, which is the right
+  // tradeoff for a WebGL-heavy suite like this one.
+  workers: 1,
   reporter: [['list']],
-  timeout: 30_000,
+  // Software-rendered WebGL in a sandboxed CI-like environment can be far
+  // slower per-frame than a real GPU; give the 3D-explorer tests headroom
+  // to match, rather than tuning the app to an artificial time budget.
+  timeout: 60_000,
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'retain-on-failure',

@@ -72,6 +72,7 @@ export function DoorHotspots() {
 export function RoomLabelHotspots() {
   const activeRoomId = useViewerStore((s) => s.activeRoomId);
   const requestTeleport = useViewerStore((s) => s.requestTeleport);
+  const setMode = useViewerStore((s) => s.setMode);
   const mode = useViewerStore((s) => s.mode);
 
   if (mode !== 'orbit') return null;
@@ -85,7 +86,15 @@ export function RoomLabelHotspots() {
           <Html key={room.id} position={[room.cameraSpawn.x, room.wallHeightOverrideM ?? room.ceilingHeightM * 0.55, room.cameraSpawn.z]} center distanceFactor={12}>
             <button
               type="button"
-              onClick={() => requestTeleport(room.id)}
+              onClick={() => {
+                // This teleport is only ever consumed by the always-mounted
+                // first-person camera, so — same as the Rooms navigator —
+                // clicking one of these orbit-only labels must also switch to
+                // Walk, or the dollhouse overview collapses inside the house
+                // while Dollhouse stays visually selected.
+                requestTeleport(room.id);
+                setMode('first-person');
+              }}
               className={`rounded-full border px-3 py-1 text-xs font-medium tracking-wide shadow-md transition-colors ${
                 isActive
                   ? 'border-bronze bg-bronze text-ivory'

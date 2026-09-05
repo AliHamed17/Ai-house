@@ -39,7 +39,7 @@ const HOUSE_PALETTE_SENTENCE =
 const NEGATIVE_CONSTRAINTS =
   'No people, no labels, no watermark-like text, no warped furniture, no impossible reflections, no added or removed doors or windows, no resized or relocated openings.';
 
-export function buildNanoBananaPrompt(roomId: RoomId, styleVariantId: string): string {
+export function buildNanoBananaPrompt(roomId: RoomId, styleVariantId: string, visitorInstruction?: string): string {
   const spec = roomPromptById.get(roomId);
   const variant = materialVariants.find((v) => v.id === styleVariantId) ?? materialVariants[0];
   const furniturePlan = spec?.furniturePlan ?? 'a tasteful warm-modern-luxury furniture plan appropriate to the room';
@@ -51,6 +51,7 @@ export function buildNanoBananaPrompt(roomId: RoomId, styleVariantId: string): s
     HOUSE_PALETTE_SENTENCE,
     `Material direction for this variation: ${variant.label} — ${variant.description}`,
     'Make the result buildable, uncluttered, and correctly scaled. Keep plumbing fixtures only in their plan-supported wet zone.',
+    ...(visitorInstruction ? [`Additionally, honor this visitor request: ${visitorInstruction}.`] : []),
     `Return a clean high-resolution architectural visualization. ${NEGATIVE_CONSTRAINTS}`,
   ].join(' ');
 }

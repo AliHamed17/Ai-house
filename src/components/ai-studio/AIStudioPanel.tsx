@@ -59,17 +59,41 @@ export function AIStudioPanel() {
 
   // One-time sync of which providers are live (billed) vs. demo, so the UI can
   // require confirmation before a paid run instead of only learning the mode
-  // after the first submission already fired it.
+  // after the first submission already fired it. A transient failure retries
+  // once before falling back to "assume live" — never leave the Generate
+  // button stuck on "Checking provider status..." forever, and never quietly
+  // assume demo, which could let a live submission through unconfirmed.
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/generation/mode')
-      .then((res) => (res.ok ? (res.json() as Promise<LiveStatus>) : null))
-      .then((data) => {
-        if (!cancelled && data) setLiveStatus(data);
-      })
-      .catch(() => {});
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
+
+    const scheduleRetryOrFallback = () => {
+      attempt += 1;
+      if (attempt <= 1) {
+        timeoutId = setTimeout(probe, 1500);
+        return;
+      }
+      setLiveStatus({ nanoBanana: true, higgsfield: true });
+    };
+
+    function probe() {
+      fetch('/api/generation/mode')
+        .then((res) => (res.ok ? (res.json() as Promise<LiveStatus>) : null))
+        .then((data) => {
+          if (cancelled) return;
+          if (data) setLiveStatus(data);
+          else scheduleRetryOrFallback();
+        })
+        .catch(() => {
+          if (!cancelled) scheduleRetryOrFallback();
+        });
+    }
+
+    probe();
     return () => {
       cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, []);
 

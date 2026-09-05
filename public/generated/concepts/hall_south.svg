@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F3EFE7" />
+      <stop offset="100%" stop-color="#8B7C6C" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#bg)" />
+  <rect x="16" y="16" width="768" height="568" fill="none" stroke="#4B4037" stroke-opacity="0.35" stroke-width="1.5" />
+  <rect x="428.9" y="394.5" width="112.7" height="54.6" rx="13.5" fill="#4B4037" opacity="0.10" />
+      <rect x="388.2" y="385.2" width="162.2" height="156.1" rx="10.5" fill="#4B4037" opacity="0.10" />
+      <rect x="549.3" y="446.1" width="94.5" height="44.5" rx="11.3" fill="#4B4037" opacity="0.10" />
+      <rect x="301.9" y="462.8" width="181.1" height="79.0" rx="15.7" fill="#4B4037" opacity="0.10" />
+      <rect x="724.5" y="302.3" width="69.5" height="152.6" rx="7.0" fill="#4B4037" opacity="0.10" />
+  <line x1="60" y1="240" x2="740" y2="240" stroke="#4B4037" stroke-opacity="0.25" stroke-width="1" />
+  <text x="400" y="150" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="40" fill="#24221F">Private Corridor</text>
+  <text x="400" y="190" text-anchor="middle" font-family="Georgia, serif" font-size="17" font-style="italic" fill="#73745F">Warm-modern-luxury concept — placeholder</text>
+  <rect x="290" y="520" width="220" height="34" rx="17" fill="#24221F" opacity="0.85" />
+  <text x="400" y="543" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" letter-spacing="0.5" fill="#F3EFE7">DEMO MODE — NOT AI-GENERATED</text>
+</svg>

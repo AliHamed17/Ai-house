@@ -3,6 +3,7 @@ import { GoogleGenAI } from '@google/genai';
 import type { GenerationInput, GenerationJob, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
 import { readPublicFileAsBase64 } from './publicAsset.server';
+import { getGeneratedImage, putGeneratedImage } from './resultStore.server';
 import { withTimeout } from './resilience.server';
 
 /**
@@ -55,6 +56,7 @@ export const nanoBananaProvider: MediaGenerationProvider = {
     }
 
     const mimeType = imagePart.inlineData.mimeType || 'image/png';
+    const resultKey = putGeneratedImage(`data:${mimeType};base64,${imagePart.inlineData.data}`);
     const jobId = encodeJobId({
       provider: 'nano-banana',
       roomId: input.roomId,
@@ -62,22 +64,25 @@ export const nanoBananaProvider: MediaGenerationProvider = {
       styleVariant: input.styleVariant,
       prompt: input.prompt,
       createdAt: Date.now(),
-      resultDataUrl: `data:${mimeType};base64,${imagePart.inlineData.data}`,
+      resultKey,
     });
     return { jobId };
   },
 
   async status(jobId: string): Promise<GenerationJob> {
     const payload = decodeJobId(jobId);
+    const resultUrl = payload.resultKey ? getGeneratedImage(payload.resultKey) : undefined;
+    const expired = Boolean(payload.resultKey) && !resultUrl;
     return {
       jobId,
       provider: 'nano-banana',
       outputType: 'image',
       roomId: payload.roomId,
-      status: 'completed',
+      status: expired ? 'failed' : 'completed',
+      error: expired ? 'This generated image is no longer available. Please generate it again.' : undefined,
       createdAt: new Date(payload.createdAt).toISOString(),
       updatedAt: new Date().toISOString(),
-      resultUrl: payload.resultDataUrl,
+      resultUrl,
       meta: {
         model: NANO_BANANA_MODEL,
         styleVariant: payload.styleVariant,

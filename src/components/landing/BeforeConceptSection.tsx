@@ -5,7 +5,7 @@ import { roomEvidenceFrame } from '@/data/evidenceFrames';
 import { houseModel } from '@/data/house';
 import type { RoomId } from '@/lib/types';
 
-const FEATURED_ROOMS: RoomId[] = ['living', 'kitchen', 'parents_bed', 'bathroom_main'];
+const FEATURED_ROOMS: RoomId[] = ['living', 'kitchen', 'bedroom_parents', 'bath_family'];
 
 export function BeforeConceptSection() {
   return (

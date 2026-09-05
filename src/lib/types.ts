@@ -7,20 +7,21 @@
 export type ConfidenceLevel = 'high' | 'medium-high' | 'medium' | 'low';
 
 export type RoomId =
+  | 'terrace_nw'
   | 'stair_landing'
-  | 'balcony_service'
-  | 'entry_hall'
   | 'living'
+  | 'entry_hall'
   | 'kitchen'
   | 'dining'
-  | 'terrace_social'
+  | 'terrace_south'
   | 'mamad'
-  | 'twin_bed'
-  | 'hall_south'
-  | 'bathroom_main'
-  | 'bathroom_ensuite'
-  | 'wc_guest'
-  | 'parents_bed';
+  | 'mamad_recess'
+  | 'corridor'
+  | 'bath_family'
+  | 'bath_ensuite'
+  | 'wc'
+  | 'bedroom_twin'
+  | 'bedroom_parents';
 
 /** A 2D point in meters, on the house's horizontal (floor) plane. */
 export interface Vec2 {

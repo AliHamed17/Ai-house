@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F3EFE7" />
+      <stop offset="100%" stop-color="#8B7C6C" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#bg)" />
+  <rect x="16" y="16" width="768" height="568" fill="none" stroke="#4B4037" stroke-opacity="0.35" stroke-width="1.5" />
+  <rect x="558.0" y="437.5" width="82.0" height="73.5" rx="15.5" fill="#4B4037" opacity="0.10" />
+      <rect x="461.0" y="275.4" width="143.1" height="129.3" rx="12.1" fill="#4B4037" opacity="0.10" />
+      <rect x="511.9" y="417.2" width="211.8" height="72.0" rx="8.9" fill="#4B4037" opacity="0.10" />
+      <rect x="607.0" y="363.1" width="72.5" height="132.7" rx="14.5" fill="#4B4037" opacity="0.10" />
+      <rect x="409.2" y="274.3" width="125.2" height="133.7" rx="14.7" fill="#4B4037" opacity="0.10" />
+  <line x1="60" y1="240" x2="740" y2="240" stroke="#4B4037" stroke-opacity="0.25" stroke-width="1" />
+  <text x="400" y="150" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="40" fill="#24221F">MAMAD Recess</text>
+  <text x="400" y="190" text-anchor="middle" font-family="Georgia, serif" font-size="17" font-style="italic" fill="#73745F">Warm-modern-luxury concept — placeholder</text>
+  <rect x="290" y="520" width="220" height="34" rx="17" fill="#24221F" opacity="0.85" />
+  <text x="400" y="543" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" letter-spacing="0.5" fill="#F3EFE7">DEMO MODE — NOT AI-GENERATED</text>
+</svg>

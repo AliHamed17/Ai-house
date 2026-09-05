@@ -8,7 +8,7 @@ import { roomEvidenceFrame } from '@/data/evidenceFrames';
 import type { GenerationJob, GenerationOutputType, RoomId } from '@/lib/types';
 import { isPlayableVideo } from '@/lib/media';
 
-const VIDEO_CAPABLE_ROOMS = new Set<RoomId>(['stair_landing', 'living', 'kitchen', 'dining', 'mamad', 'twin_bed', 'parents_bed', 'bathroom_main']);
+const VIDEO_CAPABLE_ROOMS = new Set<RoomId>(['stair_landing', 'living', 'kitchen', 'dining', 'mamad', 'bedroom_twin', 'bedroom_parents', 'bath_family']);
 
 const STATUS_COPY: Record<GenerationJob['status'], string> = {
   queued: 'Queued…',

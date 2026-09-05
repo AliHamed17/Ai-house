@@ -28,12 +28,17 @@ export function ViewerHud({ onExit }: { onExit: () => void }) {
   const [variantMenuOpen, setVariantMenuOpen] = useState(false);
 
   // Reset means different things per mode: in dollhouse it restores the
-  // elevated overview; otherwise it returns the walker to the entry room.
-  // (A first-person teleport in dollhouse would drop the camera to eye height
-  // inside the building and collapse the overview.)
+  // elevated overview; otherwise it returns the walker to the entry room and
+  // switches to Walk. (A first-person teleport in dollhouse would drop the
+  // camera to eye height inside the building and collapse the overview; from
+  // Floor Plan, the teleport alone would move the camera underneath the
+  // floor-plan overlay without ever showing the visitor they've been reset.)
   const handleResetView = () => {
     if (mode === 'orbit') requestOrbitReset();
-    else requestTeleport(ENTRY_ROOM_ID);
+    else {
+      requestTeleport(ENTRY_ROOM_ID);
+      setMode('first-person');
+    }
   };
 
   return (

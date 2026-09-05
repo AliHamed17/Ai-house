@@ -16,6 +16,7 @@ const NAVIGABLE_KINDS = new Set(['door', 'open_threshold', 'exterior_opening']);
 export function DoorHotspots() {
   const activeRoomId = useViewerStore((s) => s.activeRoomId);
   const requestTeleport = useViewerStore((s) => s.requestTeleport);
+  const setMode = useViewerStore((s) => s.setMode);
   const mode = useViewerStore((s) => s.mode);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
@@ -39,7 +40,12 @@ export function DoorHotspots() {
               rotation={[-Math.PI / 2, 0, 0]}
               onClick={(e) => {
                 e.stopPropagation();
+                // These door markers render in orbit (Dollhouse) mode too —
+                // only floorplan mode hides them — so the same mode-aware
+                // fix applies here: without it, clicking one from Dollhouse
+                // would move the camera while leaving Dollhouse selected.
                 requestTeleport(targetRoom.id);
+                setMode('first-person');
               }}
               onPointerOver={(e) => {
                 e.stopPropagation();

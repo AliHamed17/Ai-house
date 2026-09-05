@@ -36,6 +36,15 @@ test.describe('3D explorer', () => {
     await expect(page.getByText('Floor Plan View')).toHaveCount(0);
   });
 
+  test('Reset View from Floor Plan mode switches to Walk (regression)', async ({ page }) => {
+    await enter3D(page);
+    await page.getByRole('button', { name: 'Floor Plan', exact: true }).click();
+    await expect(page.getByText('Floor Plan View')).toBeVisible();
+    await page.getByRole('button', { name: /Reset View/i }).click();
+    await expect(page.getByRole('button', { name: 'Walk', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByText('Floor Plan View')).toHaveCount(0);
+  });
+
   test('dollhouse mode is reachable and reflects its pressed state', async ({ page }) => {
     await enter3D(page);
     await page.getByRole('button', { name: 'Dollhouse', exact: true }).click();

@@ -9,7 +9,7 @@
  * player along a wall face and also blocks them cleanly at a doorframe edge.
  */
 
-import type { Vec2 } from '@/lib/types';
+import type { StructuralFeature, Vec2 } from '@/lib/types';
 import type { BuiltWall } from './wallPanels';
 
 function toLocal(pos: Vec2, wall: BuiltWall) {
@@ -27,7 +27,7 @@ function toWorld(t: number, n: number, wall: BuiltWall): Vec2 {
   };
 }
 
-export function resolveCollision(pos: Vec2, radiusM: number, walls: BuiltWall[]): Vec2 {
+export function resolveCollision(pos: Vec2, radiusM: number, walls: BuiltWall[], columns: StructuralFeature[] = []): Vec2 {
   let p: Vec2 = { x: pos.x, z: pos.z };
   const ITERATIONS = 3;
 
@@ -58,6 +58,24 @@ export function resolveCollision(pos: Vec2, radiusM: number, walls: BuiltWall[])
         const world = toWorld(newT, newN, wall);
         p = world;
       }
+    }
+
+    // Columns are simple floor-to-ceiling cylinders, so (unlike a wall's
+    // rectangular void sweep) a plain circle-vs-circle push-out is enough.
+    for (const column of columns) {
+      const dx = p.x - column.position.x;
+      const dz = p.z - column.position.z;
+      const dist = Math.hypot(dx, dz);
+      const minDist = radiusM + column.radiusM;
+      if (dist >= minDist) continue;
+      if (dist < 1e-6) {
+        // Degenerate (exactly at the column's center): push a fixed
+        // direction rather than dividing by a zero-length vector.
+        p = { x: column.position.x + minDist, z: column.position.z };
+        continue;
+      }
+      const scale = minDist / dist;
+      p = { x: column.position.x + dx * scale, z: column.position.z + dz * scale };
     }
   }
 

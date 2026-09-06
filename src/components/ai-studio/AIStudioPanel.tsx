@@ -22,11 +22,14 @@ function conceptImagePath(roomId: RoomId): string | null {
 }
 
 // A completed video job whose result is a real playable clip (a live
-// Higgsfield URL), as opposed to the demo mode's SVG still that we animate
-// with a CSS pan. Only the former should mount a <video> element.
+// Higgsfield URL), as opposed to the demo mode's still (its own placeholder
+// SVG, or — when Nano Banana was live — the actual approved concept image)
+// that we animate with a CSS pan instead. Checking job.provider rather than
+// sniffing the resultUrl's shape is what lets the mock provider return
+// either kind of still and always get the pan treatment: a mock job is
+// never a real video regardless of what its resultUrl looks like.
 function isPlayableVideo(job: GenerationJob): boolean {
-  if (job.outputType !== 'video' || !job.resultUrl) return false;
-  return !job.resultUrl.endsWith('.svg') && !job.resultUrl.startsWith('data:image');
+  return job.outputType === 'video' && job.provider !== 'mock' && Boolean(job.resultUrl);
 }
 
 interface LiveStatus {

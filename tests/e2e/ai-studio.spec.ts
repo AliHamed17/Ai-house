@@ -61,4 +61,18 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.getByText(/Still confirming whether cinematic clips are live-billed/i)).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Generate cinematic clip/i })).toBeEnabled();
   });
+
+  test('a demo cinematic clip completes and renders as an animated still, never a broken <video> element (regression)', async ({ page }) => {
+    await page.goto('/#ai-studio');
+    await page.locator('select').first().selectOption('living');
+    await page.getByRole('button', { name: /Cinematic clip/i }).click();
+    await expect(page.getByRole('button', { name: /Generate cinematic clip/i })).toBeEnabled({ timeout: 10_000 });
+    await page.getByRole('button', { name: /Generate cinematic clip/i }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    // A mock job's resultUrl is never a real video, regardless of its shape
+    // (see isPlayableVideo) — it must always get the Ken-Burns-pan <Image>
+    // treatment, never mount a <video> tag pointed at a non-video URL.
+    await expect(page.locator('video')).toHaveCount(0);
+    await expect(page.getByText(/Demo mode simulates the cinematic move/i)).toBeVisible();
+  });
 });

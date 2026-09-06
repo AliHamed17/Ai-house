@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mockProvider } from '@/lib/ai/mockProvider.server';
 import { decodeJobId, encodeJobId } from '@/lib/ai/jobId';
+import { putStoredResult, RESULT_URL_PREFIX } from '@/lib/ai/resultStore.server';
 
 describe('mock generation provider', () => {
   it('round-trips a job id through encode/decode', () => {
@@ -78,6 +79,44 @@ describe('mock generation provider', () => {
     const job = await mockProvider.status(jobId);
     expect(job.status).toBe('moderated');
     expect(job.error).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it('animates a genuinely live-generated (stored) source for a video job instead of the generic placeholder (regression)', async () => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    const storedId = putStoredResult('image/png', 'aGVsbG8=');
+    const storedPath = `${RESULT_URL_PREFIX}${storedId}`;
+    const { jobId } = await mockProvider.submit({
+      provider: 'higgsfield',
+      outputType: 'video',
+      roomId: 'living',
+      styleVariant: 'warm-oak',
+      prompt: 'p',
+      sourceAssetPath: storedPath,
+    });
+    vi.setSystemTime(start + 3000);
+    const completed = await mockProvider.status(jobId);
+    expect(completed.resultUrl).toBe(storedPath);
+    vi.useRealTimers();
+  });
+
+  it('does not reuse a stored source for an IMAGE job (the placeholder concept art is the intended demo result there)', async () => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    const storedId = putStoredResult('image/png', 'aGVsbG8=');
+    const storedPath = `${RESULT_URL_PREFIX}${storedId}`;
+    const { jobId } = await mockProvider.submit({
+      provider: 'nano-banana',
+      outputType: 'image',
+      roomId: 'living',
+      styleVariant: 'warm-oak',
+      prompt: 'p',
+      sourceAssetPath: storedPath,
+    });
+    vi.setSystemTime(start + 3000);
+    const completed = await mockProvider.status(jobId);
+    expect(completed.resultUrl).toBe('/generated/concepts/living.svg');
     vi.useRealTimers();
   });
 

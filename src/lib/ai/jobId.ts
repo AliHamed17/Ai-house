@@ -26,6 +26,11 @@ export interface JobIdPayload {
   nanoBananaResultKey?: string;
   resultWidth?: number;
   resultHeight?: number;
+  // A mock video job's source, when it was a genuinely live-generated
+  // (stored) Nano Banana result — see mockProvider.server.ts — so the demo
+  // "clip" visibly animates the actual approved still it claims to, rather
+  // than always falling back to the room's generic placeholder concept.
+  mockSourceResultPath?: string;
 }
 
 export function encodeJobId(payload: JobIdPayload): string {

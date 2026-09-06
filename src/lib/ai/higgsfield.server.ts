@@ -102,6 +102,25 @@ export function assertSourceStillAvailable(sourceAssetPath: string | undefined):
   }
 }
 
+// Higgsfield fetches this URL from ITS OWN servers, so it must be a stable
+// origin the deployer actually controls — never derived from the incoming
+// request. request.nextUrl.origin reflects the Host header, which a caller
+// can spoof on any deployment whose proxy forwards or trusts an arbitrary
+// Host; that would point Higgsfield's fetch (and this app's billed credit)
+// at a server the attacker controls, even though the source path and the
+// public-reachability check both still validate. Live generation is refused
+// until a real origin is configured, matching how a missing credential or
+// AI_ALLOW_LIVE already fails closed elsewhere in this module.
+function getTrustedAssetOrigin(): string {
+  const origin = process.env.PUBLIC_ASSET_ORIGIN;
+  if (!origin) {
+    throw new Error(
+      'PUBLIC_ASSET_ORIGIN is not configured. Live Higgsfield generation requires a trusted, deployer-configured public origin to build the source image URL from — see .env.example.',
+    );
+  }
+  return origin;
+}
+
 function mapStatus(raw: string | undefined): GenerationStatus {
   switch (raw) {
     case 'queued':
@@ -132,16 +151,25 @@ export const higgsfieldProvider: MediaGenerationProvider = {
       throw new Error('Higgsfield image-to-video requires an approved source image.');
     }
     assertSourceStillAvailable(input.sourceAssetPath);
+
+    // Resolve and validate the fetchable image URL before touching the SDK
+    // or credentials at all — fail fast on a config problem rather than
+    // after already importing/configuring the real client.
+    const imageUrl = toAbsoluteUrl(getTrustedAssetOrigin(), input.sourceAssetPath);
+    // Defense in depth against a misconfigured PUBLIC_ASSET_ORIGIN (e.g. a
+    // deployer accidentally pointing it at a private/loopback address) —
+    // the trusted-origin requirement above is the actual fix for the
+    // spoofable-Host-header issue this also used to guard against.
+    if (!isPubliclyReachableOrigin(imageUrl)) {
+      throw new Error(
+        'The configured PUBLIC_ASSET_ORIGIN is not publicly reachable (a localhost or private-network origin), so Higgsfield cannot fetch it. Set it to this deployment\'s real public URL.',
+      );
+    }
+
     const credentials = getCredentials();
     const { config, higgsfield } = await import('@higgsfield/client/v2');
     config({ credentials });
 
-    const imageUrl = toAbsoluteUrl(input.originUrl, input.sourceAssetPath);
-    if (!isPubliclyReachableOrigin(imageUrl)) {
-      throw new Error(
-        'The source image URL is not publicly reachable (a localhost or private-network origin), so Higgsfield cannot fetch it. Deploy behind a public URL before submitting a live Higgsfield job.',
-      );
-    }
     // The subscribe client does not accept an AbortSignal, so the timeout can
     // only reject here (it cannot cancel the in-flight submit) — hence submit()
     // is never auto-retried, so a timed-out request never becomes a second job.

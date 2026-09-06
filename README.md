@@ -78,6 +78,7 @@ fill in only what you have:
 | `HF_CREDENTIALS` | Higgsfield credentials as `KEY_ID:KEY_SECRET`. |
 | `HF_API_KEY` / `HF_API_SECRET` | Alternative to `HF_CREDENTIALS`. |
 | `HF_IMAGE2VIDEO_ENDPOINT` / `HF_MODEL` | Override the Higgsfield endpoint/model. |
+| `PUBLIC_ASSET_ORIGIN` | **Required for live Higgsfield generation.** This deployment's real public origin, used to build the source image URL Higgsfield fetches from its own servers. Deliberately not derived from the incoming request — a spoofed Host header could otherwise redirect that fetch (and billed credits) to a server an attacker controls. |
 
 ### Generating the real interior concepts (Nano Banana)
 

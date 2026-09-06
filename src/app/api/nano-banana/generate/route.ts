@@ -50,7 +50,6 @@ export async function POST(request: NextRequest) {
       sourceAssetPath: validated.data.sourceAssetPath,
       prompt,
       simulate: validated.data.simulate,
-      originUrl: request.nextUrl.origin,
     });
     return NextResponse.json({ jobId, demoMode, provider: demoMode ? 'mock' : 'nano-banana' });
   } catch (error) {

@@ -1,6 +1,7 @@
 import 'server-only';
 import type { GenerationInput, GenerationJob, GenerationStatus, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
+import { resultIdFromPath } from './resultStore.server';
 
 const QUEUED_UNTIL_MS = 900;
 const IN_PROGRESS_UNTIL_MS = 2600;
@@ -15,6 +16,15 @@ const IN_PROGRESS_UNTIL_MS = 2600;
 export const mockProvider: MediaGenerationProvider = {
   id: 'mock',
   async submit(input: GenerationInput) {
+    // Only a genuinely live-generated (stored) source is worth threading
+    // through to the mock clip below — a raw evidence frame or the generic
+    // concept-placeholder path is what the mock IMAGE flow already shows by
+    // default, so reusing those here would replace the nicer placeholder art
+    // with a raw photo instead of improving on anything.
+    const mockSourceResultPath =
+      input.outputType === 'video' && input.sourceAssetPath && resultIdFromPath(input.sourceAssetPath)
+        ? input.sourceAssetPath
+        : undefined;
     const jobId = encodeJobId({
       provider: 'mock',
       roomId: input.roomId,
@@ -23,6 +33,7 @@ export const mockProvider: MediaGenerationProvider = {
       prompt: input.prompt,
       createdAt: Date.now(),
       simulate: input.simulate ?? 'success',
+      mockSourceResultPath,
     });
     return { jobId };
   },
@@ -55,7 +66,7 @@ export const mockProvider: MediaGenerationProvider = {
     };
 
     if (status === 'completed') {
-      job.resultUrl = `/generated/concepts/${payload.roomId}.svg`;
+      job.resultUrl = payload.mockSourceResultPath ?? `/generated/concepts/${payload.roomId}.svg`;
       job.resultWidth = 800;
       job.resultHeight = 600;
     } else if (status === 'failed') {

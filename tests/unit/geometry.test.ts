@@ -122,6 +122,23 @@ describe('collision resolution', () => {
     expect(builtSouth.doorSpans).toHaveLength(1);
     expect(builtSouth.collisionSolidSpans).toHaveLength(2);
   });
+
+  it('pushes the player out of a structural column instead of letting them walk through it (regression)', () => {
+    const column = houseModel.structuralFeatures.find((f) => f.id === 'column_living')!;
+    const playerRadius = 0.28;
+    const insideColumn = { x: column.position.x + 0.05, z: column.position.z };
+    // No walls nearby at this point, so any push-back can only have come
+    // from the column itself.
+    const resolved = resolveCollision(insideColumn, playerRadius, [], houseModel.structuralFeatures);
+    const distFromColumn = Math.hypot(resolved.x - column.position.x, resolved.z - column.position.z);
+    expect(distFromColumn).toBeGreaterThanOrEqual(column.radiusM + playerRadius - 1e-6);
+  });
+
+  it('leaves a point far from every structural column untouched', () => {
+    const farPoint = { x: 100, z: 100 };
+    const resolved = resolveCollision(farPoint, 0.28, [], houseModel.structuralFeatures);
+    expect(resolved).toEqual(farPoint);
+  });
 });
 
 describe('point-in-room lookup', () => {

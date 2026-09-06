@@ -110,7 +110,7 @@ export function FirstPersonControls() {
     const pose = useViewerStore.getState().playerPose;
     pitchRef.current = 0;
     yawRef.current = pose.yaw;
-    const resolved = resolveCollision({ x: pose.x, z: pose.z }, PLAYER_RADIUS_M, builtWalls);
+    const resolved = resolveCollision({ x: pose.x, z: pose.z }, PLAYER_RADIUS_M, builtWalls, houseModel.structuralFeatures);
     camera.position.set(resolved.x, EYE_HEIGHT_M, resolved.z);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, teleportToken]);
@@ -235,7 +235,7 @@ export function FirstPersonControls() {
         x: camera.position.x + worldDX * MOVE_SPEED_M_S * dt,
         z: camera.position.z + worldDZ * MOVE_SPEED_M_S * dt,
       };
-      const resolved = resolveCollision(candidate, PLAYER_RADIUS_M, builtWalls);
+      const resolved = resolveCollision(candidate, PLAYER_RADIUS_M, builtWalls, houseModel.structuralFeatures);
       camera.position.x = resolved.x;
       camera.position.z = resolved.z;
     }

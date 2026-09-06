@@ -125,8 +125,6 @@ export interface GenerationInput {
   prompt: string;
   negativePrompt?: string;
   aspectRatio?: string;
-  /** Origin of the incoming request (set by the route handler), used to build absolute asset URLs for providers that require one. */
-  originUrl?: string;
   /** Demo-mode only: force the mock provider to resolve to this terminal state. */
   simulate?: 'success' | 'failure' | 'moderated';
 }

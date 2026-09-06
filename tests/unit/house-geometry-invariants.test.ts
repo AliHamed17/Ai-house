@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { houseModel } from '@/data/house';
+import { CEILING_HEIGHT_M, houseModel } from '@/data/house';
 import { pointInPolygon } from '@/lib/geometry/collision';
 import type { RoomDef, RoomId, Vec2 } from '@/lib/types';
 
@@ -239,7 +239,30 @@ describe('structural columns', () => {
   });
 
   it('carries the piers the walkthrough shows, not a single invented one', () => {
-    const cols = houseModel.structuralFeatures.filter((f) => f.kind === 'column');
-    expect(cols.length).toBeGreaterThanOrEqual(8);
+    expect(houseModel.structuralFeatures.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('models the living/kitchen divider as a 0.50 m square floor-to-ceiling pier', () => {
+    const pier = houseModel.structuralFeatures.find((f) => f.id === 'pier_living_kitchen');
+    expect(pier, 'pier_living_kitchen missing').toBeDefined();
+    expect(pier!.kind).toBe('pier');
+    expect(pier!.sizeM).toBeCloseTo(0.5, 3);
+    expect(pier!.heightM).toBeCloseTo(CEILING_HEIGHT_M, 3);
+
+    const living = rooms.find((r) => r.id === 'living')!;
+    expect(pointInPolygon(pier!.position, living.floorPolygon)).toBe(true);
+
+    const half = pier!.sizeM! / 2;
+    expect(pier!.position.z + half).toBeCloseTo(5.35, 2);
+    expect(pier!.position.x + half).toBeCloseTo(0.5, 2);
+  });
+
+  it('leaves the rest of the living/kitchen boundary genuinely open', () => {
+    const divider = houseModel.openings.find((o) => o.id === 'opening_living_kitchen');
+    expect(divider?.kind).toBe('open_threshold');
+    const living = rooms.find((r) => r.id === 'living')!;
+    const solidOnBoundary = living.walls.filter((w) => Math.abs(w.start.z - 5.35) < 0.01 && Math.abs(w.end.z - 5.35) < 0.01);
+    const solidLength = solidOnBoundary.reduce((n, w) => n + Math.abs(w.end.x - w.start.x), 0);
+    expect(solidLength).toBeLessThanOrEqual(0.55);
   });
 });

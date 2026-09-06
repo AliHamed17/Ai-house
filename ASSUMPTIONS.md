@@ -25,8 +25,10 @@ built house and have been deleted:
 
 Three more corrections changed how the open plan works:
 
-- The living room is **open to the kitchen**, separated only by a ~0.5 m wall
-  stub at the west end.
+- The living room is **open to the kitchen**, separated only by a single
+  **0.50 x 0.50 m reinforced pier running floor to ceiling** at the west end,
+  where the facade steps 50 cm. It is modelled as a square structural pier
+  (`pier_living_kitchen`), not as a wall and not as a round column.
 - The dining bay is **part of the kitchen volume** — one continuous space, no
   dividing wall.
 - The guest WC has **two doors**, one from the entry hall and one from the
@@ -94,7 +96,8 @@ the entry hall rather than forcing closure.
 - **Shower room width** (`bath_family`, 3.30 m clear) — the plan draws two
   compartments here; the owner confirms one room. The merged clear width is
   derived from the two printed values plus the removed partition.
-- **Structural columns** — eleven piers, each traced to a discrete blue blob
+- **Structural columns** — ten round columns plus the owner-confirmed square
+  living/kitchen pier, each traced to a discrete blue blob
   on the plan and cross-checked against the walkthrough. The plan draws them
   as rectangular piers and blades; the video reads several as rounded
   rendered columns. The radii (0.18–0.22 m) are a rendering choice, not a

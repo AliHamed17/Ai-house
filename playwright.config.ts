@@ -22,7 +22,7 @@ export default defineConfig({
   // to match, rather than tuning the app to an artificial time budget.
   timeout: 60_000,
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: 'http://localhost:3100',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     launchOptions: {
@@ -60,10 +60,14 @@ export default defineConfig({
       use: { ...devices['Pixel 7'] },
     },
   ],
+  // Port 3100 and AI_FORCE_DEMO keep the suite hermetic: it never adopts a dev
+  // server on :3000, and it can never make a billed provider call even when
+  // real credentials are present in .env.local.
   webServer: {
-    command: 'npm run build && npm run start',
-    url: 'http://localhost:3000',
+    command: 'npm run build && npx next start -p 3100',
+    url: 'http://localhost:3100',
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 180_000,
+    env: { AI_FORCE_DEMO: '1' },
   },
 });

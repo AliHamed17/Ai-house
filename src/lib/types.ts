@@ -91,9 +91,12 @@ export interface OpeningDef {
 
 export interface StructuralFeature {
   id: string;
-  kind: 'column';
+  kind: 'column' | 'pier';
   position: Vec2;
+  /** Round columns only. Square piers use `sizeM` instead. */
   radiusM: number;
+  /** Plan side length of a square pier, meters. */
+  sizeM?: number;
   heightM: number;
   roomId: RoomId;
 }

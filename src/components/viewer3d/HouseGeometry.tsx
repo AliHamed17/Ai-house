@@ -103,7 +103,11 @@ function StructuralColumns() {
     <>
       {houseModel.structuralFeatures.map((f) => (
         <mesh key={f.id} position={[f.position.x, f.heightM / 2, f.position.z]} castShadow>
-          <cylinderGeometry args={[f.radiusM, f.radiusM, f.heightM, 16]} />
+          {f.kind === 'pier' ? (
+            <boxGeometry args={[f.sizeM ?? 0.5, f.heightM, f.sizeM ?? 0.5]} />
+          ) : (
+            <cylinderGeometry args={[f.radiusM, f.radiusM, f.heightM, 16]} />
+          )}
           <meshStandardMaterial color="#e7e2d6" roughness={0.7} />
         </mesh>
       ))}

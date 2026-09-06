@@ -81,6 +81,36 @@ export function InteractiveFloorPlan({ onRoomActivate, activateLabel = 'Enter ro
             .map((o) => (
               <circle key={o.id} cx={o.position.x} cy={o.position.z} r={0.12} fill="#F3EFE7" stroke="#4B4037" strokeWidth={0.03} />
             ))}
+          {houseModel.structuralFeatures.map((f) =>
+            f.kind === 'pier' ? (
+              <rect
+                key={f.id}
+                x={f.position.x - (f.sizeM ?? 0.5) / 2}
+                y={f.position.z - (f.sizeM ?? 0.5) / 2}
+                width={f.sizeM ?? 0.5}
+                height={f.sizeM ?? 0.5}
+                fill="#8B7C6C"
+                stroke="#24221F"
+                strokeWidth={0.04}
+                pointerEvents="none"
+              >
+                <title>{`Structural pier — ${((f.sizeM ?? 0.5) * 100).toFixed(0)} × ${((f.sizeM ?? 0.5) * 100).toFixed(0)} cm, floor to ceiling`}</title>
+              </rect>
+            ) : (
+              <circle
+                key={f.id}
+                cx={f.position.x}
+                cy={f.position.z}
+                r={f.radiusM}
+                fill="#8B7C6C"
+                stroke="#24221F"
+                strokeWidth={0.04}
+                pointerEvents="none"
+              >
+                <title>{`Structural column — ${(f.radiusM * 200).toFixed(0)} cm diameter`}</title>
+              </circle>
+            ),
+          )}
         </svg>
       </div>
 

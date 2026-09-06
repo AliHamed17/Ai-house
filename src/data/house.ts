@@ -472,7 +472,15 @@ const openings: OpeningDef[] = [
   { id: 'opening_living_kitchen', kind: 'open_threshold', position: v(1.55, 4.0), widthM: 3.1, sillM: 0, headM: CEILING_HEIGHT_M, roomA: 'living', roomB: 'kitchen', confidence: 'high', note: 'Open social zone — no dividing wall.' },
   { id: 'opening_kitchen_dining', kind: 'open_threshold', position: v(3.1, 5.65), widthM: 3.3, sillM: 0, headM: CEILING_HEIGHT_M, roomA: 'kitchen', roomB: 'dining', confidence: 'medium' },
   { id: 'opening_living_dining', kind: 'open_threshold', position: v(4.0, 4.0), widthM: 1.8, sillM: 0, headM: CEILING_HEIGHT_M, roomA: 'living', roomB: 'dining', confidence: 'medium' },
-  { id: 'exterior_opening_social_terrace', kind: 'exterior_opening', position: v(2.45, 7.3), widthM: 4.0, sillM: 0, headM: 2.2, roomA: 'kitchen', roomB: 'terrace_social', confidence: 'low', note: 'Represents the large opening toward the covered exterior space seen at 00:20-00:25.' },
+  // The full opening (x 0.45-4.45 at z=7.3) crosses both kitchen_s (x 0-3.1,
+  // owned by kitchen) and dining_s (x 3.1-4.9, owned by dining); a single
+  // record naming only kitchen/terrace_social was never applied to dining_s
+  // (findOpeningsForWall only cuts a wall for an opening that references
+  // that wall's owning room), leaving that portion solid. Split at the same
+  // x=3.1 wall boundary so each owning room gets its own cut, together
+  // reproducing the original 4.0 m width.
+  { id: 'exterior_opening_kitchen_terrace', kind: 'exterior_opening', position: v(1.775, 7.3), widthM: 2.65, sillM: 0, headM: 2.2, roomA: 'kitchen', roomB: 'terrace_social', confidence: 'low', note: 'Kitchen-side portion of the large opening toward the covered exterior space seen at 00:20-00:25.' },
+  { id: 'exterior_opening_dining_terrace', kind: 'exterior_opening', position: v(3.775, 7.3), widthM: 1.35, sillM: 0, headM: 2.2, roomA: 'dining', roomB: 'terrace_social', confidence: 'low', note: 'Dining-side portion of the large opening toward the covered exterior space seen at 00:20-00:25.' },
   { id: 'window_living_1', kind: 'window', position: v(0, 2.0), widthM: 1.2, sillM: 0.4, headM: 2.3, roomId: 'living', confidence: 'medium' },
   { id: 'window_living_2', kind: 'window', position: v(0, 3.4), widthM: 1.2, sillM: 0.4, headM: 2.3, roomId: 'living', confidence: 'medium' },
   { id: 'window_kitchen_1', kind: 'window', position: v(0, 5.6), widthM: 1.0, sillM: 1.0, headM: 2.1, roomId: 'kitchen', confidence: 'low' },

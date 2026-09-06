@@ -1,4 +1,5 @@
 import 'server-only';
+import { BlockList, isIP } from 'node:net';
 import type { GenerationInput, GenerationJob, GenerationStatus, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
 import { toAbsoluteUrl } from './publicAsset.server';
@@ -37,17 +38,23 @@ export function isTrustedHiggsfieldUrl(candidate: string): boolean {
 // Higgsfield's remote servers cannot fetch such a URL, so submitting one
 // would spend a real, billed job on a source image request that is
 // guaranteed to fail. Reject it before the paid call instead of after.
-const PRIVATE_HOSTNAME_PATTERNS = [
-  /^localhost$/i,
-  /\.localhost$/i,
-  /^0\.0\.0\.0$/,
-  /^127\./,
-  /^10\./,
-  /^192\.168\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^169\.254\./,
-  /^(\[)?::1?(\])?$/,
-];
+const PRIVATE_HOSTNAME_PATTERNS = [/^localhost$/i, /\.localhost$/i];
+
+// net.BlockList does correct CIDR arithmetic (unlike prefix-matching
+// regexes, which are easy to get subtly wrong at range boundaries — e.g.
+// 172.16.0.0/12 covers only 172.16-31.x, not all of 172.x) and, checked with
+// family 'ipv6', also matches an IPv4-mapped address (e.g. ::ffff:10.0.0.5)
+// against the ipv4 subnets below, closing that bypass for free.
+const PRIVATE_IP_BLOCKLIST = new BlockList();
+PRIVATE_IP_BLOCKLIST.addSubnet('0.0.0.0', 8, 'ipv4');
+PRIVATE_IP_BLOCKLIST.addSubnet('127.0.0.0', 8, 'ipv4');
+PRIVATE_IP_BLOCKLIST.addSubnet('10.0.0.0', 8, 'ipv4');
+PRIVATE_IP_BLOCKLIST.addSubnet('172.16.0.0', 12, 'ipv4');
+PRIVATE_IP_BLOCKLIST.addSubnet('192.168.0.0', 16, 'ipv4');
+PRIVATE_IP_BLOCKLIST.addSubnet('169.254.0.0', 16, 'ipv4');
+PRIVATE_IP_BLOCKLIST.addSubnet('::1', 128, 'ipv6');
+PRIVATE_IP_BLOCKLIST.addSubnet('fc00::', 7, 'ipv6'); // unique local (ULA)
+PRIVATE_IP_BLOCKLIST.addSubnet('fe80::', 10, 'ipv6'); // link-local
 
 export function isPubliclyReachableOrigin(candidate: string): boolean {
   let parsed: URL;
@@ -58,7 +65,14 @@ export function isPubliclyReachableOrigin(candidate: string): boolean {
   }
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
   const host = parsed.hostname.toLowerCase();
-  return !PRIVATE_HOSTNAME_PATTERNS.some((pattern) => pattern.test(host));
+  if (PRIVATE_HOSTNAME_PATTERNS.some((pattern) => pattern.test(host))) return false;
+  // URL.hostname keeps the brackets on an IPv6 literal (e.g. "[::1]"), but
+  // net.isIP/BlockList expect the bare address.
+  const bareHost = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+  const ipVersion = isIP(bareHost);
+  if (ipVersion === 4) return !PRIVATE_IP_BLOCKLIST.check(bareHost, 'ipv4');
+  if (ipVersion === 6) return !PRIVATE_IP_BLOCKLIST.check(bareHost, 'ipv6');
+  return true; // not an IP literal — a normal public hostname
 }
 
 function getCredentials(): string {

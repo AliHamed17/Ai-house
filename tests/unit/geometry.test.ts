@@ -53,6 +53,26 @@ describe('wall panel geometry', () => {
     expect(built.collisionSolidSpans).toEqual([{ t0: 0, t1: built.length }]);
   });
 
+  it('cuts the social-terrace opening into both kitchen_s and dining_s (regression)', () => {
+    // The terrace opening is 4 m wide and crosses the x=3.1 boundary between
+    // kitchen_s (owned by kitchen) and dining_s (owned by dining). A single
+    // opening record naming only kitchen/terrace_social was never applied to
+    // dining_s (findOpeningsForWall only cuts a wall for an opening that
+    // references that wall's *owning* room), leaving that portion solid
+    // despite dining listing terrace_social as connected.
+    const kitchen = getRoom('kitchen')!;
+    const kitchenWall = kitchen.walls.find((w) => w.id === 'kitchen_s')!;
+    const builtKitchen = buildWall(kitchenWall, kitchen, houseModel.openings);
+    expect(builtKitchen.voids).toHaveLength(1);
+    expect(builtKitchen.voids[0].openingId).toBe('exterior_opening_kitchen_terrace');
+
+    const dining = getRoom('dining')!;
+    const diningWall = dining.walls.find((w) => w.id === 'dining_s')!;
+    const builtDining = buildWall(diningWall, dining, houseModel.openings);
+    expect(builtDining.voids).toHaveLength(1);
+    expect(builtDining.voids[0].openingId).toBe('exterior_opening_dining_terrace');
+  });
+
   it('builds every wall in the house without throwing', () => {
     const built = buildAllWalls(houseModel.rooms, houseModel.openings);
     expect(built.length).toBeGreaterThan(20);

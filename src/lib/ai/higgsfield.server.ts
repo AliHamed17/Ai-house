@@ -31,6 +31,36 @@ export function isTrustedHiggsfieldUrl(candidate: string): boolean {
   return TRUSTED_HF_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
 }
 
+// input.originUrl comes from the incoming request's own origin (see
+// src/app/api/higgsfield/generate/route.ts), which in local dev or an
+// unconfigured preview deployment is a localhost/private-network address.
+// Higgsfield's remote servers cannot fetch such a URL, so submitting one
+// would spend a real, billed job on a source image request that is
+// guaranteed to fail. Reject it before the paid call instead of after.
+const PRIVATE_HOSTNAME_PATTERNS = [
+  /^localhost$/i,
+  /\.localhost$/i,
+  /^0\.0\.0\.0$/,
+  /^127\./,
+  /^10\./,
+  /^192\.168\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^169\.254\./,
+  /^(\[)?::1?(\])?$/,
+];
+
+export function isPubliclyReachableOrigin(candidate: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+  const host = parsed.hostname.toLowerCase();
+  return !PRIVATE_HOSTNAME_PATTERNS.some((pattern) => pattern.test(host));
+}
+
 function getCredentials(): string {
   const combined = process.env.HF_CREDENTIALS;
   if (combined) return combined;
@@ -93,6 +123,11 @@ export const higgsfieldProvider: MediaGenerationProvider = {
     config({ credentials });
 
     const imageUrl = toAbsoluteUrl(input.originUrl, input.sourceAssetPath);
+    if (!isPubliclyReachableOrigin(imageUrl)) {
+      throw new Error(
+        'The source image URL is not publicly reachable (a localhost or private-network origin), so Higgsfield cannot fetch it. Deploy behind a public URL before submitting a live Higgsfield job.',
+      );
+    }
     // The subscribe client does not accept an AbortSignal, so the timeout can
     // only reject here (it cannot cancel the in-flight submit) — hence submit()
     // is never auto-retried, so a timed-out request never becomes a second job.

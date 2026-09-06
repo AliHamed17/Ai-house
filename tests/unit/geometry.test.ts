@@ -78,11 +78,29 @@ describe('collision resolution', () => {
     expect(10.8 - resolved.x).toBeGreaterThanOrEqual(0.1 + 0.28 - 0.02);
   });
 
-  it('does not obstruct a door gap (open_threshold stays walkable)', () => {
+  it('cuts a walkable doorway gap into entry_hall boundary walls instead of leaving them fully open (regression)', () => {
+    // entry_hall's boundaries with living and hall_south each carry a
+    // specific-width open_threshold opening record, which implies a real
+    // partial wall with a doorway cut — not a fully open connection (compare
+    // e.g. the kitchen/dining boundary, which is genuinely open-plan and has
+    // no opening record at all). A prior version of this data omitted both
+    // wall segments entirely, so the openings had no wall to cut from and the
+    // whole boundary rendered/collided as fully open.
     const entry = getRoom('entry_hall')!;
-    // entry_hall omits its west wall entirely (open threshold to living), so
-    // there is no wall spec to collide with there.
-    expect(entry.walls.find((w) => w.id.includes('west'))).toBeUndefined();
+
+    const west = entry.walls.find((w) => w.id === 'entry_w')!;
+    const builtWest = buildWall(west, entry, houseModel.openings);
+    expect(builtWest.voids).toHaveLength(1);
+    expect(builtWest.voids[0].openingId).toBe('opening_entry_living');
+    expect(builtWest.doorSpans).toHaveLength(1);
+    expect(builtWest.collisionSolidSpans).toHaveLength(2); // solid on both sides of the doorway gap
+
+    const south = entry.walls.find((w) => w.id === 'entry_s')!;
+    const builtSouth = buildWall(south, entry, houseModel.openings);
+    expect(builtSouth.voids).toHaveLength(1);
+    expect(builtSouth.voids[0].openingId).toBe('opening_entry_hallsouth');
+    expect(builtSouth.doorSpans).toHaveLength(1);
+    expect(builtSouth.collisionSolidSpans).toHaveLength(2);
   });
 });
 

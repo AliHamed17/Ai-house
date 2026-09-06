@@ -115,6 +115,12 @@ const rooms: RoomDef[] = [
     walls: [
       wall('entry_n', v(4.9, 0), v(7.3, 0), true),
       wall('entry_e', v(7.3, 0), v(7.3, 3.0), false),
+      // Boundary with hall_south, carrying the opening_entry_hallsouth
+      // threshold below (mamad's own mamad_s wall covers the rest of that
+      // z=3.0 line for x 7.3-10.8).
+      wall('entry_s', v(7.3, 3.0), v(4.9, 3.0), false),
+      // Boundary with living, carrying the doorway opening_entry_living below.
+      wall('entry_w', v(4.9, 3.0), v(4.9, 0), false),
     ],
     ceilingHeightM: CEILING_HEIGHT_M,
     floorMaterialId: 'stone-entry',

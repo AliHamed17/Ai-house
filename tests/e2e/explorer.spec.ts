@@ -75,6 +75,22 @@ test.describe('3D explorer', () => {
     await expect(page.getByRole('img', { name: 'Minimap' })).toContainText('Kitchen');
   });
 
+  test('leaving Dollhouse via Walk without picking a room keeps the camera inside the house (regression)', async ({ page }) => {
+    await enter3D(page);
+    // Entering the explorer spawns in the Exterior Approach; confirm that
+    // baseline before switching away.
+    await expect(page.getByRole('img', { name: 'Minimap' })).toContainText('Exterior Approach');
+
+    await page.getByRole('button', { name: 'Dollhouse', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Dollhouse', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    // Leaving Dollhouse this way (no room picked, no teleport) must restore
+    // the last first-person position rather than stranding the camera at the
+    // elevated orbit camera's exterior vantage point.
+    await page.getByRole('button', { name: 'Walk', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Walk', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('img', { name: 'Minimap' })).toContainText('Exterior Approach');
+  });
+
   test('exiting the explorer restores normal page scrolling', async ({ page }) => {
     await enter3D(page);
 

@@ -41,6 +41,12 @@ export function AIStudioPanel() {
   const [editInstruction, setEditInstruction] = useState('');
   const [simulate, setSimulate] = useState<'success' | 'failure' | 'moderated'>('success');
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
+  // Only ever set true by a genuine (non-fallback) probe response — see the
+  // effect below. Deciding "must approve a real image first" on this instead
+  // of on liveStatus means a deployment with no credentials at all (this
+  // probe legitimately failing twice, then falling back) can never
+  // permanently disable its own demo cinematic-clip path.
+  const [confirmedLiveHiggsfield, setConfirmedLiveHiggsfield] = useState(false);
   const [confirmingLiveRun, setConfirmingLiveRun] = useState(false);
   const [job, setJob] = useState<GenerationJob | null>(null);
   const [approved, setApproved] = useState(false);
@@ -82,8 +88,10 @@ export function AIStudioPanel() {
         .then((res) => (res.ok ? (res.json() as Promise<LiveStatus>) : null))
         .then((data) => {
           if (cancelled) return;
-          if (data) setLiveStatus(data);
-          else scheduleRetryOrFallback();
+          if (data) {
+            setLiveStatus(data);
+            if (data.higgsfield) setConfirmedLiveHiggsfield(true);
+          } else scheduleRetryOrFallback();
         })
         .catch(() => {
           if (!cancelled) scheduleRetryOrFallback();
@@ -102,7 +110,9 @@ export function AIStudioPanel() {
   const approvedForCurrentRoom = approvedSource !== null && approvedSource.roomId === roomId;
   // A live (billed) Higgsfield clip must animate a real approved concept — not
   // the placeholder still — so it stays disabled until an image is approved.
-  const liveVideoNeedsApproval = Boolean(isLiveForOutput) && outputType === 'video' && !approvedForCurrentRoom;
+  // Gated on confirmedLiveHiggsfield (never on the fallback-assumed
+  // liveStatus) so a genuinely-demo deployment can't get stuck disabled.
+  const liveVideoNeedsApproval = confirmedLiveHiggsfield && outputType === 'video' && !approvedForCurrentRoom;
 
   function handleRoomChange(nextRoomId: RoomId) {
     setRoomId(nextRoomId);

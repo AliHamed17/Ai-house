@@ -79,10 +79,17 @@ export function FirstPersonControls() {
   // run would clobber the room's intended spawn yaw with the camera's
   // untouched identity rotation. Also skipped whenever a teleport has landed
   // since this effect last ran: the teleport effect above already set the
-  // correct destination position/yaw for that room, and reading the
-  // departing orbit/floor-plan camera's leftover quaternion here would
-  // overwrite that authored facing with wherever the camera used to be
-  // pointed (often steeply downward, from the dollhouse overview).
+  // correct destination position/yaw for that room, and restoring a saved
+  // pose here would overwrite that authored facing/position.
+  //
+  // The no-teleport branch restores from the store's playerPose (the last
+  // position/yaw recorded while this WAS the active first-person camera —
+  // see the useFrame below) rather than reading the live camera transform.
+  // camera is a single shared object across modes, so by the time this
+  // effect runs after e.g. clicking Walk from Dollhouse with no teleport in
+  // between, camera.position/quaternion reflect wherever the orbit camera
+  // was left (often far outside the house), not where the visitor was
+  // actually standing before they left Walk mode.
   const hasHandledModeRef = useRef(false);
   const teleportTokenAtLastHandoffRef = useRef(teleportToken);
   useEffect(() => {
@@ -95,10 +102,10 @@ export function FirstPersonControls() {
     const teleportedSinceLastHandoff = teleportToken !== teleportTokenAtLastHandoffRef.current;
     teleportTokenAtLastHandoffRef.current = teleportToken;
     if (teleportedSinceLastHandoff) return;
-    const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
-    pitchRef.current = THREE.MathUtils.clamp(euler.x, -PITCH_LIMIT_RAD, PITCH_LIMIT_RAD);
-    yawRef.current = euler.y;
-    const resolved = resolveCollision({ x: camera.position.x, z: camera.position.z }, PLAYER_RADIUS_M, builtWalls);
+    const pose = useViewerStore.getState().playerPose;
+    pitchRef.current = 0;
+    yawRef.current = pose.yaw;
+    const resolved = resolveCollision({ x: pose.x, z: pose.z }, PLAYER_RADIUS_M, builtWalls);
     camera.position.set(resolved.x, EYE_HEIGHT_M, resolved.z);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, teleportToken]);

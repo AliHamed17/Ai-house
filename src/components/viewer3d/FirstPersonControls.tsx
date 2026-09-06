@@ -33,7 +33,12 @@ export function FirstPersonControls() {
   const yawRef = useRef(0);
   const pitchRef = useRef(0);
   const pressedKeys = useRef<Set<string>>(new Set());
-  const draggingRef = useRef(false);
+  // Which pointer (if any) is the one currently look-dragging. On a touch
+  // device, the mobile joystick is a separate DOM element elsewhere on
+  // screen, but its pointermove/up events still bubble to the window
+  // listeners below — an id (rather than a boolean) is what lets those be
+  // told apart from the finger actually dragging the look.
+  const draggingPointerIdRef = useRef<number | null>(null);
   const lastPointerRef = useRef({ x: 0, y: 0 });
   const lastStoreUpdateRef = useRef(0);
   const initializedRef = useRef(false);
@@ -131,7 +136,12 @@ export function FirstPersonControls() {
 
     function onPointerDown(e: PointerEvent) {
       if (useViewerStore.getState().mode !== 'first-person') return;
-      draggingRef.current = true;
+      // First pointer wins: on the two-finger touch interaction (joystick +
+      // look), the look-drag is whichever finger touched the canvas first —
+      // a second finger landing on the canvas while it's already dragging
+      // must not steal or reset it.
+      if (draggingPointerIdRef.current !== null) return;
+      draggingPointerIdRef.current = e.pointerId;
       lastPointerRef.current = { x: e.clientX, y: e.clientY };
       if (e.pointerType === 'mouse') {
         try {
@@ -148,18 +158,23 @@ export function FirstPersonControls() {
       if (document.pointerLockElement === canvas) {
         dx = e.movementX;
         dy = e.movementY;
-      } else if (draggingRef.current) {
+      } else if (draggingPointerIdRef.current === e.pointerId) {
         dx = e.clientX - lastPointerRef.current.x;
         dy = e.clientY - lastPointerRef.current.y;
         lastPointerRef.current = { x: e.clientX, y: e.clientY };
       } else {
+        // Not the pointer that started the drag (e.g. the mobile joystick's
+        // finger, whose move events also bubble to this window listener) —
+        // never treat its unrelated coordinates as a look delta.
         return;
       }
       yawRef.current -= dx * MOUSE_LOOK_SENSITIVITY;
       pitchRef.current = THREE.MathUtils.clamp(pitchRef.current - dy * MOUSE_LOOK_SENSITIVITY, -PITCH_LIMIT_RAD, PITCH_LIMIT_RAD);
     }
-    function onPointerUp() {
-      draggingRef.current = false;
+    function onPointerUp(e: PointerEvent) {
+      if (draggingPointerIdRef.current === e.pointerId) {
+        draggingPointerIdRef.current = null;
+      }
     }
     function onPointerLockChange() {
       useViewerStore.getState().setPointerLocked(document.pointerLockElement === canvas);
@@ -168,11 +183,13 @@ export function FirstPersonControls() {
     canvas.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
     document.addEventListener('pointerlockchange', onPointerLockChange);
     return () => {
       canvas.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
       document.removeEventListener('pointerlockchange', onPointerLockChange);
     };
   }, [gl]);

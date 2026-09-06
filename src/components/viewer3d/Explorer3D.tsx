@@ -86,7 +86,16 @@ export function Explorer3D({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 bg-charcoal" role="dialog" aria-modal aria-label="Interactive 3D house explorer">
       {webglOk && (
         <CanvasErrorBoundary onError={() => setWebglOk(false)}>
-          <Canvas shadows={{ type: PCFShadowMap }} dpr={[1, 1.6]} gl={{ antialias: true, powerPreference: 'high-performance' }}>
+          <Canvas
+            shadows={{ type: PCFShadowMap }}
+            dpr={[1, 1.6]}
+            gl={{ antialias: true, powerPreference: 'high-performance' }}
+            // First-person look depends on a continuous pointer-move stream
+            // (see FirstPersonControls); without this, a touch browser can
+            // claim a one-finger drag for native scroll/zoom and cut that
+            // stream with a pointercancel, silently breaking mobile look.
+            style={{ touchAction: 'none' }}
+          >
             <Suspense fallback={null}>
               <Scene />
             </Suspense>

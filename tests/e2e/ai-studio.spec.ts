@@ -35,4 +35,30 @@ test.describe('AI Design Studio (demo mode)', () => {
     await page.locator('select').first().selectOption('living');
     await expect(page.getByRole('button', { name: /Cinematic clip/i })).toBeEnabled();
   });
+
+  test('video generation stays gated (never silently unblocked) while the provider-mode probe cannot confirm, and Check again recovers it (regression)', async ({ page }) => {
+    // Force /api/generation/mode to keep failing so the probe can never
+    // genuinely confirm the deployment's mode, exercising the safe-default
+    // fallback path — the video-approval gate must default to *requiring*
+    // approval while unconfirmed, never silently relax it — and its manual
+    // "Check again" recovery action.
+    let blockProbe = true;
+    await page.route('**/api/generation/mode', (route) => (blockProbe ? route.abort() : route.continue()));
+
+    await page.goto('/#ai-studio');
+    await page.locator('select').first().selectOption('living');
+    await page.getByRole('button', { name: /Cinematic clip/i }).click();
+
+    await expect(page.getByText(/Still confirming whether cinematic clips are live-billed/i)).toBeVisible({ timeout: 15_000 });
+    // The button's own label reads "Checking provider status..." until the
+    // automatic retries exhaust (a few seconds, by design — see the probe
+    // effect), then switches to "Generate cinematic clip" while staying
+    // disabled throughout; allow time for that transition.
+    await expect(page.getByRole('button', { name: /Generate cinematic clip/i })).toBeDisabled({ timeout: 10_000 });
+
+    blockProbe = false;
+    await page.getByRole('button', { name: 'Check again' }).click();
+    await expect(page.getByText(/Still confirming whether cinematic clips are live-billed/i)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Generate cinematic clip/i })).toBeEnabled();
+  });
 });

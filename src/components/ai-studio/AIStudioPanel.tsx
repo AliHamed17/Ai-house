@@ -41,12 +41,16 @@ export function AIStudioPanel() {
   const [editInstruction, setEditInstruction] = useState('');
   const [simulate, setSimulate] = useState<'success' | 'failure' | 'moderated'>('success');
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
-  // Only ever set true by a genuine (non-fallback) probe response — see the
-  // effect below. Deciding "must approve a real image first" on this instead
-  // of on liveStatus means a deployment with no credentials at all (this
-  // probe legitimately failing twice, then falling back) can never
-  // permanently disable its own demo cinematic-clip path.
-  const [confirmedLiveHiggsfield, setConfirmedLiveHiggsfield] = useState(false);
+  // True only once a genuine (non-fallback) /api/generation/mode response has
+  // been received — see the probe effect below. liveVideoNeedsApproval is
+  // gated on this rather than on liveStatus.higgsfield directly, so neither
+  // failure mode is possible: a fallback "assume live" guess (kept for the
+  // cost-confirmation banner, which must fail safe) can never relax the
+  // approval requirement for an actually-live deployment, and it can never
+  // permanently lock out a genuinely-demo deployment's cinematic-clip path
+  // either, since the gate only tightens (never loosens) while unconfirmed.
+  const [modeConfirmed, setModeConfirmed] = useState(false);
+  const [modeProbeRetryNonce, setModeProbeRetryNonce] = useState(0);
   const [confirmingLiveRun, setConfirmingLiveRun] = useState(false);
   const [job, setJob] = useState<GenerationJob | null>(null);
   const [approved, setApproved] = useState(false);
@@ -63,23 +67,34 @@ export function AIStudioPanel() {
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
   }, []);
 
-  // One-time sync of which providers are live (billed) vs. demo, so the UI can
-  // require confirmation before a paid run instead of only learning the mode
-  // after the first submission already fired it. A transient failure retries
-  // once before falling back to "assume live" — never leave the Generate
-  // button stuck on "Checking provider status..." forever, and never quietly
-  // assume demo, which could let a live submission through unconfirmed.
+  // Sync which providers are live (billed) vs. demo, so the UI can require
+  // confirmation before a paid run instead of only learning the mode after
+  // the first submission already fired it. /api/generation/mode is a
+  // same-origin route with no external I/O, so a real deployment (live or
+  // demo) almost always resolves it well within this retry window; it
+  // retries persistently on failure rather than giving up after one attempt,
+  // and only falls back to a display-only "assume live" guess once that
+  // window is exhausted. modeProbeRetryNonce re-arms this effect for one
+  // more attempt — bumped by the manual "Check again" action rendered next
+  // to the video-approval notice below — so an unresolved provider mode is
+  // never a permanent dead end even in that fallback case.
   useEffect(() => {
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
+    const MAX_AUTO_RETRIES = 4;
+    const RETRY_DELAY_MS = 1500;
 
     const scheduleRetryOrFallback = () => {
       attempt += 1;
-      if (attempt <= 1) {
-        timeoutId = setTimeout(probe, 1500);
+      if (attempt <= MAX_AUTO_RETRIES) {
+        timeoutId = setTimeout(probe, RETRY_DELAY_MS);
         return;
       }
+      // Display/cost-confirmation purposes only (never silently assume demo,
+      // which could let a live submission through unconfirmed). modeConfirmed
+      // stays false, so liveVideoNeedsApproval keeps requiring an approved
+      // image until a genuine response arrives.
       setLiveStatus({ nanoBanana: true, higgsfield: true });
     };
 
@@ -90,7 +105,7 @@ export function AIStudioPanel() {
           if (cancelled) return;
           if (data) {
             setLiveStatus(data);
-            if (data.higgsfield) setConfirmedLiveHiggsfield(true);
+            setModeConfirmed(true);
           } else scheduleRetryOrFallback();
         })
         .catch(() => {
@@ -103,16 +118,17 @@ export function AIStudioPanel() {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, []);
+  }, [modeProbeRetryNonce]);
 
   const videoAvailableForRoom = VIDEO_CAPABLE_ROOMS.has(roomId);
   const isLiveForOutput = outputType === 'image' ? liveStatus?.nanoBanana : liveStatus?.higgsfield;
   const approvedForCurrentRoom = approvedSource !== null && approvedSource.roomId === roomId;
-  // A live (billed) Higgsfield clip must animate a real approved concept — not
-  // the placeholder still — so it stays disabled until an image is approved.
-  // Gated on confirmedLiveHiggsfield (never on the fallback-assumed
-  // liveStatus) so a genuinely-demo deployment can't get stuck disabled.
-  const liveVideoNeedsApproval = confirmedLiveHiggsfield && outputType === 'video' && !approvedForCurrentRoom;
+  // A live (billed) Higgsfield clip must animate a real approved concept, not
+  // the placeholder still. Default to requiring approval whenever the mode
+  // isn't genuinely confirmed yet — never relax this on an unconfirmed
+  // fallback guess — and only relax it once a genuine response confirms
+  // Higgsfield is actually in demo mode for this deployment.
+  const liveVideoNeedsApproval = outputType === 'video' && !approvedForCurrentRoom && (!modeConfirmed || Boolean(liveStatus?.higgsfield));
 
   function handleRoomChange(nextRoomId: RoomId) {
     setRoomId(nextRoomId);
@@ -368,10 +384,18 @@ export function AIStudioPanel() {
               : `Generate ${outputType === 'image' ? 'concept image' : 'cinematic clip'}`}
         </button>
       )}
-      {liveVideoNeedsApproval && (
+      {liveVideoNeedsApproval && modeConfirmed && (
         <p className="mt-2 text-xs font-semibold text-bronze">
           Generate a concept image for this room and Approve it first — a live cinematic clip animates the approved
           still, not a placeholder.
+        </p>
+      )}
+      {liveVideoNeedsApproval && !modeConfirmed && (
+        <p className="mt-2 text-xs font-semibold text-bronze">
+          Still confirming whether cinematic clips are live-billed on this deployment before allowing generation.{' '}
+          <button type="button" onClick={() => setModeProbeRetryNonce((n) => n + 1)} className="underline hover:no-underline">
+            Check again
+          </button>
         </p>
       )}
       <p className="mt-2 text-xs text-charcoal/50">

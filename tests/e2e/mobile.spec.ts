@@ -39,4 +39,23 @@ test.describe('Mobile experience', () => {
     await expect(page.getByRole('dialog', { name: /Interactive 3D house explorer/i })).toBeVisible();
     await expect(page.getByLabel(/^Move/i)).toBeVisible();
   });
+
+  test('the 3D canvas disables native touch gestures so drag-to-look is never hijacked (regression)', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Enter 3D' }).first().tap();
+    await expect(page.getByRole('dialog', { name: /Interactive 3D house explorer/i })).toBeVisible();
+    // The browser's touch-gesture algorithm uses the intersection of a
+    // target's own touch-action and all its ancestors', so react-three-fiber's
+    // exact wrapper nesting around <canvas> is an implementation detail —
+    // walk up from the canvas for whichever ancestor actually carries it.
+    const touchAction = await page.evaluate(() => {
+      let el = document.querySelector('div[role="dialog"] canvas');
+      while (el) {
+        if (getComputedStyle(el).touchAction === 'none') return 'none';
+        el = el.parentElement;
+      }
+      return null;
+    });
+    expect(touchAction).toBe('none');
+  });
 });

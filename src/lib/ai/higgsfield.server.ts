@@ -14,6 +14,18 @@ import { retryOnce, withTimeout } from './resilience.server';
 const HF_ENDPOINT = process.env.HF_IMAGE2VIDEO_ENDPOINT || '/v1/image2video/dop';
 const HF_MODEL = process.env.HF_MODEL || 'dop-turbo';
 
+// The subscribe client cannot be cancelled, so a submission that times out
+// leaves Higgsfield's servers possibly still processing (and billing) a job
+// this app never got a request id for — the route's caller must not treat
+// that the same as a definite failure safe to retry immediately. Naming the
+// exact timeout message here (rather than duplicating the literal string in
+// the route) is what lets isSubmitTimeout() below match it reliably.
+const SUBMIT_TIMEOUT_MESSAGE = 'Higgsfield submission timed out after 30s';
+
+export function isSubmitTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === SUBMIT_TIMEOUT_MESSAGE;
+}
+
 // Job ids are unsigned, so an attacker could forge one carrying an
 // arbitrary higgsfieldStatusUrl. status() attaches the server's Higgsfield
 // credentials to that request, so the URL MUST be pinned to a Higgsfield
@@ -184,7 +196,7 @@ export const higgsfieldProvider: MediaGenerationProvider = {
           withPolling: false,
         }),
       30_000,
-      'Higgsfield submission timed out after 30s',
+      SUBMIT_TIMEOUT_MESSAGE,
     )) as unknown as HiggsfieldSubscribeResult;
 
     const job = jobSet.jobs?.[0];

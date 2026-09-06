@@ -75,4 +75,23 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('video')).toHaveCount(0);
     await expect(page.getByText(/Demo mode simulates the cinematic move/i)).toBeVisible();
   });
+
+  test('a status-polling outage keeps the job recoverable instead of losing it (regression)', async ({ page }) => {
+    // Every status poll fails from the start, exhausting the retry budget
+    // (see startPolling) — the job must stay recoverable rather than being
+    // silently dropped, and Generate must stay disabled (never risking a
+    // duplicate submission) until the visitor explicitly resumes it.
+    let blockStatus = true;
+    await page.route('**/api/generation/status/**', (route) => (blockStatus ? route.abort() : route.continue()));
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+
+    await expect(page.getByText(/Lost connection while checking on a generation/i)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
+
+    blockStatus = false;
+    await page.getByRole('button', { name: 'Resume checking status' }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+  });
 });

@@ -3,6 +3,7 @@ import { resolveProviderForSubmit } from '@/lib/ai/registry.server';
 import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.server';
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
 import { resultIdFromPath } from '@/lib/ai/resultStore.server';
+import { isSubmitTimeout } from '@/lib/ai/higgsfield.server';
 import { buildHiggsfieldPrompt } from '@/data/roomPrompts';
 
 export const dynamic = 'force-dynamic';
@@ -62,6 +63,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ jobId, demoMode, provider: demoMode ? 'mock' : 'higgsfield' });
   } catch (error) {
     console.error('[higgsfield/generate] submission failed:', error);
+    // The Higgsfield SDK call cannot be cancelled once in flight, so a
+    // timeout here does NOT mean the submission definitely failed — it may
+    // still be accepted and running (and billed) server-side with no
+    // request id ever reaching us to check on it. Telling the caller this
+    // was a definite failure would invite an immediate retry that risks a
+    // duplicate charge; a distinct, honest response is the most this
+    // architecture can do without provider-side idempotency support.
+    if (isSubmitTimeout(error)) {
+      return NextResponse.json(
+        {
+          error:
+            'The request to Higgsfield timed out. It may have already been accepted and could still be running (and billed) — please wait a minute and check before submitting again, to avoid a possible duplicate charge.',
+        },
+        { status: 504 },
+      );
+    }
     return NextResponse.json({ error: 'Generation could not be started. Please try again.' }, { status: 502 });
   }
 }

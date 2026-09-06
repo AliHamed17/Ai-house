@@ -1,5 +1,5 @@
 import 'server-only';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Modality } from '@google/genai';
 import type { GenerationInput, GenerationJob, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
 import { readPublicFileAsBase64 } from './publicAsset.server';
@@ -73,7 +73,21 @@ export const nanoBananaProvider: MediaGenerationProvider = {
     }
 
     const response = await withTimeout(
-      (signal) => ai.models.generateContent({ model: NANO_BANANA_MODEL, contents: parts, config: { abortSignal: signal } }),
+      (signal) =>
+        ai.models.generateContent({
+          model: NANO_BANANA_MODEL,
+          contents: parts,
+          config: {
+            abortSignal: signal,
+            // Without an explicit IMAGE modality, Gemini can return a
+            // text-only response — the paid call still completes and is
+            // billed, but the inlineData check below then fails as if
+            // generation itself had failed. Mirrors the offline generator
+            // (scripts/generate-concepts.py) so both paths behave the same.
+            responseModalities: [Modality.IMAGE],
+            imageConfig: { aspectRatio: '4:3', imageSize: '2K' },
+          },
+        }),
       45_000,
       'Nano Banana generation timed out after 45s',
     );

@@ -60,6 +60,12 @@ export function AIStudioPanel() {
   const [approvedSource, setApprovedSource] = useState<{ path: string; roomId: RoomId } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A job whose status-polling gave up after repeated transient failures
+  // (see startPolling below) rather than reaching a terminal state. The
+  // provider-side job may still be running (and already billed), so its id
+  // is kept here — not just dropped — until the visitor resumes checking on
+  // it or deliberately starts a fresh generation.
+  const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Bumped on every new generation; each in-flight fetch captures the value and
   // bails if a newer run has superseded it, so a slow/out-of-order status
@@ -155,6 +161,9 @@ export function AIStudioPanel() {
   function handleGenerateClick() {
     if (liveStatus === null) return;
     if (liveVideoNeedsApproval) return;
+    // Never start a new (possibly billed) job while a previous one's fate is
+    // still unknown — resume checking on it instead of risking a duplicate.
+    if (recoverableJobId) return;
     if (isLiveForOutput && !confirmingLiveRun) {
       setConfirmingLiveRun(true);
       return;
@@ -163,13 +172,80 @@ export function AIStudioPanel() {
     void handleGenerate();
   }
 
+  // Self-scheduling poll: the next status request is only queued after the
+  // current one resolves, so a slow live poll never spawns overlapping
+  // requests, and the token check drops any stale/out-of-order response. A
+  // live job keeps running provider-side, so a transient status error (a
+  // brief 502 or dropped connection) is retried a few times with backoff
+  // rather than abandoning a job that may already be billed — and if every
+  // retry is exhausted, the job id is kept (recoverableJobId) rather than
+  // lost, so "resume checking" can pick the same job back up instead of the
+  // only remaining option being to start a new, possibly duplicate, job.
+  // Shared between a fresh submission (handleGenerate) and resuming an
+  // unresolved one (handleResumeStatusCheck) so both get identical
+  // retry/backoff behavior from one place.
+  function startPolling(jobId: string, token: number) {
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    const MAX_TRANSIENT_FAILURES = 5;
+    let transientFailures = 0;
+    const retryOrFail = (fallbackMessage: string, serverMessage?: string) => {
+      transientFailures += 1;
+      if (transientFailures > MAX_TRANSIENT_FAILURES) {
+        setError(serverMessage ?? fallbackMessage);
+        setSubmitting(false);
+        setRecoverableJobId(jobId);
+        return;
+      }
+      pollTimerRef.current = setTimeout(poll, 1500);
+    };
+    const poll = async () => {
+      if (token !== pollTokenRef.current) return;
+      try {
+        const statusRes = await fetch(`/api/generation/status/${jobId}`);
+        const statusData = (await statusRes.json().catch(() => ({}))) as GenerationJob & { error?: string };
+        if (token !== pollTokenRef.current) return;
+        if (!statusRes.ok) {
+          retryOrFail('Could not fetch generation status.', statusData.error);
+          return;
+        }
+        transientFailures = 0;
+        setJob(statusData);
+        if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
+          setSubmitting(false);
+          setRecoverableJobId(null);
+          return;
+        }
+        pollTimerRef.current = setTimeout(poll, 1000);
+      } catch {
+        if (token !== pollTokenRef.current) return;
+        retryOrFail('Lost connection while checking generation status.');
+      }
+    };
+    void poll();
+  }
+
+  function handleResumeStatusCheck() {
+    if (!recoverableJobId) return;
+    const jobId = recoverableJobId;
+    const token = ++pollTokenRef.current;
+    setSubmitting(true);
+    setError(null);
+    // Cleared eagerly; startPolling re-sets it if this attempt also
+    // exhausts its retries, so the banner never shows a stale/wrong state
+    // while a fresh attempt is in flight.
+    setRecoverableJobId(null);
+    startPolling(jobId, token);
+  }
+
   async function handleGenerate() {
     const token = ++pollTokenRef.current;
-    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     setSubmitting(true);
     setError(null);
     setJob(null);
     setApproved(false);
+    // A deliberate new submission is the one case where abandoning a prior
+    // unresolved job is the visitor's own informed choice, not silent loss.
+    setRecoverableJobId(null);
 
     const endpoint = outputType === 'image' ? '/api/nano-banana/generate' : '/api/higgsfield/generate';
     // Once a concept for THIS room has been approved, both a refinement and a
@@ -206,46 +282,7 @@ export function AIStudioPanel() {
       return;
     }
 
-    // Self-scheduling poll: the next status request is only queued after the
-    // current one resolves, so a slow live poll never spawns overlapping
-    // requests, and the token check drops any stale/out-of-order response.
-    // A live job keeps running provider-side, so a transient status error
-    // (a brief 502 or dropped connection) is retried a few times with backoff
-    // rather than abandoning a job that may already be billed.
-    const MAX_TRANSIENT_FAILURES = 5;
-    let transientFailures = 0;
-    const retryOrFail = (fallbackMessage: string, serverMessage?: string) => {
-      transientFailures += 1;
-      if (transientFailures > MAX_TRANSIENT_FAILURES) {
-        setError(serverMessage ?? fallbackMessage);
-        setSubmitting(false);
-        return;
-      }
-      pollTimerRef.current = setTimeout(poll, 1500);
-    };
-    const poll = async () => {
-      if (token !== pollTokenRef.current) return;
-      try {
-        const statusRes = await fetch(`/api/generation/status/${jobId}`);
-        const statusData = (await statusRes.json().catch(() => ({}))) as GenerationJob & { error?: string };
-        if (token !== pollTokenRef.current) return;
-        if (!statusRes.ok) {
-          retryOrFail('Could not fetch generation status.', statusData.error);
-          return;
-        }
-        transientFailures = 0;
-        setJob(statusData);
-        if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
-          setSubmitting(false);
-          return;
-        }
-        pollTimerRef.current = setTimeout(poll, 1000);
-      } catch {
-        if (token !== pollTokenRef.current) return;
-        retryOrFail('Lost connection while checking generation status.');
-      }
-    };
-    void poll();
+    startPolling(jobId, token);
   }
 
   const activeRoom = houseModel.rooms.find((r) => r.id === roomId)!;
@@ -377,7 +414,7 @@ export function AIStudioPanel() {
         <button
           type="button"
           onClick={handleGenerateClick}
-          disabled={submitting || liveStatus === null || liveVideoNeedsApproval}
+          disabled={submitting || liveStatus === null || liveVideoNeedsApproval || recoverableJobId !== null}
           className="mt-5 w-full rounded-full bg-bronze px-4 py-3 text-sm font-semibold text-ivory shadow disabled:opacity-60 md:w-auto"
         >
           {liveStatus === null
@@ -386,6 +423,21 @@ export function AIStudioPanel() {
               ? 'Working…'
               : `Generate ${outputType === 'image' ? 'concept image' : 'cinematic clip'}`}
         </button>
+      )}
+      {recoverableJobId && (
+        <div className="mt-4 rounded-xl border border-bronze/40 bg-bronze/10 px-4 py-3">
+          <p className="text-sm font-semibold text-charcoal">
+            Lost connection while checking on a generation that may still be running (and already billed)
+            provider-side. Starting a new one risks a duplicate charge.
+          </p>
+          <button
+            type="button"
+            onClick={handleResumeStatusCheck}
+            className="mt-2 rounded-full bg-bronze px-4 py-2 text-xs font-semibold text-ivory shadow"
+          >
+            Resume checking status
+          </button>
+        </div>
       )}
       {liveVideoNeedsApproval && modeConfirmed && (
         <p className="mt-2 text-xs font-semibold text-bronze">

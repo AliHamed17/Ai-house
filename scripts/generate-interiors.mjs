@@ -7,12 +7,12 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { GoogleGenAI } from '@google/genai';
 
-const USAGE = 'Usage: node scripts/generate-interiors.mjs [roomId...] [--dry]';
+const USAGE = 'Usage: node scripts/generate-interiors.mjs [--variant=<id>] [roomId...] [--dry] [--force]';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, '..');
 const FRAMES = path.join(REPO, 'public', 'evidence', 'frames');
-const OUT_DIR = path.join(REPO, 'public', 'generated', 'interiors');
+const OUT_ROOT = path.join(REPO, 'public', 'generated', 'interiors');
 const MANIFEST = path.join(REPO, 'src', 'data', 'interiors.ts');
 
 const MODEL = process.env.NANO_BANANA_MODEL || 'gemini-3-pro-image';
@@ -30,13 +30,31 @@ function loadKey() {
   throw new Error('No GEMINI_API_KEY / GOOGLE_API_KEY found in env or .env.local');
 }
 
-const HOUSE_STYLE = [
-  'Warm modern luxury, in the language of high-end architectural visualization:',
-  'warm ivory plaster, natural rift-cut oak, pale honed limestone and travertine,',
-  'taupe and oatmeal textiles, dark-bronze metal details, deep matte finishes.',
-  'Layered 2700-3000K lighting: concealed cove light, discreet downlights, one sculptural fixture.',
-  'Late-afternoon daylight raking in through the real windows, soft contact shadows, gentle bloom.',
-].join(' ');
+const VARIANTS = [
+  {
+    id: 'warm-oak',
+    label: 'Warm Oak & Limestone',
+    palette:
+      'Warm ivory lime-plaster walls, natural rift-cut oak joinery, pale honed limestone and travertine floors, '
+      + 'oatmeal and sand textiles, dark-bronze metal. Layered 2700K light, late-afternoon golden sun raking in.',
+  },
+  {
+    id: 'cool-stone',
+    label: 'Cool Stone & Champagne',
+    palette:
+      'Cool pale quartzite-grey stone floors with soft veining, smoked greyed-oak joinery, chalk off-white walls, '
+      + 'pale grey and stone-coloured textiles, champagne and brushed-nickel metal. Crisp bright north daylight, '
+      + 'cooler 3000K fill, cleaner and more gallery-like.',
+  },
+  {
+    id: 'sand-linen',
+    label: 'Sand & Linen',
+    palette:
+      'Sand and clay tones throughout, deep taupe and mushroom plaster walls, warm travertine floors, '
+      + 'heavy washed linen and boucle in ecru and terracotta, aged unlacquered brass, one ochre accent. '
+      + 'Soft diffused warm light, cocooning and textile-led, deeper contrast in the shadows.',
+  },
+];
 
 const CAMERA = [
   'Shot on a full-frame camera with a 24mm tilt-shift lens, vertical lines kept perfectly vertical,',
@@ -54,81 +72,79 @@ const ROOMS = [
     id: 'living',
     title: 'Living Room',
     brief:
-      'A low curved sand-beige modular sofa facing the glazed west wall, two sculptural lounge chairs in cognac leather, '
-      + 'a deep-pile oatmeal wool rug, nested travertine and oak coffee tables, and one calm textured-plaster media wall '
-      + 'with concealed oak storage. Full-height linen curtains stacked clear of the glazing. Keep the round concrete '
-      + 'columns exposed and rendered smooth as a design feature.',
+      'A low curved modular sofa facing the glazed west wall, two sculptural lounge chairs, a deep-pile wool rug, '
+      + 'nested stone and timber coffee tables, and one calm textured-plaster media wall with concealed storage. '
+      + 'Full-height curtains stacked clear of the glazing. Keep the round concrete columns exposed and rendered '
+      + 'smooth as a design feature.',
   },
   {
     id: 'kitchen',
     title: 'Kitchen',
     brief:
-      'Full-height rift oak and matte-taupe cabinetry along the solid wall, fully integrated appliances, a pale quartzite '
-      + 'worktop with a matching slab backsplash and a mitred edge, an undermount sink at the window, '
-      + 'discreet under-cabinet task lighting, and a single long oak-topped island with a waterfall end. '
-      + 'Open and continuous with the living and dining space — no dividing wall.',
+      'Full-height cabinetry along the solid wall, fully integrated appliances, a stone worktop with a matching slab '
+      + 'backsplash and a mitred edge, an undermount sink at the window, discreet under-cabinet task lighting, and a '
+      + 'single long island with a waterfall end. Open and continuous with the living and dining space — no dividing wall.',
   },
   {
     id: 'dining',
     title: 'Dining Bay',
     brief:
-      'A six-seat oval table with a honed travertine top on a sculptural oak base, low-backed chairs in oatmeal boucle, '
-      + 'and one large sculptural linen-and-bronze pendant centred over the table. Reads as one continuous open volume '
-      + 'with the kitchen and living room.',
+      'A six-seat oval table with a honed stone top on a sculptural base, low-backed upholstered chairs, and one large '
+      + 'sculptural pendant centred over the table. Reads as one continuous open volume with the kitchen and living room.',
   },
   {
     id: 'entry_hall',
     title: 'Entry Hall',
     brief:
-      'A shallow floating oak console with a bronze-framed full-height mirror above it, a limestone-look large-format '
-      + 'floor, concealed shoe storage behind flush oak panelling, one ceramic bowl and a single stem of dried grass. '
-      + 'Deliberately restrained — this is the first breath of the house, not a room to fill.',
+      'A shallow floating console with a full-height mirror above it, a large-format stone floor, concealed shoe storage '
+      + 'behind flush panelling, one ceramic bowl and a single stem of dried grass. Deliberately restrained — this is the '
+      + 'first breath of the house, not a room to fill.',
   },
   {
     id: 'bedroom_parents',
     title: "Parents' Bedroom",
     brief:
-      'A broad upholstered oatmeal-linen headboard wall spanning behind the bed, oak bedside tables with bronze reading '
-      + 'lights, a low oak bench at the foot, integrated flush wardrobes, and layered sheer plus blackout linen curtains '
-      + 'on the corner windows. Calm, hotel-grade, uncluttered.',
+      'A broad upholstered headboard wall spanning behind the bed, bedside tables with slim reading lights, a low bench '
+      + 'at the foot, integrated flush wardrobes, and layered sheer plus blackout curtains on the corner windows. '
+      + 'Calm, hotel-grade, uncluttered.',
   },
   {
     id: 'bedroom_twin',
     title: "Twin / Children's Bedroom",
     brief:
-      'Two equivalent single beds in pale oak with soft rounded edges, matching oatmeal quilts, a long shared oak study '
-      + 'surface under the window, balanced closed storage, a soft wool rug, and warm indirect cove lighting. '
-      + 'Central floor left open. Grown-up materials, gentle scale — not a themed kids room.',
+      'Two equivalent single beds with soft rounded edges, matching quilts, a long shared study surface under the window, '
+      + 'balanced closed storage, a soft wool rug, and warm indirect cove lighting. Central floor left open. '
+      + 'Grown-up materials, gentle scale — not a themed kids room.',
   },
   {
     id: 'bath_family',
     title: 'Family Shower Room',
     brief:
-      'Continuous warm stone-look large-format porcelain on floor and walls, a floating oak vanity with an integrated '
-      + 'stone basin, a backlit bronze-framed mirror, a generous walk-in shower behind frameless low-iron glass, '
-      + 'a recessed shelf niche, and brushed-bronze brassware. Spa-calm, no clutter.',
+      'Continuous large-format stone-look porcelain on floor and walls, a floating vanity with an integrated stone basin, '
+      + 'a backlit framed mirror, a generous walk-in shower behind frameless low-iron glass, a recessed shelf niche, '
+      + 'and matching brassware. Spa-calm, no clutter.',
   },
   {
     id: 'wc',
     title: 'Guest WC',
     brief:
-      'A compact jewel-box cloakroom: one sculptural stone basin on a slim oak shelf, a richer dramatic stone-veined '
-      + 'wall behind it, matte deep-taupe walls elsewhere, a small bronze-framed mirror, and one warm wall light. '
+      'A compact jewel-box cloakroom: one sculptural stone basin on a slim shelf, a dramatic veined stone wall behind it, '
+      + 'deeper matte walls elsewhere, a small framed mirror, and one warm wall light. '
       + 'A small room treated as a moment, not an afterthought.',
   },
   {
     id: 'corridor',
     title: 'Bedroom Corridor',
     brief:
-      'Warm ivory plaster walls, a continuous limestone-look floor running through, flush oak doors with bronze lever '
-      + 'handles, a slim runner in oatmeal wool, and a concealed cove light washing one wall. '
-      + 'Keep the circulation completely clear — the corridor is narrow and must read generous.',
+      'Plaster walls, a continuous stone floor running through, flush doors with slim lever handles, a narrow runner, '
+      + 'and a concealed cove light washing one wall. Keep the circulation completely clear — the corridor is narrow '
+      + 'and must read generous.',
   },
   {
     id: 'mamad',
     title: 'MAMAD (Protected Room)',
     brief:
-      'Used as a calm guest room: a low oak bed with oatmeal linen, a compact oak desk, and closed flush storage. '
+      'Used as a calm guest room: a low bed, a compact desk, and closed flush storage. '
       + 'CRITICAL REGULATORY CONSTRAINT: this is an Israeli protected room. The steel blast door, the steel-framed '
       + 'blast window and the round filtration penetration must remain exactly as shown, fully visible, completely '
       + 'unobstructed, and must NOT be restyled, concealed, curtained, panelled over or replaced. '
@@ -138,17 +154,16 @@ const ROOMS = [
     id: 'terrace_nw',
     title: 'North-West Terrace',
     brief:
-      'Weather-resistant teak lounge seating with oatmeal outdoor cushions, a low travertine side table, '
-      + 'large planters with olive and rosemary, a woven outdoor rug, and warm concealed lighting in the parapet. '
-      + 'The rendered concrete corner pier stays exposed. Late golden-hour light.',
+      'Weather-resistant lounge seating with outdoor cushions, a low stone side table, large planters with olive and '
+      + 'rosemary, a woven outdoor rug, and warm concealed lighting in the parapet. The rendered concrete corner pier '
+      + 'stays exposed. Late golden-hour light.',
   },
   {
     id: 'stair_landing',
     title: 'Entry Stair & Landing',
     brief:
-      'Honed pale travertine treads with slim shadow-gap risers, a minimal dark-bronze handrail, integrated warm '
-      + 'step lighting, smooth warm-ivory rendered flank walls, and a single sculptural planter at the landing. '
-      + 'A generous, quiet arrival sequence at golden hour.',
+      'Honed stone treads with slim shadow-gap risers, a minimal handrail, integrated warm step lighting, smooth '
+      + 'rendered flank walls, and a single sculptural planter at the landing. A generous, quiet arrival sequence.',
   },
 ];
 
@@ -159,7 +174,7 @@ function heroFrame(roomId) {
   return files.length ? path.join(dir, files[0]) : null;
 }
 
-function buildPrompt(room) {
+function buildPrompt(room, variant) {
   return [
     `Transform this unfinished construction photograph of a ${room.title} into a finished, photorealistic interior.`,
     'The supplied image is a HARD architectural reference. Keep the exact camera position and lens perspective,',
@@ -167,7 +182,8 @@ function buildPrompt(room) {
     'at its exact size and position. Keep the real view through the windows.',
     'Do not add, remove, resize or move any opening. Do not change the room shape.',
     `Design brief: ${room.brief}`,
-    HOUSE_STYLE,
+    `Material and colour direction — "${variant.label}": ${variant.palette}`,
+    'This is high-end architectural visualization in the language of a luxury property film.',
     CAMERA,
     'The result must look like a photograph of a real, buildable, finished room — not a 3D render.',
     NEGATIVE,
@@ -175,8 +191,22 @@ function buildPrompt(room) {
 }
 
 function writeManifest() {
-  const existing = readdirSync(OUT_DIR).filter((f) => f.endsWith('.png')).map((f) => f.replace('.png', ''));
-  const all = ROOMS.filter((r) => existing.includes(r.id));
+  const blocks = [];
+  let total = 0;
+  for (const variant of VARIANTS) {
+    const dir = path.join(OUT_ROOT, variant.id);
+    if (!existsSync(dir)) continue;
+    const have = new Set(readdirSync(dir).filter((f) => f.endsWith('.png')).map((f) => f.replace('.png', '')));
+    const entries = ROOMS.filter((r) => have.has(r.id));
+    total += entries.length;
+    blocks.push(
+      `  '${variant.id}': {`,
+      ...entries.map(
+        (r) => `    ${r.id}: { path: '/generated/interiors/${variant.id}/${r.id}.png', title: ${JSON.stringify(r.title)} },`,
+      ),
+      '  },',
+    );
+  }
   const lines = [
     "import type { RoomId } from '@/lib/types';",
     '',
@@ -185,72 +215,97 @@ function writeManifest() {
     '  title: string;',
     '}',
     '',
-    'export const interiorRenders: Partial<Record<RoomId, InteriorRender>> = {',
-    ...all.map((r) => `  ${r.id}: { path: '/generated/interiors/${r.id}.png', title: ${JSON.stringify(r.title)} },`),
+    `export const interiorVariantIds = [${VARIANTS.map((v) => `'${v.id}'`).join(', ')}] as const;`,
+    '',
+    'export type InteriorVariantId = (typeof interiorVariantIds)[number];',
+    '',
+    'export const interiorVariantLabels: Record<InteriorVariantId, string> = {',
+    ...VARIANTS.map((v) => `  '${v.id}': ${JSON.stringify(v.label)},`),
     '};',
+    '',
+    'export const interiorRendersByVariant: Record<InteriorVariantId, Partial<Record<RoomId, InteriorRender>>> = {',
+    ...blocks,
+    '};',
+    '',
+    "export const interiorRenders = interiorRendersByVariant['warm-oak'];",
     '',
   ];
   writeFileSync(MANIFEST, lines.join('\n'), 'utf8');
-  return all.length;
+  return total;
 }
 
 async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help')) {
-    console.log(`${USAGE}\nRooms: ${ROOMS.map((r) => r.id).join(', ')}`);
+    console.log(`${USAGE}\nVariants: ${VARIANTS.map((v) => v.id).join(', ')}\nRooms: ${ROOMS.map((r) => r.id).join(', ')}`);
     return;
   }
   const dry = args.includes('--dry');
+  const force = args.includes('--force');
+  const variantArg = args.find((a) => a.startsWith('--variant='));
+  const variantIds = variantArg ? variantArg.split('=')[1].split(',') : VARIANTS.map((v) => v.id);
   const wanted = args.filter((a) => !a.startsWith('--'));
-  const todo = wanted.length ? ROOMS.filter((r) => wanted.includes(r.id)) : ROOMS;
+  const todoRooms = wanted.length ? ROOMS.filter((r) => wanted.includes(r.id)) : ROOMS;
 
-  if (!todo.length) {
-    console.error(`No matching rooms.\n${USAGE}\nRooms: ${ROOMS.map((r) => r.id).join(', ')}`);
+  const variants = VARIANTS.filter((v) => variantIds.includes(v.id));
+  if (!variants.length || !todoRooms.length) {
+    console.error(`Nothing to do.\n${USAGE}`);
     process.exit(1);
   }
 
-  mkdirSync(OUT_DIR, { recursive: true });
   const ai = dry ? null : new GoogleGenAI({ apiKey: loadKey() });
   let ok = 0;
+  let skipped = 0;
   let failed = 0;
 
-  for (const room of todo) {
-    const ref = heroFrame(room.id);
-    if (!ref) {
-      console.warn(`  ${room.id}: no reference frame, skipping`);
-      continue;
-    }
-    const prompt = buildPrompt(room);
-    if (dry) {
-      console.log(`\n=== ${room.id} (ref ${path.basename(ref)}) ===\n${prompt}\n`);
-      continue;
-    }
+  for (const variant of variants) {
+    const outDir = path.join(OUT_ROOT, variant.id);
+    mkdirSync(outDir, { recursive: true });
+    console.log(`\n[${variant.id}] ${variant.label}`);
 
-    process.stdout.write(`  ${room.id.padEnd(18)} `);
-    const started = Date.now();
-    try {
-      const res = await ai.models.generateContent({
-        model: MODEL,
-        contents: [
-          { text: prompt },
-          { inlineData: { mimeType: 'image/jpeg', data: readFileSync(ref).toString('base64') } },
-        ],
-      });
-      const parts = res.candidates?.[0]?.content?.parts ?? [];
-      const img = parts.find((p) => p.inlineData?.data);
-      if (!img) throw new Error('no image in response');
-      const buf = Buffer.from(img.inlineData.data, 'base64');
-      writeFileSync(path.join(OUT_DIR, `${room.id}.png`), buf);
-      console.log(`ok  ${Math.round(buf.length / 1024)}KB  ${((Date.now() - started) / 1000).toFixed(1)}s`);
-      ok += 1;
-    } catch (err) {
-      console.log(`FAILED  ${err.message}`);
-      failed += 1;
+    for (const room of todoRooms) {
+      const out = path.join(outDir, `${room.id}.png`);
+      if (!force && existsSync(out)) {
+        skipped += 1;
+        continue;
+      }
+      const ref = heroFrame(room.id);
+      if (!ref) {
+        console.warn(`  ${room.id}: no reference frame, skipping`);
+        continue;
+      }
+      if (dry) {
+        console.log(`\n=== ${variant.id}/${room.id} ===\n${buildPrompt(room, variant)}\n`);
+        continue;
+      }
+
+      process.stdout.write(`  ${room.id.padEnd(18)} `);
+      const started = Date.now();
+      try {
+        const res = await ai.models.generateContent({
+          model: MODEL,
+          contents: [
+            { text: buildPrompt(room, variant) },
+            { inlineData: { mimeType: 'image/jpeg', data: readFileSync(ref).toString('base64') } },
+          ],
+        });
+        const parts = res.candidates?.[0]?.content?.parts ?? [];
+        const img = parts.find((p) => p.inlineData?.data);
+        if (!img) throw new Error('no image in response');
+        const buf = Buffer.from(img.inlineData.data, 'base64');
+        writeFileSync(out, buf);
+        console.log(`ok  ${Math.round(buf.length / 1024)}KB  ${((Date.now() - started) / 1000).toFixed(1)}s`);
+        ok += 1;
+      } catch (err) {
+        console.log(`FAILED  ${err.message}`);
+        failed += 1;
+      }
     }
   }
 
-  if (!dry && ok) {
-    console.log(`\n${ok} generated, ${failed} failed. Manifest lists ${writeManifest()} rooms.`);
+  if (!dry) {
+    console.log(`\n${ok} generated, ${skipped} already present, ${failed} failed.`);
+    console.log(`Manifest lists ${writeManifest()} renders.`);
   }
 }
 

@@ -42,15 +42,30 @@ function prune(): void {
  * which only records a key AFTER its submit resolves, does not close this
  * window: both requests would see an empty store and each start their own.)
  *
- * A run that fails releases its reservation, so a genuinely later attempt
- * (not just a concurrent or immediate retry) can try again fresh — this
+ * A run that fails with a DEFINITE error (the common case) releases its
+ * reservation, so a genuinely later attempt can try again fresh — this
  * function only prevents a duplicate for a submission that is still
  * outstanding or already succeeded, not a fresh choice to retry after a
  * known failure. A run that succeeds stays cached for the rest of the TTL,
  * so any later retry — concurrent or not — reconciles to the same job.
+ *
+ * Some providers (Higgsfield's uncancellable subscribe() call, guarded by
+ * isSubmitTimeout in higgsfield.server.ts) can fail in a way that is itself
+ * AMBIGUOUS — the request may already have been accepted and billed even
+ * though our own wait for it rejected. Releasing the reservation for THAT
+ * kind of failure would defeat the whole point: a retry with the same key
+ * would see an empty store and start a genuinely second, separately billed
+ * submission. `isAmbiguousFailure`, when supplied, identifies such errors so
+ * their reservation is kept instead — a retry then reconciles to the SAME
+ * (rejected) outcome rather than trying again, until the TTL prunes it.
+ *
  * With no key supplied (an older client), every call runs independently.
  */
-export function reserveIdempotentSubmission(key: string | undefined, run: () => Promise<string>): Promise<string> {
+export function reserveIdempotentSubmission(
+  key: string | undefined,
+  run: () => Promise<string>,
+  options?: { isAmbiguousFailure?: (error: unknown) => boolean },
+): Promise<string> {
   if (!key) return run();
   prune();
 
@@ -64,8 +79,10 @@ export function reserveIdempotentSubmission(key: string | undefined, run: () => 
   }
 
   const promise = run();
-  promise.catch(() => {
-    store.delete(key);
+  promise.catch((error: unknown) => {
+    if (!options?.isAmbiguousFailure?.(error)) {
+      store.delete(key);
+    }
   });
   store.set(key, { promise, createdAt: Date.now() });
   return promise;

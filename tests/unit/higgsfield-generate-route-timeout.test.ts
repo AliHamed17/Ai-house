@@ -52,6 +52,31 @@ describe('POST /api/higgsfield/generate (ambiguous-timeout handling)', () => {
     expect(data.error).toMatch(/may have already been accepted/i);
   });
 
+  it('retrying with the same idempotencyKey after a timeout never calls provider.submit again (regression)', async () => {
+    // The Higgsfield SDK call cannot be cancelled, so a retry after this
+    // exact failure must not be allowed to start a second, separately
+    // billed submission — even though the first one "failed" from this
+    // route's point of view.
+    const submitMock = vi.fn().mockRejectedValue(new Error('Higgsfield submission timed out after 30s'));
+    vi.doMock('@/lib/ai/registry.server', () => ({
+      resolveProviderForSubmit: () => ({
+        demoMode: false,
+        provider: { id: 'higgsfield', submit: submitMock, status: async () => { throw new Error('not used in this test'); } },
+      }),
+    }));
+    vi.resetModules();
+    const { POST } = await import('@/app/api/higgsfield/generate/route');
+
+    const body = { roomId: 'living', sourceAssetPath: '/api/generation/result/some-real-looking-id', idempotencyKey: 'hf-timeout-retry-key' };
+    const res1 = await POST(makeRequest(body));
+    expect(res1.status).toBe(504);
+    const res2 = await POST(makeRequest(body));
+    expect(res2.status).toBe(504);
+    expect((await res2.json()).error).toMatch(/may have already been accepted/i);
+
+    expect(submitMock).toHaveBeenCalledTimes(1);
+  });
+
   it('still returns the generic 502 failure for a non-timeout submit error', async () => {
     vi.doMock('@/lib/ai/registry.server', () => ({
       resolveProviderForSubmit: () => ({

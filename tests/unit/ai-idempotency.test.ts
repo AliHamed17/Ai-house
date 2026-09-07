@@ -36,6 +36,32 @@ describe('reserveIdempotentSubmission (reconciles a retried submission instead o
     expect(run).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps the reservation after a failure the caller marks ambiguous, so a retry reconciles to the SAME rejection instead of running again (regression)', async () => {
+    // Mirrors Higgsfield's uncancellable-timeout case: the failure does not
+    // mean the underlying submission definitely never happened, so a retry
+    // must not be allowed to start a second, separately billed one.
+    const ambiguousError = new Error('ambiguous timeout');
+    const run = vi.fn().mockRejectedValueOnce(ambiguousError).mockResolvedValueOnce('job-should-not-be-reached');
+    const isAmbiguousFailure = (error: unknown) => error === ambiguousError;
+
+    await expect(reserveIdempotentSubmission('ambiguous-key', run, { isAmbiguousFailure })).rejects.toThrow('ambiguous timeout');
+    await Promise.resolve();
+    await expect(reserveIdempotentSubmission('ambiguous-key', run, { isAmbiguousFailure })).rejects.toThrow('ambiguous timeout');
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('still releases the reservation for a failure the caller does not mark ambiguous, even when isAmbiguousFailure is supplied', async () => {
+    const definiteError = new Error('bad credentials');
+    const run = vi.fn().mockRejectedValueOnce(definiteError).mockResolvedValueOnce('job-after-definite-failure');
+    const isAmbiguousFailure = () => false;
+
+    await expect(reserveIdempotentSubmission('definite-key', run, { isAmbiguousFailure })).rejects.toThrow('bad credentials');
+    await Promise.resolve();
+    const result = await reserveIdempotentSubmission('definite-key', run, { isAmbiguousFailure });
+    expect(result).toBe('job-after-definite-failure');
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
   it('reserves the key before run() settles, so a concurrent call with the same key joins instead of starting a second run (regression)', async () => {
     let resolveRun: (value: string) => void = () => {};
     const runPromise = new Promise<string>((resolve) => {

@@ -55,19 +55,27 @@ export async function POST(request: NextRequest) {
     // Reserved before the provider call is awaited (see idempotency.server),
     // so a retry carrying the same idempotencyKey — even one that arrives
     // while this exact submission is still in flight — joins this call
-    // instead of starting a second, separately billed one.
-    const jobId = await reserveIdempotentSubmission(validated.data.idempotencyKey, async () => {
-      const result = await provider.submit({
-        provider: 'higgsfield',
-        outputType: 'video',
-        roomId: validated.data.roomId,
-        styleVariant: validated.data.styleVariant,
-        sourceAssetPath: validated.data.sourceAssetPath,
-        prompt,
-        simulate: validated.data.simulate,
-      });
-      return result.jobId;
-    });
+    // instead of starting a second, separately billed one. isAmbiguousFailure
+    // keeps that reservation even if the call rejects with isSubmitTimeout:
+    // that specific failure means we don't know whether Higgsfield actually
+    // accepted the job, so a retry must not be allowed to start a genuinely
+    // second submission — it should keep reconciling to this same outcome.
+    const jobId = await reserveIdempotentSubmission(
+      validated.data.idempotencyKey,
+      async () => {
+        const result = await provider.submit({
+          provider: 'higgsfield',
+          outputType: 'video',
+          roomId: validated.data.roomId,
+          styleVariant: validated.data.styleVariant,
+          sourceAssetPath: validated.data.sourceAssetPath,
+          prompt,
+          simulate: validated.data.simulate,
+        });
+        return result.jobId;
+      },
+      { isAmbiguousFailure: isSubmitTimeout },
+    );
     return NextResponse.json({ jobId, demoMode, provider: demoMode ? 'mock' : 'higgsfield' });
   } catch (error) {
     console.error('[higgsfield/generate] submission failed:', error);

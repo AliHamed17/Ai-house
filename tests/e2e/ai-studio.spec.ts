@@ -107,11 +107,48 @@ test.describe('AI Design Studio (demo mode)', () => {
     await page.goto('/#ai-studio');
     await page.getByRole('button', { name: /Generate concept image/i }).click();
 
-    await expect(page.getByText(/Lost connection while submitting a generation/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('select').first()).toBeDisabled();
     await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
 
     blockGenerate = false;
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('select').first()).toBeEnabled();
+  });
+
+  test('a Higgsfield 504 (ambiguous submit timeout) also keeps the submission recoverable, not just a dropped connection (regression)', async ({ page }) => {
+    // The route returns a normal, well-formed 504 response (not a dropped
+    // connection) specifically when a live Higgsfield submit times out in a
+    // way that may still have been accepted and billed (see isSubmitTimeout
+    // in higgsfield.server.ts). That response DOES reach the client, so it
+    // is easy to mistake for a definite failure — but it must be treated
+    // exactly like a lost connection: recoverable, not a safe-to-retry-fresh
+    // error.
+    let simulateTimeout = true;
+    await page.route('**/api/higgsfield/generate', (route) => {
+      if (!simulateTimeout) return route.continue();
+      return route.fulfill({
+        status: 504,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error:
+            'The request to Higgsfield timed out. It may have already been accepted and could still be running (and billed) — please wait a minute and check before submitting again, to avoid a possible duplicate charge.',
+        }),
+      });
+    });
+
+    await page.goto('/#ai-studio');
+    await page.locator('select').first().selectOption('living');
+    await page.getByRole('button', { name: /Cinematic clip/i }).click();
+    await expect(page.getByRole('button', { name: /Generate cinematic clip/i })).toBeEnabled({ timeout: 10_000 });
+    await page.getByRole('button', { name: /Generate cinematic clip/i }).click();
+
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('select').first()).toBeDisabled();
+    await expect(page.getByRole('button', { name: /Generate cinematic clip/i })).toBeDisabled();
+
+    simulateTimeout = false;
     await page.getByRole('button', { name: 'Resume submission' }).click();
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('select').first()).toBeEnabled();

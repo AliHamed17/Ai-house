@@ -255,16 +255,23 @@ export function AIStudioPanel() {
   }
 
   // Submits one generation request. On a definite failure (a non-OK HTTP
-  // response, which the server has already resolved one way or another) it
-  // just reports the error. On a network-level failure — the fetch itself
-  // throwing, so we cannot tell "never reached the server" apart from
-  // "reached the server, which ran and billed it, but the response never
-  // came back" — it does NOT tell the visitor it's safe to just try again.
-  // The exact request (endpoint, body, and its idempotencyKey) is kept as
-  // recoverableSubmission so a retry reuses the same key: the server
-  // recognizes it and returns the job it already created rather than
-  // starting and billing a second one. Shared between a fresh submission
-  // (handleGenerate) and resuming one (handleResumeSubmission).
+  // response the server has already conclusively resolved) it just reports
+  // the error. Two cases are NOT definite, and both keep the exact request
+  // (endpoint, body, and its idempotencyKey) as recoverableSubmission so a
+  // retry reuses the same key — the server recognizes it and returns the
+  // job it already created (or, for the second case, the same ambiguous
+  // outcome — see idempotency.server's isAmbiguousFailure) rather than
+  // starting and billing a second one:
+  //  - a network-level failure (the fetch itself throwing), where we
+  //    cannot tell "never reached the server" apart from "reached the
+  //    server, which ran and billed it, but the response never came back";
+  //  - a 504 from the Higgsfield route specifically, its explicit signal
+  //    that the submission timed out in a way that may still have been
+  //    accepted and billed (see isSubmitTimeout in higgsfield.server) —
+  //    this DID reach the client as a normal response, but is exactly as
+  //    ambiguous as a dropped connection would have been.
+  // Shared between a fresh submission (handleGenerate) and resuming one
+  // (handleResumeSubmission).
   async function submitOnce(endpoint: string, body: Record<string, unknown>, token: number): Promise<string | null> {
     try {
       const res = await fetch(endpoint, {
@@ -277,6 +284,7 @@ export function AIStudioPanel() {
       if (!res.ok) {
         setError(data.error ?? 'Generation request failed.');
         setSubmitting(false);
+        if (res.status === 504) setRecoverableSubmission({ endpoint, body });
         return null;
       }
       return data.jobId as string;
@@ -489,8 +497,9 @@ export function AIStudioPanel() {
       {recoverableSubmission && (
         <div className="mt-4 rounded-xl border border-bronze/40 bg-bronze/10 px-4 py-3">
           <p className="text-sm font-semibold text-charcoal">
-            Lost connection while submitting a generation — it may have already been received and billed. Resuming
-            reuses the exact same request rather than starting a new, possibly duplicate one.
+            The outcome of this generation is unclear (a lost connection, or a provider timeout) — it may have
+            already been received and billed. Resuming reuses the exact same request rather than starting a new,
+            possibly duplicate one.
           </p>
           <button
             type="button"

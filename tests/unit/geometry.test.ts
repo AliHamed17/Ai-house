@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { houseModel, getRoom } from '@/data/house';
+import { houseModel, getRoom, PLAYER_RADIUS_M } from '@/data/house';
 import { buildAllWalls, buildWall } from '@/lib/geometry/wallPanels';
 import { resolveCollision, pointInPolygon } from '@/lib/geometry/collision';
 
@@ -174,5 +174,26 @@ describe('exterior room ceilings (a covered space still has a roof, an open one 
     expect(approach.hasCeiling).toBeFalsy();
     expect(balcony.isExterior).toBe(true);
     expect(balcony.hasCeiling).toBeFalsy();
+  });
+});
+
+describe('twin bedroom doorway (must clear the solid, protected MAMAD wall, not just overlap it) (regression)', () => {
+  it('keeps mamad_e fully solid — a protected room stays sealed outside its one designated door/window', () => {
+    const mamad = getRoom('mamad')!;
+    const wallSpec = mamad.walls.find((w) => w.id === 'mamad_e')!;
+    const built = buildWall(wallSpec, mamad, houseModel.openings);
+    expect(built.voids).toHaveLength(0);
+    expect(built.collisionSolidSpans).toEqual([{ t0: 0, t1: built.length }]);
+  });
+
+  it('gives the hall_south/twin_bed doorway a fully open span, entirely above mamad_e, at least as wide as the player', () => {
+    const hallSouth = getRoom('hall_south')!;
+    const wallSpec = hallSouth.walls.find((w) => w.id === 'hs_twin')!;
+    const built = buildWall(wallSpec, hallSouth, houseModel.openings);
+    // The whole hs_twin wall lies within the door's span, so it is a single,
+    // fully-open gap with no residual solid collision span — none of it
+    // depends on the void that mamad_e (a different room's wall) leaves.
+    expect(built.collisionSolidSpans).toHaveLength(0);
+    expect(built.length).toBeGreaterThanOrEqual(PLAYER_RADIUS_M * 2);
   });
 });

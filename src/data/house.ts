@@ -316,17 +316,23 @@ const rooms: RoomDef[] = [
     floorPolygon: [
       v(4.9, 3.0),
       v(10.8, 3.0),
-      v(10.8, 3.5),
-      v(11.9, 3.5),
+      // This notch's north edge is 3.7 rather than the 3.5 a straight
+      // adjacency inference would suggest — mamad_e (a protected room's
+      // real, plan-sourced wall) is solid for the full z<3.0 span, so the
+      // hall_south/twin_bed doorway must clear entirely above z=3.0 to be
+      // walkable at all; a notch that stopped at 3.5 left only a 0.5 m
+      // passage there, narrower than PLAYER_RADIUS_M*2 (regression).
+      v(10.8, 3.7),
+      v(11.9, 3.7),
       v(11.9, 9.85),
       v(10.8, 9.85),
       v(10.8, 4.0),
       v(4.9, 4.0),
     ],
     walls: [
-      wall('hs_twin', v(10.8, 3.0), v(10.8, 3.5), false),
-      wall('hs_link_top', v(10.8, 3.5), v(11.9, 3.5), true),
-      wall('hs_link_e_void', v(11.9, 3.5), v(11.9, 6.35), true),
+      wall('hs_twin', v(10.8, 3.0), v(10.8, 3.7), false),
+      wall('hs_link_top', v(10.8, 3.7), v(11.9, 3.7), true),
+      wall('hs_link_e_void', v(11.9, 3.7), v(11.9, 6.35), true),
       wall('hs_link_e_parents', v(11.9, 6.35), v(11.9, 9.85), false),
       wall('hs_link_bottom', v(11.9, 9.85), v(10.8, 9.85), true),
       wall('hs_link_w_void', v(10.8, 9.85), v(10.8, 5.2), true),

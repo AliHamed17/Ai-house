@@ -58,6 +58,14 @@ export function getStoredResult(id: string | undefined): StoredResult | undefine
  * wasting a paid job on a 404. Touching it gives it a fresh, full TTL_MS
  * from this exact moment, which comfortably outlasts any realistic
  * provider fetch time.
+ *
+ * Deletes and re-sets the entry (rather than mutating createdAt in place) so
+ * it also moves to the end of the Map's iteration order. putStoredResult's
+ * capacity eviction below walks that same order and removes whatever is
+ * first — a mutate-in-place touch leaves a just-refreshed entry sitting
+ * exactly where it was, so a concurrent unrelated submission that fills the
+ * store to capacity would evict it immediately despite the fresh TTL,
+ * letting an already-started billed job 404 the moment it fetches the URL.
  */
 export function touchStoredResult(id: string | undefined): boolean {
   if (!id) return false;
@@ -67,18 +75,34 @@ export function touchStoredResult(id: string | undefined): boolean {
     store.delete(id);
     return false;
   }
-  entry.createdAt = Date.now();
+  store.delete(id);
+  store.set(id, { ...entry, createdAt: Date.now() });
   return true;
 }
 
 /** Matches the public URL the client and provider adapters use to fetch a stored result. */
 export const RESULT_URL_PREFIX = '/api/generation/result/';
 
-/** Extracts the stored-result id from a `/api/generation/result/<id>` path, if it is one. */
+/**
+ * Extracts the stored-result id from a `/api/generation/result/<id>` path —
+ * but only when that path IS the canonical URL for that id (an optional
+ * `?query` or `#fragment` suffix is tolerated; a trailing PATH segment is
+ * not). A caller-controlled sourceAssetPath is later joined as-is with the
+ * trusted asset origin and handed to a provider to fetch (see
+ * higgsfield.server's toAbsoluteUrl call) — if a noncanonical path like
+ * `<prefix><id>/missing` were accepted here just because an id could be
+ * *found* in it, every validation gate that checks "is this a real stored
+ * result?" would pass for the extracted id, while the actual URL fetched
+ * still 404s, wasting a paid job. Rejecting it here (rather than validating
+ * separately at each call site) closes that gap once for every caller.
+ */
 export function resultIdFromPath(path: string): string | undefined {
   if (!path.startsWith(RESULT_URL_PREFIX)) return undefined;
-  const id = path.slice(RESULT_URL_PREFIX.length).split(/[/?#]/)[0];
-  return id || undefined;
+  const rest = path.slice(RESULT_URL_PREFIX.length);
+  const suffixIndex = rest.search(/[?#]/);
+  const id = suffixIndex === -1 ? rest : rest.slice(0, suffixIndex);
+  if (!id || id.includes('/')) return undefined;
+  return id;
 }
 
 /**

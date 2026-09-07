@@ -33,6 +33,22 @@ export function isNanoBananaConfigured(): boolean {
   return Boolean(nanoBananaApiKey());
 }
 
+// generateContent is given an AbortSignal (below) so our own client-side wait
+// stops on timeout, but that only closes OUR connection — it cannot recall
+// generation Google's servers already started (and will bill) once the
+// request reached them. A timeout here is therefore exactly as ambiguous as
+// Higgsfield's uncancellable subscribe() call (see isSubmitTimeout in
+// higgsfield.server.ts): the route must not treat it as a definite failure
+// safe to retry, or a retry could start a second, separately billed
+// generation for the exact same request. Naming the message here (rather
+// than duplicating the literal string in the route) is what lets
+// isSubmitTimeout() below match it reliably.
+const SUBMIT_TIMEOUT_MESSAGE = 'Nano Banana generation timed out after 45s';
+
+export function isSubmitTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === SUBMIT_TIMEOUT_MESSAGE;
+}
+
 /**
  * Reads a source image for an image-to-image generation. Accepts either a
  * public site asset (an evidence frame, a committed concept) or a previously
@@ -99,7 +115,7 @@ export const nanoBananaProvider: MediaGenerationProvider = {
           },
         }),
       45_000,
-      'Nano Banana generation timed out after 45s',
+      SUBMIT_TIMEOUT_MESSAGE,
     );
 
     const candidateParts = response.candidates?.[0]?.content?.parts ?? [];

@@ -58,9 +58,10 @@ const RECOVERY_STORAGE_KEY = 'ai-studio:unresolved-generation';
 //  - 'submission' resumes by POSTing again with the same idempotencyKey.
 //    Its reservation's TTL depends on WHY it was recorded as recoverable in
 //    the first place, and the two cases are not equivalent:
-//      - ambiguous: true — the 504 Higgsfield-timeout case (isSubmitTimeout).
-//        The server explicitly upgrades THIS reservation to AMBIGUOUS_TTL_MS
-//        (60 min) specifically because it knows the outcome is unresolved.
+//      - ambiguous: true — the 504 submit-timeout case (isSubmitTimeout in
+//        higgsfield.server / nanoBanana.server). The server explicitly
+//        upgrades THIS reservation to AMBIGUOUS_TTL_MS (60 min) specifically
+//        because it knows the outcome is unresolved.
 //      - ambiguous: false — a network-level failure (the fetch itself
 //        throwing). The client cannot tell from this alone whether the
 //        request reached the server, and if it did, whether it went on to
@@ -378,10 +379,10 @@ export function AIStudioPanel() {
   //  - a network-level failure (the fetch itself throwing), where we
   //    cannot tell "never reached the server" apart from "reached the
   //    server, which ran and billed it, but the response never came back";
-  //  - a 504 from the Higgsfield route specifically, its explicit signal
-  //    that the submission timed out in a way that may still have been
-  //    accepted and billed (see isSubmitTimeout in higgsfield.server) —
-  //    this DID reach the client as a normal response, but is exactly as
+  //  - a 504 from either generate route, its explicit signal that the
+  //    submission timed out in a way that may still have been accepted and
+  //    billed (see isSubmitTimeout in higgsfield.server / nanoBanana.server)
+  //    — this DID reach the client as a normal response, but is exactly as
   //    ambiguous as a dropped connection would have been.
   // A 410 (from either route) is a third, definite case that still gets
   // special handling: the approved source it named expired from the
@@ -459,9 +460,9 @@ export function AIStudioPanel() {
         if (res.status === 504) {
           setRecoverableSubmission({ endpoint, body });
           // ambiguous: true, with a FRESH timestamp — mirrors isSubmitTimeout
-          // server-side (the only way this route returns a 504), which is
-          // exactly when idempotency.server refreshes createdAt and upgrades
-          // to the longer AMBIGUOUS_TTL_MS for this same reservation.
+          // server-side (the only way either generate route returns a 504),
+          // which is exactly when idempotency.server refreshes createdAt and
+          // upgrades to the longer AMBIGUOUS_TTL_MS for this same reservation.
           writeRecoveryEntry({ kind: 'submission', ambiguous: true, endpoint, body, roomId, outputType, createdAt: Date.now() });
         }
         // A definite, pre-billing failure — the approved source this request

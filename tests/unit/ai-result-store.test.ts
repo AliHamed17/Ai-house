@@ -22,6 +22,16 @@ describe('in-memory generation result store', () => {
     expect(resultIdFromPath('/evidence/frames/foo.jpg')).toBeUndefined();
   });
 
+  it('rejects a noncanonical path carrying an extra segment after the id (regression)', () => {
+    // A caller could submit "<prefix><id>/missing" hoping the extracted id
+    // still passes every "is this a real stored result?" gate, while the
+    // FULL sourceAssetPath (not just the id) is what actually gets fetched
+    // by a provider — which would 404 after a paid job already started.
+    const id = putStoredResult('image/png', 'aGVsbG8=');
+    expect(resultIdFromPath(`${RESULT_URL_PREFIX}${id}/missing`)).toBeUndefined();
+    expect(resultIdFromPath(`${RESULT_URL_PREFIX}${id}/`)).toBeUndefined();
+  });
+
   describe('touchStoredResult (refreshes an entry\'s TTL so a slower external fetch does not race its expiry)', () => {
     it('refreshes the TTL clock so the entry survives past its original expiry', () => {
       vi.useFakeTimers();
@@ -51,6 +61,25 @@ describe('in-memory generation result store', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('protects a touched entry from capacity eviction by moving it out of "oldest" position (regression)', () => {
+      // MAX_ENTRIES is 100. Fill the store to exactly capacity, then touch
+      // the very first entry inserted — the one capacity eviction would
+      // otherwise remove first. If touch only refreshed createdAt without
+      // also moving the entry in the Map's iteration order, it would still
+      // be evicted immediately by the very next insert despite the fresh
+      // TTL, letting an already-started billed job 404 against it.
+      const victimId = putStoredResult('image/png', 'first');
+      const nextOldestId = putStoredResult('image/png', 'second');
+      for (let i = 2; i < 100; i++) putStoredResult('image/png', `entry-${i}`);
+
+      expect(touchStoredResult(victimId)).toBe(true);
+
+      putStoredResult('image/png', 'one-past-capacity');
+
+      expect(getStoredResult(victimId)).toBeDefined();
+      expect(getStoredResult(nextOldestId)).toBeUndefined();
     });
   });
 });

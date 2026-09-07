@@ -4,7 +4,7 @@ import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.serv
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
 import { resultIdFromPath } from '@/lib/ai/resultStore.server';
 import { isSubmitTimeout } from '@/lib/ai/higgsfield.server';
-import { getIdempotentJobId, recordIdempotentJobId } from '@/lib/ai/idempotency.server';
+import { reserveIdempotentSubmission } from '@/lib/ai/idempotency.server';
 import { buildHiggsfieldPrompt } from '@/data/roomPrompts';
 
 export const dynamic = 'force-dynamic';
@@ -35,15 +35,6 @@ export async function POST(request: NextRequest) {
 
   const { provider, demoMode } = resolveProviderForSubmit('higgsfield');
 
-  // If this exact submission (by idempotency key) already produced a job —
-  // e.g. the client's fetch threw after the server had already accepted and
-  // possibly billed the request, and it's now retrying — return that same
-  // job instead of starting (and billing) a second one.
-  const existingJobId = getIdempotentJobId(validated.data.idempotencyKey);
-  if (existingJobId) {
-    return NextResponse.json({ jobId: existingJobId, demoMode, provider: demoMode ? 'mock' : 'higgsfield' });
-  }
-
   // The client only shows a "must approve a real image first" gate as a UX
   // nicety — this route is directly reachable, so that check alone can't stop
   // a caller from submitting any nonempty site-relative path (a static
@@ -61,16 +52,22 @@ export async function POST(request: NextRequest) {
   const prompt = buildHiggsfieldPrompt(validated.data.roomId);
 
   try {
-    const { jobId } = await provider.submit({
-      provider: 'higgsfield',
-      outputType: 'video',
-      roomId: validated.data.roomId,
-      styleVariant: validated.data.styleVariant,
-      sourceAssetPath: validated.data.sourceAssetPath,
-      prompt,
-      simulate: validated.data.simulate,
+    // Reserved before the provider call is awaited (see idempotency.server),
+    // so a retry carrying the same idempotencyKey — even one that arrives
+    // while this exact submission is still in flight — joins this call
+    // instead of starting a second, separately billed one.
+    const jobId = await reserveIdempotentSubmission(validated.data.idempotencyKey, async () => {
+      const result = await provider.submit({
+        provider: 'higgsfield',
+        outputType: 'video',
+        roomId: validated.data.roomId,
+        styleVariant: validated.data.styleVariant,
+        sourceAssetPath: validated.data.sourceAssetPath,
+        prompt,
+        simulate: validated.data.simulate,
+      });
+      return result.jobId;
     });
-    recordIdempotentJobId(validated.data.idempotencyKey, jobId);
     return NextResponse.json({ jobId, demoMode, provider: demoMode ? 'mock' : 'higgsfield' });
   } catch (error) {
     console.error('[higgsfield/generate] submission failed:', error);

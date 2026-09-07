@@ -46,39 +46,57 @@ interface LiveStatus {
 // resuming still requires the visitor's own click rather than silently
 // firing a request on page load.
 const RECOVERY_STORAGE_KEY = 'ai-studio:unresolved-generation';
-// The two entry kinds get different ceilings because they carry different
-// risk if the entry outlives what the server can actually back up:
+// Ceilings mirror exactly what the server can actually still back up, so an
+// entry is never offered for Resume past the point its server-side
+// reservation (idempotency.server) could already be gone — at which point
+// Resume wouldn't reconcile anything, it would silently start a genuinely
+// new, separately billed submission.
 //  - 'job' only ever drives a status POLL (a read), which is safe to retry
 //    indefinitely — Higgsfield's own servers, not this server's in-memory
 //    stores, are the source of truth for whether a live job is still
 //    checkable, so a generous window here is never a billing risk.
-//  - 'submission' resumes by POSTing again with the same idempotencyKey,
-//    reconciled server-side via idempotency.server's reservation store.
-//    That reservation is NOT permanent — it expires after TTL_MS (10 min)
-//    normally, or AMBIGUOUS_TTL_MS (60 min, kept longer specifically for
-//    this recovery flow) for the kind of failure that sets recoverableSubmission.
-//    An entry that outlives the server's actual reservation doesn't resume
-//    anything — the key is gone, so provider.submit() runs again as a
-//    genuinely new, separately billed request, exactly what idempotency
-//    exists to prevent. This ceiling must never exceed AMBIGUOUS_TTL_MS.
-const RECOVERY_MAX_AGE_MS: Record<RecoveryEntry['kind'], number> = {
+//  - 'submission' resumes by POSTing again with the same idempotencyKey.
+//    Its reservation's TTL depends on WHY it was recorded as recoverable in
+//    the first place, and the two cases are not equivalent:
+//      - ambiguous: true — the 504 Higgsfield-timeout case (isSubmitTimeout).
+//        The server explicitly upgrades THIS reservation to AMBIGUOUS_TTL_MS
+//        (60 min) specifically because it knows the outcome is unresolved.
+//      - ambiguous: false — a network-level failure (the fetch itself
+//        throwing). The client cannot tell from this alone whether the
+//        request reached the server, and if it did, whether it went on to
+//        succeed (kept at the ordinary TTL_MS, 10 min — success never
+//        upgrades a reservation) or fail definitively (deleted entirely,
+//        safe either way). The worst case that ISN'T "safe to retry" is
+//        "succeeded, still cached" — bounded by the SHORT ordinary TTL_MS,
+//        so that's the ceiling this case must assume.
+//    Using the long (ambiguous) ceiling for BOTH would let a network-loss
+//    recovery whose request actually succeeded outlive its real 10-minute
+//    reservation and silently double-submit on Resume.
+const RECOVERY_MAX_AGE_MS = {
   job: 24 * 60 * 60_000,
-  // 55, not 60, minutes: a small safety margin under idempotency.server's
-  // AMBIGUOUS_TTL_MS for clock/network skew between when this entry was
-  // written and when the server's own reservation window actually started.
-  submission: 55 * 60_000,
-};
+  // 5min margin under idempotency.server's AMBIGUOUS_TTL_MS (60 min) for
+  // clock/network skew between writing this entry and the server's own
+  // reservation window actually starting.
+  submissionAmbiguous: 55 * 60_000,
+  // Margin under idempotency.server's TTL_MS (10 min), same reasoning.
+  submissionOrdinary: 9 * 60_000,
+} as const;
 
 type RecoveryEntry =
   | { kind: 'job'; jobId: string; roomId: RoomId; outputType: GenerationOutputType; createdAt: number }
-  | { kind: 'submission'; endpoint: string; body: Record<string, unknown>; roomId: RoomId; outputType: GenerationOutputType; createdAt: number };
+  | { kind: 'submission'; ambiguous: boolean; endpoint: string; body: Record<string, unknown>; roomId: RoomId; outputType: GenerationOutputType; createdAt: number };
+
+function recoveryMaxAgeMs(entry: RecoveryEntry): number {
+  if (entry.kind === 'job') return RECOVERY_MAX_AGE_MS.job;
+  return entry.ambiguous ? RECOVERY_MAX_AGE_MS.submissionAmbiguous : RECOVERY_MAX_AGE_MS.submissionOrdinary;
+}
 
 function readRecoveryEntry(): RecoveryEntry | null {
   try {
     const raw = localStorage.getItem(RECOVERY_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as RecoveryEntry;
-    if (Date.now() - parsed.createdAt > RECOVERY_MAX_AGE_MS[parsed.kind]) return null;
+    if (Date.now() - parsed.createdAt > recoveryMaxAgeMs(parsed)) return null;
     return parsed;
   } catch {
     return null;
@@ -414,7 +432,10 @@ export function AIStudioPanel() {
         clearRecoveryEntry();
         if (res.status === 504) {
           setRecoverableSubmission({ endpoint, body });
-          writeRecoveryEntry({ kind: 'submission', endpoint, body, roomId, outputType, createdAt: Date.now() });
+          // ambiguous: true — mirrors isSubmitTimeout server-side, which is
+          // the only way this route returns a 504; that reservation is kept
+          // at the longer AMBIGUOUS_TTL_MS specifically for this case.
+          writeRecoveryEntry({ kind: 'submission', ambiguous: true, endpoint, body, roomId, outputType, createdAt: Date.now() });
         }
         // A definite, pre-billing failure — the approved source this request
         // named fell out of the server's cache. Nothing to resume: clear it
@@ -429,7 +450,10 @@ export function AIStudioPanel() {
       setError('Could not reach the generation service. If it was already submitted, Resume below reuses the exact same request instead of starting a new one.');
       setSubmitting(false);
       setRecoverableSubmission({ endpoint, body });
-      writeRecoveryEntry({ kind: 'submission', endpoint, body, roomId, outputType, createdAt: Date.now() });
+      // ambiguous: false — a network-level failure never upgrades a
+      // server-side reservation; if the request reached the server and
+      // succeeded, that reservation stays at the ordinary (short) TTL_MS.
+      writeRecoveryEntry({ kind: 'submission', ambiguous: false, endpoint, body, roomId, outputType, createdAt: Date.now() });
       return null;
     }
   }

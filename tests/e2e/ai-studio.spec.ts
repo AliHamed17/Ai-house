@@ -274,7 +274,7 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('select').first()).toBeEnabled();
   });
 
-  test('a submission recovery entry older than the server\'s reservation window is not offered for Resume after reload (regression)', async ({ page }) => {
+  test('an ambiguous (504-timeout) submission recovery entry older than the server\'s AMBIGUOUS_TTL_MS is not offered after reload (regression)', async ({ page }) => {
     // idempotency.server's AMBIGUOUS_TTL_MS is 60 minutes — a persisted
     // recovery entry older than that (minus a small safety margin) could be
     // resuming a reservation the server has already forgotten, which would
@@ -282,10 +282,11 @@ test.describe('AI Design Studio (demo mode)', () => {
     // of reconciling to the original one.
     const staleEntry = {
       kind: 'submission',
-      endpoint: '/api/nano-banana/generate',
-      body: { roomId: 'living', idempotencyKey: 'stale-recovery-key', simulate: 'success' },
+      ambiguous: true,
+      endpoint: '/api/higgsfield/generate',
+      body: { roomId: 'living', idempotencyKey: 'stale-ambiguous-recovery-key', simulate: 'success' },
       roomId: 'living',
-      outputType: 'image',
+      outputType: 'video',
       createdAt: Date.now() - 56 * 60_000,
     };
     await page.addInitScript((entry) => {
@@ -297,18 +298,63 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
   });
 
-  test('a submission recovery entry still within the server\'s reservation window is offered for Resume after reload (baseline for the ceiling above)', async ({ page }) => {
+  test('an ambiguous (504-timeout) submission recovery entry still within AMBIGUOUS_TTL_MS is offered after reload (baseline for the ceiling above)', async ({ page }) => {
     const freshEntry = {
       kind: 'submission',
-      endpoint: '/api/nano-banana/generate',
-      body: { roomId: 'living', idempotencyKey: 'fresh-recovery-key', simulate: 'success' },
+      ambiguous: true,
+      endpoint: '/api/higgsfield/generate',
+      body: { roomId: 'living', idempotencyKey: 'fresh-ambiguous-recovery-key', simulate: 'success' },
       roomId: 'living',
-      outputType: 'image',
+      outputType: 'video',
       createdAt: Date.now() - 50 * 60_000,
     };
     await page.addInitScript((entry) => {
       localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify(entry));
     }, freshEntry);
+
+    await page.goto('/#ai-studio');
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+  });
+
+  test('a non-ambiguous (network-failure) submission recovery entry does NOT get the longer ambiguous ceiling (regression)', async ({ page }) => {
+    // A network-level failure never upgrades the server-side reservation —
+    // if the request actually reached the server and succeeded, that
+    // reservation is bounded by the ordinary (short) TTL_MS, not
+    // AMBIGUOUS_TTL_MS. 12 minutes is past the ordinary ceiling but well
+    // within the ambiguous one — this is exactly the gap where treating
+    // every 'submission' entry the same way risked a silent double-billed
+    // resubmission.
+    const staleOrdinaryEntry = {
+      kind: 'submission',
+      ambiguous: false,
+      endpoint: '/api/nano-banana/generate',
+      body: { roomId: 'living', idempotencyKey: 'stale-ordinary-recovery-key', simulate: 'success' },
+      roomId: 'living',
+      outputType: 'image',
+      createdAt: Date.now() - 12 * 60_000,
+    };
+    await page.addInitScript((entry) => {
+      localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify(entry));
+    }, staleOrdinaryEntry);
+
+    await page.goto('/#ai-studio');
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+  });
+
+  test('a non-ambiguous (network-failure) submission recovery entry within its own (shorter) ceiling is still offered (baseline for the ceiling above)', async ({ page }) => {
+    const freshOrdinaryEntry = {
+      kind: 'submission',
+      ambiguous: false,
+      endpoint: '/api/nano-banana/generate',
+      body: { roomId: 'living', idempotencyKey: 'fresh-ordinary-recovery-key', simulate: 'success' },
+      roomId: 'living',
+      outputType: 'image',
+      createdAt: Date.now() - 5 * 60_000,
+    };
+    await page.addInitScript((entry) => {
+      localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify(entry));
+    }, freshOrdinaryEntry);
 
     await page.goto('/#ai-studio');
     await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();

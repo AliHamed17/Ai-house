@@ -35,6 +35,14 @@ export function isIdempotencyKeyMismatchError(error: unknown): boolean {
   return error instanceof Error && error.message === IDEMPOTENCY_KEY_MISMATCH_MESSAGE;
 }
 
+// AIStudioPanel.tsx's client-side RECOVERY_MAX_AGE_MS.submissionOrdinary is
+// intentionally kept at (a small safety margin under) this exact value — a
+// client recovery entry that outlives its actual server-side reservation
+// doesn't resume anything, it silently starts a genuinely new, separately
+// billed submission. This is the ceiling for a NON-ambiguous recoverable
+// submission (a network-level failure) specifically, since success never
+// upgrades a reservation past this TTL. If this changes, that constant must
+// change with it.
 const TTL_MS = 10 * 60_000;
 // An ambiguous (possibly-already-billed) failure gets a much longer window
 // than an ordinary in-flight reservation: the whole point of keeping it is to
@@ -44,11 +52,10 @@ const TTL_MS = 10 * 60_000;
 // the same documented tradeoff resultStore/rateLimit make — it just matches
 // the window to how long this specific kind of doubt plausibly lasts.
 //
-// AIStudioPanel.tsx's client-side RECOVERY_MAX_AGE_MS.submission is
-// intentionally kept at (a small safety margin under) this exact value — a
-// client recovery entry that outlives this reservation doesn't resume
-// anything, it silently starts a genuinely new, separately billed
-// submission. If this changes, that constant must change with it.
+// AIStudioPanel.tsx's client-side RECOVERY_MAX_AGE_MS.submissionAmbiguous is
+// intentionally kept at (a small safety margin under) this exact value, for
+// the same reason as TTL_MS above but for the ambiguous (isSubmitTimeout)
+// case specifically. If this changes, that constant must change with it.
 const AMBIGUOUS_TTL_MS = 60 * 60_000;
 const MAX_ENTRIES = 200;
 const store = new Map<string, IdempotencyEntry>();

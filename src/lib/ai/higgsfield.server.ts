@@ -3,7 +3,7 @@ import { BlockList, isIP } from 'node:net';
 import type { GenerationInput, GenerationJob, GenerationStatus, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
 import { toAbsoluteUrl } from './publicAsset.server';
-import { getStoredResult, resultIdFromPath, SOURCE_EXPIRED_MESSAGE } from './resultStore.server';
+import { resultIdFromPath, SOURCE_EXPIRED_MESSAGE, touchStoredResult } from './resultStore.server';
 import { retryOnce, withTimeout } from './resilience.server';
 
 /**
@@ -106,10 +106,17 @@ export function isHiggsfieldConfigured(): boolean {
  * spending a paid Higgsfield call on a source that will 404 the moment
  * Higgsfield's servers try to fetch it. A static asset path resolves no
  * stored id and is always considered available.
+ *
+ * Uses touchStoredResult rather than a plain existence check: a source with
+ * only seconds left on its TTL could otherwise pass this preflight and still
+ * expire before Higgsfield's servers actually fetch the URL (its own
+ * separate, slower step) — wasting the paid job on a 404 despite the check
+ * having just passed. Touching it resets its clock to a fresh TTL_MS from
+ * this exact moment, comfortably outlasting any realistic fetch delay.
  */
 export function assertSourceStillAvailable(sourceAssetPath: string | undefined): void {
   const storedId = resultIdFromPath(sourceAssetPath ?? '');
-  if (storedId && !getStoredResult(storedId)) {
+  if (storedId && !touchStoredResult(storedId)) {
     throw new Error(SOURCE_EXPIRED_MESSAGE);
   }
 }

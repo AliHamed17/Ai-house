@@ -49,6 +49,28 @@ export function getStoredResult(id: string | undefined): StoredResult | undefine
   return entry;
 }
 
+/**
+ * Like getStoredResult, but also refreshes the entry's TTL clock when found.
+ * A plain existence check at preflight time isn't enough for a source about
+ * to be handed to a real, slower external step (Higgsfield fetching the URL
+ * itself, on its own schedule) — a source that had only seconds left could
+ * pass the preflight check and still expire before that fetch happens,
+ * wasting a paid job on a 404. Touching it gives it a fresh, full TTL_MS
+ * from this exact moment, which comfortably outlasts any realistic
+ * provider fetch time.
+ */
+export function touchStoredResult(id: string | undefined): boolean {
+  if (!id) return false;
+  const entry = store.get(id);
+  if (!entry) return false;
+  if (Date.now() - entry.createdAt > TTL_MS) {
+    store.delete(id);
+    return false;
+  }
+  entry.createdAt = Date.now();
+  return true;
+}
+
 /** Matches the public URL the client and provider adapters use to fetch a stored result. */
 export const RESULT_URL_PREFIX = '/api/generation/result/';
 

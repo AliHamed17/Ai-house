@@ -379,4 +379,31 @@ test.describe('AI Design Studio (demo mode)', () => {
     await page.goto('/#ai-studio');
     await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible();
   });
+
+  test('a fresh submission is recoverable even if the page reloads before the request itself ever settles (regression)', async ({ page }) => {
+    // The request never resolves at all here — simulating the browser
+    // context disappearing (a reload, a crash, a closed tab) WHILE the POST
+    // is still genuinely in flight, before the client has any chance to
+    // learn the outcome one way or the other (no response, no thrown
+    // error). Recovery state written only after the fetch settles would
+    // leave no trace anywhere — not even in memory — that this submission
+    // ever happened, even though the server may have already accepted (and
+    // could still be running, or have already run and billed) it.
+    await page.route('**/api/nano-banana/generate', () => new Promise(() => {}));
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    // Give the click's fetch a moment to actually start before reloading.
+    await page.waitForTimeout(500);
+    await page.reload();
+
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+    await expect(page.locator('select').first()).toBeDisabled();
+
+    // Confirm it isn't just a stranded banner — unblocking and resuming
+    // still completes normally.
+    await page.unroute('**/api/nano-banana/generate');
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+  });
 });

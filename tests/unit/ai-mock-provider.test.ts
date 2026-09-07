@@ -101,6 +101,31 @@ describe('mock generation provider', () => {
     vi.useRealTimers();
   });
 
+  it('falls back to the placeholder when the stored source has already expired by submit time, instead of baking in a dead URL (regression)', async () => {
+    // resultIdFromPath alone only confirms the PATH shape — a stored result
+    // approved a while before the visitor finally clicks "Generate cinematic
+    // clip" can have already fallen out of the TTL-bounded store by submit
+    // time. Without checking existence too, this job would later report
+    // "completed" with a resultUrl that 404s.
+    vi.useFakeTimers();
+    const start = Date.now();
+    const storedId = putStoredResult('image/png', 'aGVsbG8=');
+    const storedPath = `${RESULT_URL_PREFIX}${storedId}`;
+    vi.setSystemTime(start + 11 * 60_000); // past resultStore's 10-minute TTL
+    const { jobId } = await mockProvider.submit({
+      provider: 'higgsfield',
+      outputType: 'video',
+      roomId: 'living',
+      styleVariant: 'warm-oak',
+      prompt: 'p',
+      sourceAssetPath: storedPath,
+    });
+    vi.setSystemTime(start + 11 * 60_000 + 3000);
+    const completed = await mockProvider.status(jobId);
+    expect(completed.resultUrl).toBe('/generated/concepts/living.svg');
+    vi.useRealTimers();
+  });
+
   it('does not reuse a stored source for an IMAGE job (the placeholder concept art is the intended demo result there)', async () => {
     vi.useFakeTimers();
     const start = Date.now();

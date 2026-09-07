@@ -1,7 +1,7 @@
 import 'server-only';
 import type { GenerationInput, GenerationJob, GenerationStatus, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
-import { resultIdFromPath } from './resultStore.server';
+import { getStoredResult, resultIdFromPath } from './resultStore.server';
 
 const QUEUED_UNTIL_MS = 900;
 const IN_PROGRESS_UNTIL_MS = 2600;
@@ -20,11 +20,15 @@ export const mockProvider: MediaGenerationProvider = {
     // through to the mock clip below — a raw evidence frame or the generic
     // concept-placeholder path is what the mock IMAGE flow already shows by
     // default, so reusing those here would replace the nicer placeholder art
-    // with a raw photo instead of improving on anything.
-    const mockSourceResultPath =
-      input.outputType === 'video' && input.sourceAssetPath && resultIdFromPath(input.sourceAssetPath)
-        ? input.sourceAssetPath
-        : undefined;
+    // with a raw photo instead of improving on anything. Checking
+    // resultIdFromPath alone only confirms the PATH shape, not that the
+    // bytes are actually still there — a stored result approved a while ago
+    // could have already fallen out of the TTL-bounded store by the time
+    // this (demo, unbilled) submit runs, which would otherwise bake a
+    // future-404 URL into a job that later reports "completed".
+    const storedSourceId =
+      input.outputType === 'video' && input.sourceAssetPath ? resultIdFromPath(input.sourceAssetPath) : undefined;
+    const mockSourceResultPath = storedSourceId && getStoredResult(storedSourceId) ? input.sourceAssetPath : undefined;
     const jobId = encodeJobId({
       provider: 'mock',
       roomId: input.roomId,

@@ -28,6 +28,15 @@ export function MobileControls() {
     if (mode !== 'first-person') {
       setMobileMove({ x: 0, z: 0 });
     }
+    // A cleanup, not just the mode-change branch above: if this component
+    // unmounts entirely while still holding a nonzero move (a visitor holds
+    // the joystick and closes the explorer with another finger), mobileMove
+    // is never reset — it lives in the shared Zustand store, not local
+    // state, so useFrame keeps reading that stale nonzero value and the
+    // camera starts walking again the instant the explorer reopens.
+    return () => {
+      setMobileMove({ x: 0, z: 0 });
+    };
   }, [mode, setMobileMove]);
 
   if (!isTouchDevice || mode !== 'first-person') return null;

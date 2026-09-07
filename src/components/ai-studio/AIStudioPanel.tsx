@@ -399,6 +399,22 @@ export function AIStudioPanel() {
   // Shared between a fresh submission (handleGenerate) and resuming one
   // (handleResumeSubmission).
   async function submitOnce(endpoint: string, body: Record<string, unknown>, token: number, isResume = false): Promise<string | null> {
+    // Written before fetch() is even called, not only once it settles — a
+    // tab closing or crashing while THIS exact POST is still in flight
+    // otherwise leaves no trace anywhere (not persisted, not even in
+    // memory) that a possibly-billed submission happened at all, even
+    // though the server may have already accepted (and is running, or has
+    // already run) it. ambiguous: false is the same safe assumption used
+    // for a network-level failure below: we don't yet know the outcome, so
+    // assume the shorter, ordinary-TTL ceiling rather than the longer one.
+    // Skipped for a resume: the entry it's resuming already exists (that's
+    // why Resume is being offered) and already covers this same case: if
+    // this attempt is also interrupted, that untouched original entry is
+    // what a later reload falls back to.
+    const createdAt = Date.now();
+    if (!isResume) {
+      writeRecoveryEntry({ kind: 'submission', ambiguous: false, endpoint, body, roomId, outputType, createdAt });
+    }
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -416,13 +432,23 @@ export function AIStudioPanel() {
               ? `Too many attempts — please wait ${retryAfterSeconds}s and try again.`
               : (data.error ?? 'Too many attempts. Please wait a moment and try again.'),
           );
-          // Deliberately does NOT clearRecoveryEntry(): this was never a
-          // conclusive outcome for the original submission, only a local
-          // throttle on THIS attempt. handleResumeSubmission already
-          // optimistically cleared the in-memory state before calling this,
-          // so it's restored here — the persisted entry was never touched,
-          // so it's still exactly as it was.
-          if (isResume) setRecoverableSubmission({ endpoint, body });
+          if (isResume) {
+            // Deliberately does NOT clearRecoveryEntry(): this was never a
+            // conclusive outcome for the original submission, only a local
+            // throttle on THIS attempt. handleResumeSubmission already
+            // optimistically cleared the in-memory state before calling
+            // this, so it's restored here — the persisted entry (predating
+            // this resume attempt, and never touched by the pre-fetch write
+            // above since that's skipped for a resume) is still exactly as
+            // it was.
+            setRecoverableSubmission({ endpoint, body });
+          } else {
+            // Nothing reached the provider — the rate limiter rejected this
+            // fresh attempt before it got anywhere near reserveIdempotentSubmission.
+            // The pre-fetch entry above was only ever a speculative just-in-case
+            // write and can be discarded now that the outcome is known.
+            clearRecoveryEntry();
+          }
           return null;
         }
         setError(data.error ?? 'Generation request failed.');
@@ -432,9 +458,10 @@ export function AIStudioPanel() {
         clearRecoveryEntry();
         if (res.status === 504) {
           setRecoverableSubmission({ endpoint, body });
-          // ambiguous: true — mirrors isSubmitTimeout server-side, which is
-          // the only way this route returns a 504; that reservation is kept
-          // at the longer AMBIGUOUS_TTL_MS specifically for this case.
+          // ambiguous: true, with a FRESH timestamp — mirrors isSubmitTimeout
+          // server-side (the only way this route returns a 504), which is
+          // exactly when idempotency.server refreshes createdAt and upgrades
+          // to the longer AMBIGUOUS_TTL_MS for this same reservation.
           writeRecoveryEntry({ kind: 'submission', ambiguous: true, endpoint, body, roomId, outputType, createdAt: Date.now() });
         }
         // A definite, pre-billing failure — the approved source this request
@@ -450,10 +477,12 @@ export function AIStudioPanel() {
       setError('Could not reach the generation service. If it was already submitted, Resume below reuses the exact same request instead of starting a new one.');
       setSubmitting(false);
       setRecoverableSubmission({ endpoint, body });
-      // ambiguous: false — a network-level failure never upgrades a
-      // server-side reservation; if the request reached the server and
-      // succeeded, that reservation stays at the ordinary (short) TTL_MS.
-      writeRecoveryEntry({ kind: 'submission', ambiguous: false, endpoint, body, roomId, outputType, createdAt: Date.now() });
+      // ambiguous: false, keeping the ORIGINAL pre-fetch createdAt (not a
+      // fresh Date.now() here) — a network-level failure never upgrades a
+      // server-side reservation, so if the request reached the server and
+      // succeeded, that reservation's own clock started at (approximately)
+      // when the request arrived, not when this client-side catch fired.
+      writeRecoveryEntry({ kind: 'submission', ambiguous: false, endpoint, body, roomId, outputType, createdAt });
       return null;
     }
   }

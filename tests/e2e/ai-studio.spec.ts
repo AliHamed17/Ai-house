@@ -94,4 +94,26 @@ test.describe('AI Design Studio (demo mode)', () => {
     await page.getByRole('button', { name: 'Resume checking status' }).click();
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
   });
+
+  test('a submit-response outage keeps the submission recoverable and locks room/output selection (regression)', async ({ page }) => {
+    // The generate POST never gets a response back (a dropped connection),
+    // even though a real server could have already accepted and billed it —
+    // the submission must stay recoverable (never silently discarded), and
+    // room/output selection must lock so an eventual result can't get
+    // displayed or approved against a room switched to in the meantime.
+    let blockGenerate = true;
+    await page.route('**/api/nano-banana/generate', (route) => (blockGenerate ? route.abort() : route.continue()));
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+
+    await expect(page.getByText(/Lost connection while submitting a generation/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('select').first()).toBeDisabled();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
+
+    blockGenerate = false;
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('select').first()).toBeEnabled();
+  });
 });

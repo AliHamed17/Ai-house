@@ -4,6 +4,7 @@ import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.serv
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
 import { buildNanoBananaEditPrompt, buildNanoBananaPrompt } from '@/data/roomPrompts';
 import { resultIdFromPath } from '@/lib/ai/resultStore.server';
+import { getIdempotentJobId, recordIdempotentJobId } from '@/lib/ai/idempotency.server';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,16 @@ export async function POST(request: NextRequest) {
   }
 
   const { provider, demoMode } = resolveProviderForSubmit('nano-banana');
+
+  // If this exact submission (by idempotency key) already produced a job —
+  // e.g. the client's fetch threw after a live, single-shot Gemini call had
+  // already completed and been billed server-side, and it's now retrying —
+  // return that same job instead of starting (and billing) a second one.
+  const existingJobId = getIdempotentJobId(validated.data.idempotencyKey);
+  if (existingJobId) {
+    return NextResponse.json({ jobId: existingJobId, demoMode, provider: demoMode ? 'mock' : 'nano-banana' });
+  }
+
   // The edit-prompt framing ("refine this approved concept") only makes sense
   // when the source is actually a prior generated-and-approved result — never
   // the raw unfinished evidence frame. Check that server-side (a stored-result
@@ -51,6 +62,7 @@ export async function POST(request: NextRequest) {
       prompt,
       simulate: validated.data.simulate,
     });
+    recordIdempotentJobId(validated.data.idempotencyKey, jobId);
     return NextResponse.json({ jobId, demoMode, provider: demoMode ? 'mock' : 'nano-banana' });
   } catch (error) {
     console.error('[nano-banana/generate] submission failed:', error);

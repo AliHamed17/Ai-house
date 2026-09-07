@@ -49,4 +49,23 @@ describe('generation request validation', () => {
     const bad = validateGenerationRequest({ roomId: 'living', simulate: 'explode' });
     expect(bad.ok && bad.data.simulate).toBeUndefined();
   });
+
+  it('accepts a well-formed idempotencyKey (a crypto.randomUUID() shape)', () => {
+    const result = validateGenerationRequest({ roomId: 'living', idempotencyKey: '3fa85f64-5717-4562-b3fc-2c963f66afa6' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.idempotencyKey).toBe('3fa85f64-5717-4562-b3fc-2c963f66afa6');
+  });
+
+  it('omits idempotencyKey when absent (older clients)', () => {
+    const result = validateGenerationRequest({ roomId: 'living' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.idempotencyKey).toBeUndefined();
+  });
+
+  it('rejects a malformed idempotencyKey', () => {
+    expect(validateGenerationRequest({ roomId: 'living', idempotencyKey: 'has spaces' }).ok).toBe(false);
+    expect(validateGenerationRequest({ roomId: 'living', idempotencyKey: 'x'.repeat(101) }).ok).toBe(false);
+    expect(validateGenerationRequest({ roomId: 'living', idempotencyKey: '<script>' }).ok).toBe(false);
+    expect(validateGenerationRequest({ roomId: 'living', idempotencyKey: '' }).ok).toBe(false);
+  });
 });

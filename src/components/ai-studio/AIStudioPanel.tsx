@@ -66,6 +66,12 @@ export function AIStudioPanel() {
   // is kept here — not just dropped — until the visitor resumes checking on
   // it or deliberately starts a fresh generation.
   const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
+  // A submission whose HTTP response never reached us (a dropped connection,
+  // a client-side timeout) — the server may have already accepted, run, and
+  // billed it. Holds exactly what's needed to retry the identical request:
+  // its idempotencyKey lets the server recognize the retry and return the
+  // job it already created instead of starting a duplicate one.
+  const [recoverableSubmission, setRecoverableSubmission] = useState<{ endpoint: string; body: Record<string, unknown> } | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Bumped on every new generation; each in-flight fetch captures the value and
   // bails if a newer run has superseded it, so a slow/out-of-order status
@@ -138,8 +144,18 @@ export function AIStudioPanel() {
   // fallback guess — and only relax it once a genuine response confirms
   // Higgsfield is actually in demo mode for this deployment.
   const liveVideoNeedsApproval = outputType === 'video' && !approvedForCurrentRoom && (!modeConfirmed || Boolean(liveStatus?.higgsfield));
+  // Either kind of unresolved job (a submission whose response was lost, or
+  // one whose status-polling gave up) must block both a new submission and
+  // a room/output change — changing context out from under an unresolved
+  // job would let its eventual result get displayed, approved, or billed
+  // against the wrong room.
+  const hasUnresolvedJob = recoverableJobId !== null || recoverableSubmission !== null;
 
   function handleRoomChange(nextRoomId: RoomId) {
+    // The selector is disabled in this state too; this guard is defense in
+    // depth so an unresolved job's eventual result can never be displayed,
+    // approved, or billed against a room switched to after it was submitted.
+    if (hasUnresolvedJob) return;
     setRoomId(nextRoomId);
     if (!VIDEO_CAPABLE_ROOMS.has(nextRoomId) && outputType === 'video') setOutputType('image');
     setConfirmingLiveRun(false);
@@ -153,6 +169,7 @@ export function AIStudioPanel() {
   }
 
   function handleOutputTypeChange(nextOutputType: GenerationOutputType) {
+    if (hasUnresolvedJob) return;
     if (nextOutputType === 'video' && !videoAvailableForRoom) return;
     setOutputType(nextOutputType);
     setConfirmingLiveRun(false);
@@ -163,7 +180,7 @@ export function AIStudioPanel() {
     if (liveVideoNeedsApproval) return;
     // Never start a new (possibly billed) job while a previous one's fate is
     // still unknown — resume checking on it instead of risking a duplicate.
-    if (recoverableJobId) return;
+    if (hasUnresolvedJob) return;
     if (isLiveForOutput && !confirmingLiveRun) {
       setConfirmingLiveRun(true);
       return;
@@ -237,6 +254,54 @@ export function AIStudioPanel() {
     startPolling(jobId, token);
   }
 
+  // Submits one generation request. On a definite failure (a non-OK HTTP
+  // response, which the server has already resolved one way or another) it
+  // just reports the error. On a network-level failure — the fetch itself
+  // throwing, so we cannot tell "never reached the server" apart from
+  // "reached the server, which ran and billed it, but the response never
+  // came back" — it does NOT tell the visitor it's safe to just try again.
+  // The exact request (endpoint, body, and its idempotencyKey) is kept as
+  // recoverableSubmission so a retry reuses the same key: the server
+  // recognizes it and returns the job it already created rather than
+  // starting and billing a second one. Shared between a fresh submission
+  // (handleGenerate) and resuming one (handleResumeSubmission).
+  async function submitOnce(endpoint: string, body: Record<string, unknown>, token: number): Promise<string | null> {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (token !== pollTokenRef.current) return null; // a newer run superseded this one
+      if (!res.ok) {
+        setError(data.error ?? 'Generation request failed.');
+        setSubmitting(false);
+        return null;
+      }
+      return data.jobId as string;
+    } catch {
+      if (token !== pollTokenRef.current) return null;
+      setError('Could not reach the generation service. If it was already submitted, Resume below reuses the exact same request instead of starting a new one.');
+      setSubmitting(false);
+      setRecoverableSubmission({ endpoint, body });
+      return null;
+    }
+  }
+
+  function handleResumeSubmission() {
+    if (!recoverableSubmission) return;
+    const { endpoint, body } = recoverableSubmission;
+    const token = ++pollTokenRef.current;
+    setSubmitting(true);
+    setError(null);
+    setRecoverableSubmission(null);
+    void (async () => {
+      const jobId = await submitOnce(endpoint, body, token);
+      if (jobId) startPolling(jobId, token);
+    })();
+  }
+
   async function handleGenerate() {
     const token = ++pollTokenRef.current;
     setSubmitting(true);
@@ -246,6 +311,7 @@ export function AIStudioPanel() {
     // A deliberate new submission is the one case where abandoning a prior
     // unresolved job is the visitor's own informed choice, not silent loss.
     setRecoverableJobId(null);
+    setRecoverableSubmission(null);
 
     const endpoint = outputType === 'image' ? '/api/nano-banana/generate' : '/api/higgsfield/generate';
     // Once a concept for THIS room has been approved, both a refinement and a
@@ -253,36 +319,17 @@ export function AIStudioPanel() {
     // starts from the room's evidence frame and a clip from its concept still.
     const approvedForRoom = approvedSource && approvedSource.roomId === roomId ? approvedSource.path : undefined;
     const sourceAssetPath = approvedForRoom ?? (outputType === 'image' ? roomEvidenceFrame[roomId]?.path : conceptImagePath(roomId));
+    const body = {
+      roomId,
+      styleVariant,
+      sourceAssetPath,
+      editInstruction: editInstruction || undefined,
+      simulate,
+      idempotencyKey: crypto.randomUUID(),
+    };
 
-    let jobId: string;
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          roomId,
-          styleVariant,
-          sourceAssetPath,
-          editInstruction: editInstruction || undefined,
-          simulate,
-        }),
-      });
-      const data = await res.json();
-      if (token !== pollTokenRef.current) return; // a newer run superseded this one
-      if (!res.ok) {
-        setError(data.error ?? 'Generation request failed.');
-        setSubmitting(false);
-        return;
-      }
-      jobId = data.jobId;
-    } catch {
-      if (token !== pollTokenRef.current) return;
-      setError('Could not reach the generation service.');
-      setSubmitting(false);
-      return;
-    }
-
-    startPolling(jobId, token);
+    const jobId = await submitOnce(endpoint, body, token);
+    if (jobId) startPolling(jobId, token);
   }
 
   const activeRoom = houseModel.rooms.find((r) => r.id === roomId)!;
@@ -308,7 +355,7 @@ export function AIStudioPanel() {
           <select
             value={roomId}
             onChange={(e) => handleRoomChange(e.target.value as RoomId)}
-            disabled={submitting}
+            disabled={submitting || hasUnresolvedJob}
             className="rounded-xl border border-limestone/60 bg-ivory px-3 py-2 text-charcoal disabled:cursor-not-allowed disabled:opacity-60"
           >
             {houseModel.rooms.map((room) => (
@@ -340,7 +387,7 @@ export function AIStudioPanel() {
             <button
               type="button"
               onClick={() => handleOutputTypeChange('image')}
-              disabled={submitting}
+              disabled={submitting || hasUnresolvedJob}
               className={`flex-1 px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${outputType === 'image' ? 'bg-bronze text-ivory' : 'bg-ivory text-charcoal'}`}
             >
               Photorealistic image (Nano Banana)
@@ -348,7 +395,7 @@ export function AIStudioPanel() {
             <button
               type="button"
               onClick={() => handleOutputTypeChange('video')}
-              disabled={submitting || !videoAvailableForRoom}
+              disabled={submitting || hasUnresolvedJob || !videoAvailableForRoom}
               className={`flex-1 px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${outputType === 'video' ? 'bg-bronze text-ivory' : 'bg-ivory text-charcoal'}`}
               title={videoAvailableForRoom ? undefined : 'Cinematic clips are limited to the principal rooms.'}
             >
@@ -414,7 +461,7 @@ export function AIStudioPanel() {
         <button
           type="button"
           onClick={handleGenerateClick}
-          disabled={submitting || liveStatus === null || liveVideoNeedsApproval || recoverableJobId !== null}
+          disabled={submitting || liveStatus === null || liveVideoNeedsApproval || hasUnresolvedJob}
           className="mt-5 w-full rounded-full bg-bronze px-4 py-3 text-sm font-semibold text-ivory shadow disabled:opacity-60 md:w-auto"
         >
           {liveStatus === null
@@ -436,6 +483,21 @@ export function AIStudioPanel() {
             className="mt-2 rounded-full bg-bronze px-4 py-2 text-xs font-semibold text-ivory shadow"
           >
             Resume checking status
+          </button>
+        </div>
+      )}
+      {recoverableSubmission && (
+        <div className="mt-4 rounded-xl border border-bronze/40 bg-bronze/10 px-4 py-3">
+          <p className="text-sm font-semibold text-charcoal">
+            Lost connection while submitting a generation — it may have already been received and billed. Resuming
+            reuses the exact same request rather than starting a new, possibly duplicate one.
+          </p>
+          <button
+            type="button"
+            onClick={handleResumeSubmission}
+            className="mt-2 rounded-full bg-bronze px-4 py-2 text-xs font-semibold text-ivory shadow"
+          >
+            Resume submission
           </button>
         </div>
       )}

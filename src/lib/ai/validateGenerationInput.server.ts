@@ -7,12 +7,15 @@ const VALID_ROOM_IDS = new Set<string>(houseModel.rooms.map((r) => r.id));
 const VALID_VARIANT_IDS = new Set(materialVariants.map((v) => v.id));
 const SIMULATE_VALUES = new Set(['success', 'failure', 'moderated']);
 
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9-]{1,100}$/;
+
 export interface ValidatedGenerationRequest {
   roomId: RoomId;
   styleVariant: string;
   sourceAssetPath?: string;
   simulate?: 'success' | 'failure' | 'moderated';
   editInstruction?: string;
+  idempotencyKey?: string;
 }
 
 export type ValidationResult =
@@ -49,5 +52,17 @@ export function validateGenerationRequest(body: unknown): ValidationResult {
     editInstruction = b.editInstruction.slice(0, 500);
   }
 
-  return { ok: true, data: { roomId: b.roomId as RoomId, styleVariant, sourceAssetPath, simulate, editInstruction } };
+  // A client-generated key (crypto.randomUUID() shape, but not required to
+  // be one) used to reconcile a retried submission with a job the server
+  // already created for it — see idempotency.server.ts. Absent entirely on
+  // a client that predates this field; never required.
+  let idempotencyKey: string | undefined;
+  if (b.idempotencyKey !== undefined) {
+    if (typeof b.idempotencyKey !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(b.idempotencyKey)) {
+      return { ok: false, error: 'idempotencyKey must be a short alphanumeric/hyphen string.' };
+    }
+    idempotencyKey = b.idempotencyKey;
+  }
+
+  return { ok: true, data: { roomId: b.roomId as RoomId, styleVariant, sourceAssetPath, simulate, editInstruction, idempotencyKey } };
 }

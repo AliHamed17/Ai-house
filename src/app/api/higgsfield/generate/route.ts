@@ -4,6 +4,7 @@ import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.serv
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
 import { resultIdFromPath } from '@/lib/ai/resultStore.server';
 import { isSubmitTimeout } from '@/lib/ai/higgsfield.server';
+import { getIdempotentJobId, recordIdempotentJobId } from '@/lib/ai/idempotency.server';
 import { buildHiggsfieldPrompt } from '@/data/roomPrompts';
 
 export const dynamic = 'force-dynamic';
@@ -34,6 +35,15 @@ export async function POST(request: NextRequest) {
 
   const { provider, demoMode } = resolveProviderForSubmit('higgsfield');
 
+  // If this exact submission (by idempotency key) already produced a job —
+  // e.g. the client's fetch threw after the server had already accepted and
+  // possibly billed the request, and it's now retrying — return that same
+  // job instead of starting (and billing) a second one.
+  const existingJobId = getIdempotentJobId(validated.data.idempotencyKey);
+  if (existingJobId) {
+    return NextResponse.json({ jobId: existingJobId, demoMode, provider: demoMode ? 'mock' : 'higgsfield' });
+  }
+
   // The client only shows a "must approve a real image first" gate as a UX
   // nicety — this route is directly reachable, so that check alone can't stop
   // a caller from submitting any nonempty site-relative path (a static
@@ -60,6 +70,7 @@ export async function POST(request: NextRequest) {
       prompt,
       simulate: validated.data.simulate,
     });
+    recordIdempotentJobId(validated.data.idempotencyKey, jobId);
     return NextResponse.json({ jobId, demoMode, provider: demoMode ? 'mock' : 'higgsfield' });
   } catch (error) {
     console.error('[higgsfield/generate] submission failed:', error);

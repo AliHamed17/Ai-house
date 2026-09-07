@@ -85,28 +85,57 @@ const RECOVERY_MAX_AGE_MS = {
 
 type RecoveryEntry =
   | { kind: 'job'; jobId: string; roomId: RoomId; outputType: GenerationOutputType; createdAt: number }
-  | { kind: 'submission'; ambiguous: boolean; endpoint: string; body: Record<string, unknown>; roomId: RoomId; outputType: GenerationOutputType; createdAt: number };
+  | {
+      kind: 'submission';
+      ambiguous: boolean;
+      idempotencyKey: string;
+      endpoint: string;
+      body: Record<string, unknown>;
+      roomId: RoomId;
+      outputType: GenerationOutputType;
+      createdAt: number;
+    };
 
 function recoveryMaxAgeMs(entry: RecoveryEntry): number {
   if (entry.kind === 'job') return RECOVERY_MAX_AGE_MS.job;
   return entry.ambiguous ? RECOVERY_MAX_AGE_MS.submissionAmbiguous : RECOVERY_MAX_AGE_MS.submissionOrdinary;
 }
 
-function readRecoveryEntry(): RecoveryEntry | null {
+// Every entry is keyed by its own generation's stable identity — a job's
+// jobId, or a submission's idempotencyKey — rather than all sharing one
+// slot. Two tabs (genuinely different browser tabs, or two tabs of the same
+// browser both open to this page) each tracking their own in-flight
+// generation write to the SAME origin-wide localStorage; a single shared key
+// meant either tab's write, or either tab's terminal-state clear, could
+// silently overwrite or destroy the OTHER tab's still-active recovery record
+// (regression) — after which a reload of that other tab would offer no
+// recovery at all and silently permit a second, possibly duplicate-billed
+// submission. Keying by identity means a write or clear only ever touches
+// the one entry it actually owns.
+function jobRecoveryId(jobId: string): string {
+  return `job:${jobId}`;
+}
+function submissionRecoveryId(idempotencyKey: string): string {
+  return `submission:${idempotencyKey}`;
+}
+function recoveryEntryId(entry: RecoveryEntry): string {
+  return entry.kind === 'job' ? jobRecoveryId(entry.jobId) : submissionRecoveryId(entry.idempotencyKey);
+}
+
+function readAllRecoveryEntries(): Record<string, RecoveryEntry> {
   try {
     const raw = localStorage.getItem(RECOVERY_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as RecoveryEntry;
-    if (Date.now() - parsed.createdAt > recoveryMaxAgeMs(parsed)) return null;
-    return parsed;
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, RecoveryEntry>;
   } catch {
-    return null;
+    return {};
   }
 }
 
-function writeRecoveryEntry(entry: RecoveryEntry): void {
+function writeAllRecoveryEntries(all: Record<string, RecoveryEntry>): void {
   try {
-    localStorage.setItem(RECOVERY_STORAGE_KEY, JSON.stringify(entry));
+    if (Object.keys(all).length === 0) localStorage.removeItem(RECOVERY_STORAGE_KEY);
+    else localStorage.setItem(RECOVERY_STORAGE_KEY, JSON.stringify(all));
   } catch {
     // Best-effort (private browsing, storage disabled, quota) — the
     // in-memory state this mirrors still works for as long as the tab
@@ -114,12 +143,38 @@ function writeRecoveryEntry(entry: RecoveryEntry): void {
   }
 }
 
-function clearRecoveryEntry(): void {
-  try {
-    localStorage.removeItem(RECOVERY_STORAGE_KEY);
-  } catch {
-    // best-effort, see writeRecoveryEntry
+// Restores the most recently written still-valid entry (a reasonable choice
+// when more than one is present — see the multi-tab note above; this tab's
+// own subsequent actions then track that ONE entry by its own identity, same
+// as any other restore) and opportunistically prunes every expired entry so
+// the store does not grow unboundedly across many abandoned tabs over time.
+function readRecoveryEntry(): RecoveryEntry | null {
+  const all = readAllRecoveryEntries();
+  let newest: RecoveryEntry | null = null;
+  let changed = false;
+  for (const [id, entry] of Object.entries(all)) {
+    if (Date.now() - entry.createdAt > recoveryMaxAgeMs(entry)) {
+      delete all[id];
+      changed = true;
+      continue;
+    }
+    if (!newest || entry.createdAt > newest.createdAt) newest = entry;
   }
+  if (changed) writeAllRecoveryEntries(all);
+  return newest;
+}
+
+function writeRecoveryEntry(entry: RecoveryEntry): void {
+  const all = readAllRecoveryEntries();
+  all[recoveryEntryId(entry)] = entry;
+  writeAllRecoveryEntries(all);
+}
+
+function clearRecoveryEntry(id: string): void {
+  const all = readAllRecoveryEntries();
+  if (!(id in all)) return;
+  delete all[id];
+  writeAllRecoveryEntries(all);
 }
 
 export function AIStudioPanel() {
@@ -343,7 +398,7 @@ export function AIStudioPanel() {
         if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
           setSubmitting(false);
           setRecoverableJobId(null);
-          clearRecoveryEntry();
+          clearRecoveryEntry(jobRecoveryId(jobId));
           return;
         }
         pollTimerRef.current = setTimeout(poll, 1000);
@@ -366,6 +421,34 @@ export function AIStudioPanel() {
     // while a fresh attempt is in flight.
     setRecoverableJobId(null);
     startPolling(jobId, token);
+  }
+
+  // A job can become PERMANENTLY uncheckable (e.g. the provider credentials
+  // it needs are removed after submission) — every status attempt then
+  // exhausts its retries the same way forever, "Resume checking status"
+  // never succeeds, and the 24h recovery ceiling is only evaluated at mount,
+  // so a tab that is never reloaded would otherwise stay locked out of
+  // Generate indefinitely with no way out (regression). This gives the
+  // visitor an explicit, deliberate way to stop tracking it locally instead.
+  function handleAbandonJob() {
+    if (!recoverableJobId) return;
+    // A newer token means any already-scheduled retry timeout from the
+    // abandoned poll loop drops its result instead of acting on it — the
+    // same guard startPolling's own responses already rely on.
+    ++pollTokenRef.current;
+    clearRecoveryEntry(jobRecoveryId(recoverableJobId));
+    setRecoverableJobId(null);
+    setError(null);
+  }
+
+  // Same reasoning as handleAbandonJob, for a submission whose outcome is
+  // ambiguous rather than a job that is merely uncheckable.
+  function handleAbandonSubmission() {
+    if (!recoverableSubmission) return;
+    ++pollTokenRef.current;
+    clearRecoveryEntry(submissionRecoveryId(recoverableSubmission.body.idempotencyKey as string));
+    setRecoverableSubmission(null);
+    setError(null);
   }
 
   // Submits one generation request. On a definite failure (a non-OK HTTP
@@ -413,8 +496,9 @@ export function AIStudioPanel() {
     // this attempt is also interrupted, that untouched original entry is
     // what a later reload falls back to.
     const createdAt = Date.now();
+    const idempotencyKey = body.idempotencyKey as string;
     if (!isResume) {
-      writeRecoveryEntry({ kind: 'submission', ambiguous: false, endpoint, body, roomId, outputType, createdAt });
+      writeRecoveryEntry({ kind: 'submission', ambiguous: false, idempotencyKey, endpoint, body, roomId, outputType, createdAt });
     }
     try {
       const res = await fetch(endpoint, {
@@ -448,7 +532,7 @@ export function AIStudioPanel() {
             // fresh attempt before it got anywhere near reserveIdempotentSubmission.
             // The pre-fetch entry above was only ever a speculative just-in-case
             // write and can be discarded now that the outcome is known.
-            clearRecoveryEntry();
+            clearRecoveryEntry(submissionRecoveryId(idempotencyKey));
           }
           return null;
         }
@@ -456,14 +540,14 @@ export function AIStudioPanel() {
         // Cleared unconditionally first: a stale entry from an earlier
         // ambiguous attempt on this same request (see handleResumeSubmission)
         // must not survive a now-definite outcome, whichever way it resolved.
-        clearRecoveryEntry();
+        clearRecoveryEntry(submissionRecoveryId(idempotencyKey));
         if (res.status === 504) {
           setRecoverableSubmission({ endpoint, body });
           // ambiguous: true, with a FRESH timestamp — mirrors isSubmitTimeout
           // server-side (the only way either generate route returns a 504),
           // which is exactly when idempotency.server refreshes createdAt and
           // upgrades to the longer AMBIGUOUS_TTL_MS for this same reservation.
-          writeRecoveryEntry({ kind: 'submission', ambiguous: true, endpoint, body, roomId, outputType, createdAt: Date.now() });
+          writeRecoveryEntry({ kind: 'submission', ambiguous: true, idempotencyKey, endpoint, body, roomId, outputType, createdAt: Date.now() });
         }
         // A definite, pre-billing failure — the approved source this request
         // named fell out of the server's cache. Nothing to resume: clear it
@@ -483,7 +567,7 @@ export function AIStudioPanel() {
       // server-side reservation, so if the request reached the server and
       // succeeded, that reservation's own clock started at (approximately)
       // when the request arrived, not when this client-side catch fired.
-      writeRecoveryEntry({ kind: 'submission', ambiguous: false, endpoint, body, roomId, outputType, createdAt });
+      writeRecoveryEntry({ kind: 'submission', ambiguous: false, idempotencyKey, endpoint, body, roomId, outputType, createdAt });
       return null;
     }
   }
@@ -497,7 +581,13 @@ export function AIStudioPanel() {
     setRecoverableSubmission(null);
     void (async () => {
       const jobId = await submitOnce(endpoint, body, token, true);
-      if (jobId) startPolling(jobId, token);
+      if (jobId) {
+        // The submission's own entry is now superseded by the job entry
+        // startPolling writes below — clear it explicitly so it doesn't
+        // linger in storage until it eventually ages out on its own.
+        clearRecoveryEntry(submissionRecoveryId(body.idempotencyKey as string));
+        startPolling(jobId, token);
+      }
     })();
   }
 
@@ -509,9 +599,14 @@ export function AIStudioPanel() {
     setApproved(false);
     // A deliberate new submission is the one case where abandoning a prior
     // unresolved job is the visitor's own informed choice, not silent loss.
+    // (handleGenerateClick already returns early while hasUnresolvedJob is
+    // true, so recoverableJobId/recoverableSubmission are already guaranteed
+    // null here — there is nothing of THIS tab's own left to clear from
+    // storage, and blindly clearing "whatever's there" could only ever hit a
+    // DIFFERENT tab's still-active entry now that entries are keyed per
+    // generation rather than sharing one slot.)
     setRecoverableJobId(null);
     setRecoverableSubmission(null);
-    clearRecoveryEntry();
 
     const endpoint = outputType === 'image' ? '/api/nano-banana/generate' : '/api/higgsfield/generate';
     // Once a concept for THIS room has been approved, both a refinement and a
@@ -529,7 +624,13 @@ export function AIStudioPanel() {
     };
 
     const jobId = await submitOnce(endpoint, body, token);
-    if (jobId) startPolling(jobId, token);
+    if (jobId) {
+      // The submission's own entry is now superseded by the job entry
+      // startPolling writes below — clear it explicitly so it doesn't linger
+      // in storage until it eventually ages out on its own.
+      clearRecoveryEntry(submissionRecoveryId(body.idempotencyKey));
+      startPolling(jobId, token);
+    }
   }
 
   const activeRoom = houseModel.rooms.find((r) => r.id === roomId)!;
@@ -677,13 +778,26 @@ export function AIStudioPanel() {
             Lost connection while checking on a generation that may still be running (and already billed)
             provider-side. Starting a new one risks a duplicate charge.
           </p>
-          <button
-            type="button"
-            onClick={handleResumeStatusCheck}
-            className="mt-2 rounded-full bg-bronze px-4 py-2 text-xs font-semibold text-ivory shadow"
-          >
-            Resume checking status
-          </button>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleResumeStatusCheck}
+              className="rounded-full bg-bronze px-4 py-2 text-xs font-semibold text-ivory shadow"
+            >
+              Resume checking status
+            </button>
+            <button
+              type="button"
+              onClick={handleAbandonJob}
+              className="rounded-full border border-limestone/60 px-4 py-2 text-xs font-semibold text-charcoal hover:bg-limestone/30"
+            >
+              Abandon and start over
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-charcoal/60">
+            Abandoning only stops checking locally — if this is genuinely stuck (e.g. provider credentials changed
+            after it was submitted), it&apos;s the only way to unlock a new generation.
+          </p>
         </div>
       )}
       {recoverableSubmission && (
@@ -693,13 +807,26 @@ export function AIStudioPanel() {
             already been received and billed. Resuming reuses the exact same request rather than starting a new,
             possibly duplicate one.
           </p>
-          <button
-            type="button"
-            onClick={handleResumeSubmission}
-            className="mt-2 rounded-full bg-bronze px-4 py-2 text-xs font-semibold text-ivory shadow"
-          >
-            Resume submission
-          </button>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleResumeSubmission}
+              className="rounded-full bg-bronze px-4 py-2 text-xs font-semibold text-ivory shadow"
+            >
+              Resume submission
+            </button>
+            <button
+              type="button"
+              onClick={handleAbandonSubmission}
+              className="rounded-full border border-limestone/60 px-4 py-2 text-xs font-semibold text-charcoal hover:bg-limestone/30"
+            >
+              Abandon and start over
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-charcoal/60">
+            Abandoning only stops checking locally — if this is genuinely stuck, it&apos;s the only way to unlock a
+            new generation.
+          </p>
         </div>
       )}
       {liveVideoNeedsApproval && modeConfirmed && (

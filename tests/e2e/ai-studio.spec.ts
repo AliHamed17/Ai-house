@@ -1,4 +1,14 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+// Mirrors AIStudioPanel's own keyed-collection storage shape (a job's own
+// jobId, or a submission's own idempotencyKey, as the record's key) rather
+// than a single shared slot — see jobRecoveryId/submissionRecoveryId there.
+async function writeRawRecoveryEntry(page: Page, entry: Record<string, unknown>) {
+  await page.addInitScript((e) => {
+    const id = e.kind === 'job' ? `job:${e.jobId}` : `submission:${e.idempotencyKey}`;
+    localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify({ [id]: e }));
+  }, entry);
+}
 
 test.describe('AI Design Studio (demo mode)', () => {
   test('generates a concept image and reaches the completed state', async ({ page }) => {
@@ -283,15 +293,14 @@ test.describe('AI Design Studio (demo mode)', () => {
     const staleEntry = {
       kind: 'submission',
       ambiguous: true,
+      idempotencyKey: 'stale-ambiguous-recovery-key',
       endpoint: '/api/higgsfield/generate',
       body: { roomId: 'living', idempotencyKey: 'stale-ambiguous-recovery-key', simulate: 'success' },
       roomId: 'living',
       outputType: 'video',
       createdAt: Date.now() - 56 * 60_000,
     };
-    await page.addInitScript((entry) => {
-      localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify(entry));
-    }, staleEntry);
+    await writeRawRecoveryEntry(page, staleEntry);
 
     await page.goto('/#ai-studio');
     await expect(page.getByRole('button', { name: 'Resume submission' })).toHaveCount(0);
@@ -302,15 +311,14 @@ test.describe('AI Design Studio (demo mode)', () => {
     const freshEntry = {
       kind: 'submission',
       ambiguous: true,
+      idempotencyKey: 'fresh-ambiguous-recovery-key',
       endpoint: '/api/higgsfield/generate',
       body: { roomId: 'living', idempotencyKey: 'fresh-ambiguous-recovery-key', simulate: 'success' },
       roomId: 'living',
       outputType: 'video',
       createdAt: Date.now() - 50 * 60_000,
     };
-    await page.addInitScript((entry) => {
-      localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify(entry));
-    }, freshEntry);
+    await writeRawRecoveryEntry(page, freshEntry);
 
     await page.goto('/#ai-studio');
     await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
@@ -327,15 +335,14 @@ test.describe('AI Design Studio (demo mode)', () => {
     const staleOrdinaryEntry = {
       kind: 'submission',
       ambiguous: false,
+      idempotencyKey: 'stale-ordinary-recovery-key',
       endpoint: '/api/nano-banana/generate',
       body: { roomId: 'living', idempotencyKey: 'stale-ordinary-recovery-key', simulate: 'success' },
       roomId: 'living',
       outputType: 'image',
       createdAt: Date.now() - 12 * 60_000,
     };
-    await page.addInitScript((entry) => {
-      localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify(entry));
-    }, staleOrdinaryEntry);
+    await writeRawRecoveryEntry(page, staleOrdinaryEntry);
 
     await page.goto('/#ai-studio');
     await expect(page.getByRole('button', { name: 'Resume submission' })).toHaveCount(0);
@@ -346,15 +353,14 @@ test.describe('AI Design Studio (demo mode)', () => {
     const freshOrdinaryEntry = {
       kind: 'submission',
       ambiguous: false,
+      idempotencyKey: 'fresh-ordinary-recovery-key',
       endpoint: '/api/nano-banana/generate',
       body: { roomId: 'living', idempotencyKey: 'fresh-ordinary-recovery-key', simulate: 'success' },
       roomId: 'living',
       outputType: 'image',
       createdAt: Date.now() - 5 * 60_000,
     };
-    await page.addInitScript((entry) => {
-      localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify(entry));
-    }, freshOrdinaryEntry);
+    await writeRawRecoveryEntry(page, freshOrdinaryEntry);
 
     await page.goto('/#ai-studio');
     await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
@@ -372,9 +378,7 @@ test.describe('AI Design Studio (demo mode)', () => {
       outputType: 'image',
       createdAt: Date.now() - 2 * 60 * 60_000,
     };
-    await page.addInitScript((entry) => {
-      localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify(entry));
-    }, jobEntry);
+    await writeRawRecoveryEntry(page, jobEntry);
 
     await page.goto('/#ai-studio');
     await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible();
@@ -405,5 +409,97 @@ test.describe('AI Design Studio (demo mode)', () => {
     await page.unroute('**/api/nano-banana/generate');
     await page.getByRole('button', { name: 'Resume submission' }).click();
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('two tabs each tracking their own in-flight submission do not clobber or destroy each other\'s recovery record (regression)', async ({ page, context }) => {
+    // Both tabs write to the SAME origin-wide localStorage key. Before entries
+    // were keyed by their own idempotencyKey, either tab's write — or either
+    // tab's terminal-state clear — could silently overwrite or destroy the
+    // OTHER tab's still-active record, so a reload of that other tab would
+    // lose its only recovery identifier and silently permit a duplicate,
+    // possibly duplicate-billed submission.
+    //
+    // Tab 2 mounts (and reads localStorage once, at mount) BEFORE tab 1 ever
+    // writes anything — otherwise tab 2's OWN mount-time restore would
+    // immediately inherit tab 1's entry as its own unresolved job, which is
+    // separate, CORRECT behavior (any outstanding possibly-billed job blocks
+    // a fresh submission everywhere, not only in its own tab) rather than the
+    // clobbering bug under test here.
+    const page2 = await context.newPage();
+    await page2.route('**/api/nano-banana/generate', (route) => route.abort());
+    await page2.goto('/#ai-studio');
+
+    let tab1Mode: 'drop' | 'fail' = 'drop';
+    await page.route('**/api/nano-banana/generate', (route) => {
+      if (tab1Mode === 'drop') return route.abort();
+      return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) });
+    });
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    // Tab 2, independently, starts its own submission — its in-memory state
+    // was never re-synced with tab 1's write above (that only happens on
+    // mount/reload), so its Generate button is still enabled.
+    await page2.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page2.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    // Both tabs' entries must coexist in storage — neither write clobbered
+    // the other's key.
+    const storedAfterBothWrites = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
+    const parsedAfterBothWrites = JSON.parse(storedAfterBothWrites ?? '{}') as Record<string, unknown>;
+    expect(Object.keys(parsedAfterBothWrites)).toHaveLength(2);
+
+    // Tab 1 now reaches a definite, terminal outcome (via Resume — Generate
+    // itself stays disabled while its own submission is still unresolved)
+    // and clears ITS entry.
+    tab1Mode = 'fail';
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.getByText('boom')).toBeVisible({ timeout: 10_000 });
+
+    // Tab 2's entry must have survived tab 1's clear — still exactly one
+    // entry left in storage (tab 2's), not zero.
+    const storedAfterTab1Clears = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
+    const parsedAfterTab1Clears = JSON.parse(storedAfterTab1Clears ?? '{}') as Record<string, unknown>;
+    expect(Object.keys(parsedAfterTab1Clears)).toHaveLength(1);
+
+    // And reloading tab 2 still genuinely offers its own recovery banner —
+    // the record wasn't merely present as an untouched blob, it's usable.
+    await page2.reload();
+    await expect(page2.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('abandoning a recoverable job clears its recovery record and unlocks Generate (regression)', async ({ page }) => {
+    // A permanently uncheckable job (e.g. provider credentials removed after
+    // submission) would otherwise leave Generate disabled forever — Resume
+    // just fails the same way every time, and the 24h ceiling is only
+    // evaluated at mount. Abandon is the only escape hatch for that case.
+    await page.route('**/api/generation/status/**', (route) => route.abort());
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/Lost connection while checking on a generation/i)).toBeVisible({ timeout: 15_000 });
+
+    await page.getByRole('button', { name: 'Abandon and start over' }).click();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+    await expect(page.locator('select').first()).toBeEnabled();
+
+    // Not just hidden in memory — actually gone from storage, or a reload
+    // would resurrect the same deadlock.
+    const stored = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
+    expect(stored).toBeNull();
+  });
+
+  test('abandoning a recoverable submission clears its recovery record and unlocks Generate (regression)', async ({ page }) => {
+    await page.route('**/api/nano-banana/generate', (route) => route.abort());
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    await page.getByRole('button', { name: 'Abandon and start over' }).click();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+    await expect(page.locator('select').first()).toBeEnabled();
+
+    const stored = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
+    expect(stored).toBeNull();
   });
 });

@@ -241,6 +241,7 @@ const rooms: RoomDef[] = [
     isWetRoom: false,
     isProtected: false,
     isExterior: true,
+    hasCeiling: true, // a covered recess/loggia, unlike the open-air exterior approach/balcony
     connectedRoomIds: ['kitchen', 'dining'],
     visibleFeatures: ['covered recess/loggia', 'parapet-height openings', 'neighborhood view'],
     unresolvedQuestions: ['Exact depth and parapet height are not confirmed.'],

@@ -159,3 +159,20 @@ describe('point-in-room lookup', () => {
     expect(pointInPolygon(living.cameraSpawn, mamad.floorPolygon)).toBe(false);
   });
 });
+
+describe('exterior room ceilings (a covered space still has a roof, an open one does not)', () => {
+  it('flags the covered terrace/loggia as having a ceiling (regression)', () => {
+    const terrace = getRoom('terrace_social')!;
+    expect(terrace.isExterior).toBe(true);
+    expect(terrace.hasCeiling).toBe(true);
+  });
+
+  it('does not flag a genuinely open-air exterior room as having a ceiling', () => {
+    const approach = getRoom('stair_landing')!;
+    const balcony = getRoom('balcony_service')!;
+    expect(approach.isExterior).toBe(true);
+    expect(approach.hasCeiling).toBeFalsy();
+    expect(balcony.isExterior).toBe(true);
+    expect(balcony.hasCeiling).toBeFalsy();
+  });
+});

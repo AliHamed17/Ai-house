@@ -146,3 +146,47 @@ describe('reserveIdempotentSubmission fingerprint binding (a reused key must nev
     expect(isIdempotencyKeyMismatchError(undefined)).toBe(false);
   });
 });
+
+describe('reserveIdempotentSubmission at capacity (MAX_ENTRIES=200) — eviction must never target an in-flight reservation', () => {
+  it('never evicts an unsettled (still in-flight) entry to make room for a new key, even at capacity (regression)', async () => {
+    // A run() that never settles, standing in for a submission still
+    // genuinely in flight when a load spike fills the store to capacity.
+    const neverResolve = () => new Promise<string>(() => {});
+    const firstPromise = reserveIdempotentSubmission('capacity-unsettled-key-0', 'fp-0', neverResolve);
+    for (let i = 1; i < 200; i++) {
+      reserveIdempotentSubmission(`capacity-unsettled-key-${i}`, `fp-${i}`, neverResolve);
+    }
+
+    // A 201st, distinct key while all 200 are still pending — this pushes
+    // past MAX_ENTRIES and would normally trigger an eviction.
+    const freshRun = vi.fn().mockResolvedValue('job-201');
+    const result = await reserveIdempotentSubmission('capacity-unsettled-key-200', 'fp-200', freshRun);
+    expect(result).toBe('job-201');
+    expect(freshRun).toHaveBeenCalledTimes(1);
+
+    // If eviction had removed the oldest (key-0) to make room, this would
+    // see an empty slot and invoke retryRun, and rejoined would be a
+    // different promise than the original. Neither may happen — key-0's
+    // run() is still executing, so it must still be reserved.
+    const retryRun = vi.fn().mockResolvedValue('should-not-run');
+    const rejoined = reserveIdempotentSubmission('capacity-unsettled-key-0', 'fp-0', retryRun);
+    expect(retryRun).not.toHaveBeenCalled();
+    expect(rejoined).toBe(firstPromise);
+  });
+
+  it('does evict a SETTLED entry to make room at capacity (baseline — the cap still works under normal conditions)', async () => {
+    for (let i = 0; i < 200; i++) {
+      await reserveIdempotentSubmission(`capacity-settled-key-${i}`, `fp-${i}`, () => Promise.resolve(`job-${i}`));
+    }
+    const freshRun = vi.fn().mockResolvedValue('job-201-settled');
+    await reserveIdempotentSubmission('capacity-settled-key-200', 'fp-200', freshRun);
+    expect(freshRun).toHaveBeenCalledTimes(1);
+
+    // The oldest settled entry should have been evicted to make room —
+    // reserving the same key again now runs a genuinely new execution.
+    const retryRun = vi.fn().mockResolvedValue('job-0-rerun');
+    const result = await reserveIdempotentSubmission('capacity-settled-key-0', 'fp-0', retryRun);
+    expect(retryRun).toHaveBeenCalledTimes(1);
+    expect(result).toBe('job-0-rerun');
+  });
+});

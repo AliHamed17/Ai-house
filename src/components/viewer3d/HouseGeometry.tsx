@@ -29,9 +29,17 @@ function Floor({ room, variantId }: { room: RoomDef; variantId: string }) {
 }
 
 function Ceiling({ room, variantId }: { room: RoomDef; variantId: string }) {
-  const height = room.wallHeightOverrideM ?? room.ceilingHeightM;
+  // wallHeightOverrideM (a low parapet, on the exterior rooms that set it)
+  // is a WALL height, not a ceiling one — a covered terrace's roof sits at
+  // the normal building ceiling line above those short railing-height
+  // walls, not at railing height itself, so this always uses ceilingHeightM
+  // regardless of any wall-height override.
+  const height = room.ceilingHeightM;
   const geometry = useMemo(() => new THREE.ShapeGeometry(polygonShape(room.floorPolygon)), [room.floorPolygon]);
-  if (room.isExterior) return null;
+  // A genuinely open-air exterior space (the entry approach, a balcony) has
+  // no ceiling at all; a covered one (a terrace/loggia) does, and opts back
+  // in via hasCeiling.
+  if (room.isExterior && !room.hasCeiling) return null;
   const color = resolveWallColor(room.wallMaterialId, variantId);
   return (
     <mesh geometry={geometry} rotation={[Math.PI / 2, 0, 0]} position={[0, height, 0]}>

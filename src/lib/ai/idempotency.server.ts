@@ -19,6 +19,14 @@ interface IdempotencyEntry {
   createdAt: number;
   ttlMs: number;
   fingerprint: string;
+  // Whether run() has settled (succeeded or failed, ambiguously or not) —
+  // distinct from ttlMs/createdAt, which govern how long a SETTLED entry
+  // stays around for retry-reconciliation. This instead guards eviction: an
+  // entry whose run() is STILL executing must never be evicted to make room
+  // for a new key, or a retry that arrives after the eviction would start a
+  // genuinely concurrent second invocation of run() — exactly the duplicate
+  // idempotency exists to prevent, just triggered by capacity instead of TTL.
+  settled: boolean;
 }
 
 // idempotencyKey is entirely client-supplied with no enforced format or
@@ -104,6 +112,13 @@ function prune(): void {
  * is rejected with IDEMPOTENCY_KEY_MISMATCH_MESSAGE rather than silently
  * handed the wrong caller's job or allowed to bypass the dedupe entirely.
  *
+ * At MAX_ENTRIES capacity, only an already-SETTLED entry is evicted to make
+ * room for a new key — never one whose run() is still executing. Evicting
+ * an in-flight entry under a load spike would let a lost-response retry for
+ * that same key start a genuinely concurrent second submission the instant
+ * after eviction, which is the exact failure mode this whole mechanism
+ * exists to prevent; a temporary over-capacity store is the safer outcome.
+ *
  * With no key supplied (an older client), every call runs independently.
  */
 export function reserveIdempotentSubmission(
@@ -124,19 +139,35 @@ export function reserveIdempotentSubmission(
   }
 
   while (store.size >= MAX_ENTRIES) {
-    const oldest = store.keys().next().value;
-    if (oldest === undefined) break;
-    store.delete(oldest);
+    let evictedKey: string | undefined;
+    for (const [candidateKey, candidateEntry] of store) {
+      if (candidateEntry.settled) {
+        evictedKey = candidateKey;
+        break;
+      }
+    }
+    // Every entry is still in flight (an extreme load spike) — leave the
+    // store temporarily over its soft cap rather than evict one of them;
+    // evicting an in-flight entry to make room is exactly what would let a
+    // lost-response retry start a genuinely concurrent second submission.
+    if (evictedKey === undefined) break;
+    store.delete(evictedKey);
   }
 
   const promise = run();
-  promise.catch((error: unknown) => {
-    if (options?.isAmbiguousFailure?.(error)) {
-      store.set(key, { promise, createdAt: Date.now(), ttlMs: AMBIGUOUS_TTL_MS, fingerprint });
-    } else {
-      store.delete(key);
-    }
-  });
-  store.set(key, { promise, createdAt: Date.now(), ttlMs: TTL_MS, fingerprint });
+  promise.then(
+    () => {
+      const current = store.get(key);
+      if (current && current.promise === promise) current.settled = true;
+    },
+    (error: unknown) => {
+      if (options?.isAmbiguousFailure?.(error)) {
+        store.set(key, { promise, createdAt: Date.now(), ttlMs: AMBIGUOUS_TTL_MS, fingerprint, settled: true });
+      } else {
+        store.delete(key);
+      }
+    },
+  );
+  store.set(key, { promise, createdAt: Date.now(), ttlMs: TTL_MS, fingerprint, settled: false });
   return promise;
 }

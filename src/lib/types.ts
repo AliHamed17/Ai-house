@@ -54,6 +54,11 @@ export interface RoomDef {
   isWetRoom: boolean;
   isProtected: boolean;
   isExterior: boolean;
+  /** An exterior room that is actually roofed (a covered terrace/loggia, as
+   * opposed to a genuinely open-air space like an approach or balcony) —
+   * meaningful only when isExterior is true; overrides the default
+   * exterior-implies-no-ceiling assumption. */
+  hasCeiling?: boolean;
   connectedRoomIds: RoomId[];
   visibleFeatures: string[];
   unresolvedQuestions: string[];

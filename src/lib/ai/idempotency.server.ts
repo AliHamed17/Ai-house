@@ -43,6 +43,12 @@ const TTL_MS = 10 * 60_000;
 // make the reservation permanent — it is still a bounded, per-instance cache,
 // the same documented tradeoff resultStore/rateLimit make — it just matches
 // the window to how long this specific kind of doubt plausibly lasts.
+//
+// AIStudioPanel.tsx's client-side RECOVERY_MAX_AGE_MS.submission is
+// intentionally kept at (a small safety margin under) this exact value — a
+// client recovery entry that outlives this reservation doesn't resume
+// anything, it silently starts a genuinely new, separately billed
+// submission. If this changes, that constant must change with it.
 const AMBIGUOUS_TTL_MS = 60 * 60_000;
 const MAX_ENTRIES = 200;
 const store = new Map<string, IdempotencyEntry>();

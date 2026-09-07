@@ -236,4 +236,101 @@ test.describe('AI Design Studio (demo mode)', () => {
     // evidence frame instead.
     expect(thirdRequestSourcePath).toBe('/evidence/frames/00-00-16_open-social-zone.jpg');
   });
+
+  test('a rate limit (429) on Resume preserves the recoverable submission instead of discarding it (regression)', async ({ page }) => {
+    // A 429 on a Resume click means only that THIS attempt was throttled —
+    // it says nothing about whether the original ambiguous submission it
+    // was resuming succeeded or failed. Treating it as conclusive would
+    // discard the only way back to that submission.
+    let mode: 'drop' | 'rate-limited' | 'ok' = 'drop';
+    await page.route('**/api/nano-banana/generate', (route) => {
+      if (mode === 'drop') return route.abort();
+      if (mode === 'rate-limited') {
+        return route.fulfill({
+          status: 429,
+          headers: { 'Retry-After': '5' },
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Too many generation requests. Please wait a moment and try again.' }),
+        });
+      }
+      return route.continue();
+    });
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    mode = 'rate-limited';
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.getByText(/Too many attempts.*wait 5s/i)).toBeVisible({ timeout: 10_000 });
+    // Still recoverable — the banner must not have been lost, and selection
+    // must still be locked, exactly as before the rate-limited click.
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+    await expect(page.locator('select').first()).toBeDisabled();
+
+    mode = 'ok';
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('select').first()).toBeEnabled();
+  });
+
+  test('a submission recovery entry older than the server\'s reservation window is not offered for Resume after reload (regression)', async ({ page }) => {
+    // idempotency.server's AMBIGUOUS_TTL_MS is 60 minutes — a persisted
+    // recovery entry older than that (minus a small safety margin) could be
+    // resuming a reservation the server has already forgotten, which would
+    // silently start a genuinely new, separately billed submission instead
+    // of reconciling to the original one.
+    const staleEntry = {
+      kind: 'submission',
+      endpoint: '/api/nano-banana/generate',
+      body: { roomId: 'living', idempotencyKey: 'stale-recovery-key', simulate: 'success' },
+      roomId: 'living',
+      outputType: 'image',
+      createdAt: Date.now() - 56 * 60_000,
+    };
+    await page.addInitScript((entry) => {
+      localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify(entry));
+    }, staleEntry);
+
+    await page.goto('/#ai-studio');
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+  });
+
+  test('a submission recovery entry still within the server\'s reservation window is offered for Resume after reload (baseline for the ceiling above)', async ({ page }) => {
+    const freshEntry = {
+      kind: 'submission',
+      endpoint: '/api/nano-banana/generate',
+      body: { roomId: 'living', idempotencyKey: 'fresh-recovery-key', simulate: 'success' },
+      roomId: 'living',
+      outputType: 'image',
+      createdAt: Date.now() - 50 * 60_000,
+    };
+    await page.addInitScript((entry) => {
+      localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify(entry));
+    }, freshEntry);
+
+    await page.goto('/#ai-studio');
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+  });
+
+  test('a job-recovery entry uses its own, more generous ceiling than a submission entry (regression)', async ({ page }) => {
+    // Checking on a job is a read (never resubmits or bills anything), so it
+    // is safe to keep offering for much longer than a submission entry —
+    // this proves the ceiling is genuinely keyed by entry kind, not a single
+    // value that happens to cover both.
+    const jobEntry = {
+      kind: 'job',
+      jobId: 'recovery-ceiling-test-job-id',
+      roomId: 'living',
+      outputType: 'image',
+      createdAt: Date.now() - 2 * 60 * 60_000,
+    };
+    await page.addInitScript((entry) => {
+      localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify(entry));
+    }, jobEntry);
+
+    await page.goto('/#ai-studio');
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible();
+  });
 });

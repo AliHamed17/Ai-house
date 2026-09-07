@@ -46,11 +46,28 @@ interface LiveStatus {
 // resuming still requires the visitor's own click rather than silently
 // firing a request on page load.
 const RECOVERY_STORAGE_KEY = 'ai-studio:unresolved-generation';
-// Generous rather than tight: a real provider-side job (especially a live
-// Higgsfield video) can plausibly still be worth checking on well beyond a
-// typical "retry soon" window. This only bounds how long an old entry can
-// resurrect a recovery banner at all, not anything billing-relevant.
-const RECOVERY_MAX_AGE_MS = 24 * 60 * 60_000;
+// The two entry kinds get different ceilings because they carry different
+// risk if the entry outlives what the server can actually back up:
+//  - 'job' only ever drives a status POLL (a read), which is safe to retry
+//    indefinitely — Higgsfield's own servers, not this server's in-memory
+//    stores, are the source of truth for whether a live job is still
+//    checkable, so a generous window here is never a billing risk.
+//  - 'submission' resumes by POSTing again with the same idempotencyKey,
+//    reconciled server-side via idempotency.server's reservation store.
+//    That reservation is NOT permanent — it expires after TTL_MS (10 min)
+//    normally, or AMBIGUOUS_TTL_MS (60 min, kept longer specifically for
+//    this recovery flow) for the kind of failure that sets recoverableSubmission.
+//    An entry that outlives the server's actual reservation doesn't resume
+//    anything — the key is gone, so provider.submit() runs again as a
+//    genuinely new, separately billed request, exactly what idempotency
+//    exists to prevent. This ceiling must never exceed AMBIGUOUS_TTL_MS.
+const RECOVERY_MAX_AGE_MS: Record<RecoveryEntry['kind'], number> = {
+  job: 24 * 60 * 60_000,
+  // 55, not 60, minutes: a small safety margin under idempotency.server's
+  // AMBIGUOUS_TTL_MS for clock/network skew between when this entry was
+  // written and when the server's own reservation window actually started.
+  submission: 55 * 60_000,
+};
 
 type RecoveryEntry =
   | { kind: 'job'; jobId: string; roomId: RoomId; outputType: GenerationOutputType; createdAt: number }
@@ -61,7 +78,7 @@ function readRecoveryEntry(): RecoveryEntry | null {
     const raw = localStorage.getItem(RECOVERY_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as RecoveryEntry;
-    if (Date.now() - parsed.createdAt > RECOVERY_MAX_AGE_MS) return null;
+    if (Date.now() - parsed.createdAt > RECOVERY_MAX_AGE_MS[parsed.kind]) return null;
     return parsed;
   } catch {
     return null;
@@ -354,9 +371,16 @@ export function AIStudioPanel() {
   // Nothing was billed, so it isn't kept as recoverableSubmission — instead
   // approvedSource is cleared so the next Generate uses a fresh source
   // rather than retrying this exact request and failing the same way again.
+  // A 429 is a fourth case, but the opposite kind of "not definite": it means
+  // this specific attempt never even reached the idempotency/provider logic
+  // (the rate limiter runs first), so it says NOTHING about whether an
+  // earlier ambiguous submission this is resuming succeeded or failed —
+  // isResume (true only from handleResumeSubmission) is what makes that
+  // existing recoverableSubmission survive it, rather than being silently
+  // discarded by a throttle that has nothing to do with the original request.
   // Shared between a fresh submission (handleGenerate) and resuming one
   // (handleResumeSubmission).
-  async function submitOnce(endpoint: string, body: Record<string, unknown>, token: number): Promise<string | null> {
+  async function submitOnce(endpoint: string, body: Record<string, unknown>, token: number, isResume = false): Promise<string | null> {
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -366,8 +390,24 @@ export function AIStudioPanel() {
       const data = await res.json();
       if (token !== pollTokenRef.current) return null; // a newer run superseded this one
       if (!res.ok) {
-        setError(data.error ?? 'Generation request failed.');
         setSubmitting(false);
+        if (res.status === 429) {
+          const retryAfterSeconds = res.headers.get('Retry-After');
+          setError(
+            retryAfterSeconds
+              ? `Too many attempts — please wait ${retryAfterSeconds}s and try again.`
+              : (data.error ?? 'Too many attempts. Please wait a moment and try again.'),
+          );
+          // Deliberately does NOT clearRecoveryEntry(): this was never a
+          // conclusive outcome for the original submission, only a local
+          // throttle on THIS attempt. handleResumeSubmission already
+          // optimistically cleared the in-memory state before calling this,
+          // so it's restored here — the persisted entry was never touched,
+          // so it's still exactly as it was.
+          if (isResume) setRecoverableSubmission({ endpoint, body });
+          return null;
+        }
+        setError(data.error ?? 'Generation request failed.');
         // Cleared unconditionally first: a stale entry from an earlier
         // ambiguous attempt on this same request (see handleResumeSubmission)
         // must not survive a now-definite outcome, whichever way it resolved.
@@ -402,7 +442,7 @@ export function AIStudioPanel() {
     setError(null);
     setRecoverableSubmission(null);
     void (async () => {
-      const jobId = await submitOnce(endpoint, body, token);
+      const jobId = await submitOnce(endpoint, body, token, true);
       if (jobId) startPolling(jobId, token);
     })();
   }

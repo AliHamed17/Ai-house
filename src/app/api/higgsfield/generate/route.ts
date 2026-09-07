@@ -4,7 +4,7 @@ import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.serv
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
 import { isSourceExpiredError, resultIdFromPath } from '@/lib/ai/resultStore.server';
 import { isSubmitTimeout } from '@/lib/ai/higgsfield.server';
-import { reserveIdempotentSubmission } from '@/lib/ai/idempotency.server';
+import { isIdempotencyKeyMismatchError, reserveIdempotentSubmission } from '@/lib/ai/idempotency.server';
 import { buildHiggsfieldPrompt } from '@/data/roomPrompts';
 
 export const dynamic = 'force-dynamic';
@@ -60,8 +60,19 @@ export async function POST(request: NextRequest) {
     // that specific failure means we don't know whether Higgsfield actually
     // accepted the job, so a retry must not be allowed to start a genuinely
     // second submission — it should keep reconciling to this same outcome.
+    // Binds the key to this exact request (see idempotency.server) so a
+    // reused/guessed key naming a different room, source, or style never
+    // gets handed back a mismatched job.
+    const fingerprint = JSON.stringify({
+      provider: 'higgsfield',
+      roomId: validated.data.roomId,
+      styleVariant: validated.data.styleVariant,
+      sourceAssetPath: validated.data.sourceAssetPath,
+      simulate: validated.data.simulate,
+    });
     const jobId = await reserveIdempotentSubmission(
       validated.data.idempotencyKey,
+      fingerprint,
       async () => {
         const result = await provider.submit({
           provider: 'higgsfield',
@@ -79,6 +90,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ jobId, demoMode, provider: demoMode ? 'mock' : 'higgsfield' });
   } catch (error) {
     console.error('[higgsfield/generate] submission failed:', error);
+    if (isIdempotencyKeyMismatchError(error)) {
+      return NextResponse.json({ error: (error as Error).message }, { status: 409 });
+    }
     // This is a definite, pre-billing failure — assertSourceStillAvailable
     // rejects it before the request ever reaches Higgsfield's servers — so,
     // unlike isSubmitTimeout below, there is nothing ambiguous to preserve.

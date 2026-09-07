@@ -18,6 +18,21 @@ interface IdempotencyEntry {
   promise: Promise<string>;
   createdAt: number;
   ttlMs: number;
+  fingerprint: string;
+}
+
+// idempotencyKey is entirely client-supplied with no enforced format or
+// entropy, and the store below is one shared, unscoped Map — so a caller
+// that (by bug or otherwise) reuses a key across a genuinely different
+// request must never be handed back a stale reservation for the WRONG
+// submission. Each route builds this from the exact fields that determine
+// what it submits (including its own provider id, so two routes can never
+// collide on a shared key), with a fixed field order so identical requests
+// always fingerprint identically.
+export const IDEMPOTENCY_KEY_MISMATCH_MESSAGE = 'This idempotencyKey was already used for a different request. Use a new idempotencyKey for a new submission.';
+
+export function isIdempotencyKeyMismatchError(error: unknown): boolean {
+  return error instanceof Error && error.message === IDEMPOTENCY_KEY_MISMATCH_MESSAGE;
 }
 
 const TTL_MS = 10 * 60_000;
@@ -70,10 +85,17 @@ function prune(): void {
  * AMBIGUOUS_TTL_MS (from the moment the ambiguity was detected), since the
  * whole point is to survive a visitor stepping away before checking back.
  *
+ * `fingerprint` binds the reservation to the specific request it was made
+ * for. A second call with the same key but a DIFFERENT fingerprint — a
+ * reused or guessed key naming a different room, output type, or source —
+ * is rejected with IDEMPOTENCY_KEY_MISMATCH_MESSAGE rather than silently
+ * handed the wrong caller's job or allowed to bypass the dedupe entirely.
+ *
  * With no key supplied (an older client), every call runs independently.
  */
 export function reserveIdempotentSubmission(
   key: string | undefined,
+  fingerprint: string,
   run: () => Promise<string>,
   options?: { isAmbiguousFailure?: (error: unknown) => boolean },
 ): Promise<string> {
@@ -81,7 +103,12 @@ export function reserveIdempotentSubmission(
   prune();
 
   const existing = store.get(key);
-  if (existing) return existing.promise;
+  if (existing) {
+    if (existing.fingerprint !== fingerprint) {
+      return Promise.reject(new Error(IDEMPOTENCY_KEY_MISMATCH_MESSAGE));
+    }
+    return existing.promise;
+  }
 
   while (store.size >= MAX_ENTRIES) {
     const oldest = store.keys().next().value;
@@ -92,11 +119,11 @@ export function reserveIdempotentSubmission(
   const promise = run();
   promise.catch((error: unknown) => {
     if (options?.isAmbiguousFailure?.(error)) {
-      store.set(key, { promise, createdAt: Date.now(), ttlMs: AMBIGUOUS_TTL_MS });
+      store.set(key, { promise, createdAt: Date.now(), ttlMs: AMBIGUOUS_TTL_MS, fingerprint });
     } else {
       store.delete(key);
     }
   });
-  store.set(key, { promise, createdAt: Date.now(), ttlMs: TTL_MS });
+  store.set(key, { promise, createdAt: Date.now(), ttlMs: TTL_MS, fingerprint });
   return promise;
 }

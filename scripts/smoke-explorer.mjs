@@ -1,11 +1,20 @@
 import { chromium } from 'playwright';
 import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const OUT = '/tmp/claude-0/-home-user-Ai-house/21ece015-d642-5f0d-a878-916102c3aa21/scratchpad/shots';
+// Resolved relative to this script (not any one authoring machine), so the
+// smoke scripts work from any checkout. PLAYWRIGHT_CHROMIUM_EXECUTABLE (see
+// playwright.config.ts) lets a sandboxed/offline environment point at a
+// pre-installed Chromium instead of downloading one — omit it to fall back
+// to Playwright's own default browser lookup.
+const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'smoke-output');
+fs.mkdirSync(OUT, { recursive: true });
 const BASE = 'http://localhost:3000';
-const EXE = '/opt/pw-browsers/chromium';
 
-const browser = await chromium.launch({ executablePath: EXE });
+const browser = await chromium.launch(
+  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {},
+);
 const errors = [];
 
 async function shot(page, name) {

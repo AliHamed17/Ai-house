@@ -123,13 +123,32 @@ export function FirstPersonControls() {
     function onKeyUp(e: KeyboardEvent) {
       pressedKeys.current.delete(e.code);
     }
+    // A keyup while the window/tab isn't focused (switching apps or tabs, or
+    // minimizing, while a movement key is held) is commonly never delivered —
+    // without this, the camera would keep walking in that direction
+    // indefinitely once focus returns, until the key is pressed and released
+    // again.
+    function clearPressedKeys() {
+      pressedKeys.current.clear();
+    }
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', clearPressedKeys);
+    document.addEventListener('visibilitychange', clearPressedKeys);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', clearPressedKeys);
+      document.removeEventListener('visibilitychange', clearPressedKeys);
     };
   }, []);
+
+  // Defense in depth alongside the blur/visibility clear above: whatever the
+  // exact cause, a stale held-key entry must never survive leaving
+  // first-person mode and carry over into a later return to it.
+  useEffect(() => {
+    if (mode !== 'first-person') pressedKeys.current.clear();
+  }, [mode]);
 
   useEffect(() => {
     const canvas = gl.domElement;

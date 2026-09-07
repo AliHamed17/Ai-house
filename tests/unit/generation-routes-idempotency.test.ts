@@ -136,4 +136,63 @@ describe('idempotency reconciliation on the generation routes (a lost response m
     expect((await res1.json()).jobId).toBe('job-x');
     expect((await res2.json()).jobId).toBe('job-y');
   });
+
+  it('POST /api/nano-banana/generate: reusing the same idempotencyKey for a DIFFERENT room is rejected (409), never returning the first room’s job (regression)', async () => {
+    const submitMock = vi.fn().mockResolvedValueOnce({ jobId: 'job-room-living' }).mockResolvedValueOnce({ jobId: 'job-should-not-run' });
+    vi.doMock('@/lib/ai/registry.server', () => ({
+      resolveProviderForSubmit: () => ({
+        demoMode: false,
+        provider: {
+          id: 'nano-banana',
+          submit: submitMock,
+          status: async () => {
+            throw new Error('not used in this test');
+          },
+        },
+      }),
+    }));
+    vi.resetModules();
+    const { POST } = await import('@/app/api/nano-banana/generate/route');
+
+    const res1 = await POST(makeRequest('http://localhost:3000/api/nano-banana/generate', { roomId: 'living', idempotencyKey: 'reused-key-mismatch' }));
+    expect(res1.status).toBe(200);
+    expect((await res1.json()).jobId).toBe('job-room-living');
+
+    // Same key, a genuinely different request (different room) — must be
+    // refused, not silently handed the "living" job nor allowed to start a
+    // second, separately billed submission under the same key.
+    const res2 = await POST(makeRequest('http://localhost:3000/api/nano-banana/generate', { roomId: 'kitchen', idempotencyKey: 'reused-key-mismatch' }));
+    expect(res2.status).toBe(409);
+    expect((await res2.json()).error).toMatch(/already used for a different request/i);
+    expect(submitMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('POST /api/higgsfield/generate: reusing the same idempotencyKey for a DIFFERENT source is rejected (409) (regression)', async () => {
+    const submitMock = vi.fn().mockResolvedValueOnce({ jobId: 'job-source-a' }).mockResolvedValueOnce({ jobId: 'job-should-not-run' });
+    vi.doMock('@/lib/ai/registry.server', () => ({
+      resolveProviderForSubmit: () => ({
+        demoMode: false,
+        provider: {
+          id: 'higgsfield',
+          submit: submitMock,
+          status: async () => {
+            throw new Error('not used in this test');
+          },
+        },
+      }),
+    }));
+    vi.resetModules();
+    const { POST } = await import('@/app/api/higgsfield/generate/route');
+
+    const body1 = { roomId: 'living', sourceAssetPath: '/api/generation/result/source-a', idempotencyKey: 'hf-reused-key-mismatch' };
+    const res1 = await POST(makeRequest('http://localhost:3000/api/higgsfield/generate', body1));
+    expect(res1.status).toBe(200);
+    expect((await res1.json()).jobId).toBe('job-source-a');
+
+    const body2 = { roomId: 'living', sourceAssetPath: '/api/generation/result/source-b', idempotencyKey: 'hf-reused-key-mismatch' };
+    const res2 = await POST(makeRequest('http://localhost:3000/api/higgsfield/generate', body2));
+    expect(res2.status).toBe(409);
+    expect((await res2.json()).error).toMatch(/already used for a different request/i);
+    expect(submitMock).toHaveBeenCalledTimes(1);
+  });
 });

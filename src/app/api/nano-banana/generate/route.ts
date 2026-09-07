@@ -4,7 +4,7 @@ import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.serv
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
 import { buildNanoBananaEditPrompt, buildNanoBananaPrompt } from '@/data/roomPrompts';
 import { isSourceExpiredError, resultIdFromPath } from '@/lib/ai/resultStore.server';
-import { reserveIdempotentSubmission } from '@/lib/ai/idempotency.server';
+import { isIdempotencyKeyMismatchError, reserveIdempotentSubmission } from '@/lib/ai/idempotency.server';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,8 +47,18 @@ export async function POST(request: NextRequest) {
     // Reserved before the provider call is awaited (see idempotency.server),
     // so a retry carrying the same idempotencyKey — even one that arrives
     // while this exact submission is still in flight — joins this call
-    // instead of starting a second, separately billed one.
-    const jobId = await reserveIdempotentSubmission(validated.data.idempotencyKey, async () => {
+    // instead of starting a second, separately billed one. The fingerprint
+    // binds the key to this exact request so a reused/guessed key naming a
+    // different room, source, or edit never gets handed back a mismatched job.
+    const fingerprint = JSON.stringify({
+      provider: 'nano-banana',
+      roomId: validated.data.roomId,
+      styleVariant: validated.data.styleVariant,
+      sourceAssetPath: validated.data.sourceAssetPath,
+      editInstruction: validated.data.editInstruction,
+      simulate: validated.data.simulate,
+    });
+    const jobId = await reserveIdempotentSubmission(validated.data.idempotencyKey, fingerprint, async () => {
       const result = await provider.submit({
         provider: 'nano-banana',
         outputType: 'image',
@@ -63,6 +73,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ jobId, demoMode, provider: demoMode ? 'mock' : 'nano-banana' });
   } catch (error) {
     console.error('[nano-banana/generate] submission failed:', error);
+    if (isIdempotencyKeyMismatchError(error)) {
+      return NextResponse.json({ error: (error as Error).message }, { status: 409 });
+    }
     // A definite, pre-billing failure (the approved source fell out of the
     // TTL cache before this refinement used it) — a distinct status is what
     // lets the client recognize it and clear the stale approval, instead of

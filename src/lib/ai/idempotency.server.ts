@@ -17,16 +17,25 @@ import 'server-only';
 interface IdempotencyEntry {
   promise: Promise<string>;
   createdAt: number;
+  ttlMs: number;
 }
 
 const TTL_MS = 10 * 60_000;
+// An ambiguous (possibly-already-billed) failure gets a much longer window
+// than an ordinary in-flight reservation: the whole point of keeping it is to
+// let a visitor come back after stepping away to check whether the charge
+// went through, and 10 minutes is too short a leash for that. This does not
+// make the reservation permanent — it is still a bounded, per-instance cache,
+// the same documented tradeoff resultStore/rateLimit make — it just matches
+// the window to how long this specific kind of doubt plausibly lasts.
+const AMBIGUOUS_TTL_MS = 60 * 60_000;
 const MAX_ENTRIES = 200;
 const store = new Map<string, IdempotencyEntry>();
 
 function prune(): void {
   const now = Date.now();
   for (const [key, value] of store) {
-    if (now - value.createdAt > TTL_MS) store.delete(key);
+    if (now - value.createdAt > value.ttlMs) store.delete(key);
   }
 }
 
@@ -57,7 +66,9 @@ function prune(): void {
  * would see an empty store and start a genuinely second, separately billed
  * submission. `isAmbiguousFailure`, when supplied, identifies such errors so
  * their reservation is kept instead — a retry then reconciles to the SAME
- * (rejected) outcome rather than trying again, until the TTL prunes it.
+ * (rejected) outcome rather than trying again — and its TTL is extended to
+ * AMBIGUOUS_TTL_MS (from the moment the ambiguity was detected), since the
+ * whole point is to survive a visitor stepping away before checking back.
  *
  * With no key supplied (an older client), every call runs independently.
  */
@@ -80,10 +91,12 @@ export function reserveIdempotentSubmission(
 
   const promise = run();
   promise.catch((error: unknown) => {
-    if (!options?.isAmbiguousFailure?.(error)) {
+    if (options?.isAmbiguousFailure?.(error)) {
+      store.set(key, { promise, createdAt: Date.now(), ttlMs: AMBIGUOUS_TTL_MS });
+    } else {
       store.delete(key);
     }
   });
-  store.set(key, { promise, createdAt: Date.now() });
+  store.set(key, { promise, createdAt: Date.now(), ttlMs: TTL_MS });
   return promise;
 }

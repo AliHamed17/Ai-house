@@ -3,7 +3,7 @@ import { resolveProviderForSubmit } from '@/lib/ai/registry.server';
 import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.server';
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
 import { buildNanoBananaEditPrompt, buildNanoBananaPrompt } from '@/data/roomPrompts';
-import { resultIdFromPath } from '@/lib/ai/resultStore.server';
+import { isSourceExpiredError, resultIdFromPath } from '@/lib/ai/resultStore.server';
 import { reserveIdempotentSubmission } from '@/lib/ai/idempotency.server';
 
 export const dynamic = 'force-dynamic';
@@ -63,6 +63,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ jobId, demoMode, provider: demoMode ? 'mock' : 'nano-banana' });
   } catch (error) {
     console.error('[nano-banana/generate] submission failed:', error);
+    // A definite, pre-billing failure (the approved source fell out of the
+    // TTL cache before this refinement used it) — a distinct status is what
+    // lets the client recognize it and clear the stale approval, instead of
+    // retrying the exact same request and failing the same way forever.
+    if (isSourceExpiredError(error)) {
+      return NextResponse.json({ error: (error as Error).message }, { status: 410 });
+    }
     return NextResponse.json({ error: 'Generation could not be started. Please try again.' }, { status: 502 });
   }
 }

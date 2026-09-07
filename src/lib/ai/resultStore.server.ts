@@ -58,3 +58,18 @@ export function resultIdFromPath(path: string): string | undefined {
   const id = path.slice(RESULT_URL_PREFIX.length).split(/[/?#]/)[0];
   return id || undefined;
 }
+
+/**
+ * Shared between both provider adapters so the generate routes (and, in
+ * turn, the client) can recognize this specific failure and react to it —
+ * an approved concept whose stored bytes fell out of this TTL-bounded cache
+ * before it was used as the source for a refinement or a cinematic clip.
+ * Distinct from a static evidence-frame asset failing to read, which is a
+ * different problem with nothing to "regenerate."
+ */
+export const SOURCE_EXPIRED_MESSAGE =
+  'The approved source image has expired from the server cache. Please regenerate and re-approve it, then try again.';
+
+export function isSourceExpiredError(error: unknown): boolean {
+  return error instanceof Error && error.message === SOURCE_EXPIRED_MESSAGE;
+}

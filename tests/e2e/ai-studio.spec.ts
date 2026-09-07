@@ -153,4 +153,87 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('select').first()).toBeEnabled();
   });
+
+  test('a recoverable submission survives a page reload, not just staying in memory (regression)', async ({ page }) => {
+    // recoverableSubmission is plain React state — a reload wipes it unless
+    // it is also mirrored to localStorage (see writeRecoveryEntry in
+    // AIStudioPanel). Without that, closing or reloading the tab after a
+    // lost-connection submit would silently forget a possibly-billed job.
+    let blockGenerate = true;
+    await page.route('**/api/nano-banana/generate', (route) => (blockGenerate ? route.abort() : route.continue()));
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    await page.reload();
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('select').first()).toBeDisabled();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
+
+    blockGenerate = false;
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('select').first()).toBeEnabled();
+  });
+
+  test('a recoverable (status-polling-exhausted) job survives a page reload (regression)', async ({ page }) => {
+    let blockStatus = true;
+    await page.route('**/api/generation/status/**', (route) => (blockStatus ? route.abort() : route.continue()));
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/Lost connection while checking on a generation/i)).toBeVisible({ timeout: 15_000 });
+
+    await page.reload();
+    await expect(page.getByText(/Lost connection while checking on a generation/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
+
+    blockStatus = false;
+    await page.getByRole('button', { name: 'Resume checking status' }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('an expired approved source (410) is never treated as recoverable, and clears so the next attempt uses a fresh source (regression)', async ({ page }) => {
+    // Unlike a lost connection or a Higgsfield timeout, a 410 is a definite,
+    // pre-billing failure (see SOURCE_EXPIRED_MESSAGE) — nothing to resume,
+    // and retrying the identical request would just fail the same way
+    // forever unless the stale approvedSource is cleared client-side.
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Approve' }).click();
+    await expect(page.getByRole('button', { name: '✓ Approved' })).toBeVisible();
+
+    let requestCount = 0;
+    let thirdRequestSourcePath: string | undefined;
+    await page.route('**/api/nano-banana/generate', (route) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return route.fulfill({
+          status: 410,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'The approved source image has expired from the server cache. Please regenerate and re-approve it, then try again.',
+          }),
+        });
+      }
+      thirdRequestSourcePath = route.request().postDataJSON()?.sourceAssetPath;
+      return route.continue();
+    });
+
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/expired from the server cache/i)).toBeVisible({ timeout: 10_000 });
+    // A definite failure — not recoverable, and does not lock selection.
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toHaveCount(0);
+    await expect(page.locator('select').first()).toBeEnabled();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    // The stale approvedSource (a /api/generation/result/... path) must not
+    // have been reused — the fresh attempt falls back to the room's static
+    // evidence frame instead.
+    expect(thirdRequestSourcePath).toBe('/evidence/frames/00-00-16_open-social-zone.jpg');
+  });
 });

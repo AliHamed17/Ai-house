@@ -3,7 +3,7 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import type { GenerationInput, GenerationJob, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
 import { readPublicFileAsBase64 } from './publicAsset.server';
-import { getStoredResult, putStoredResult, RESULT_URL_PREFIX, resultIdFromPath } from './resultStore.server';
+import { getStoredResult, putStoredResult, RESULT_URL_PREFIX, resultIdFromPath, SOURCE_EXPIRED_MESSAGE } from './resultStore.server';
 import { withTimeout } from './resilience.server';
 
 /**
@@ -38,14 +38,27 @@ export function isNanoBananaConfigured(): boolean {
  * public site asset (an evidence frame, a committed concept) or a previously
  * generated result served from the in-memory store — the latter is how an
  * *approved* concept is fed back in as the source for a refinement.
+ *
+ * The two failure modes are deliberately distinguished rather than both
+ * collapsing to null: a stored result that fell out of the TTL cache means
+ * the caller's approved concept specifically has expired (SOURCE_EXPIRED_MESSAGE,
+ * which the routes turn into a 410 the client acts on by clearing that stale
+ * approval); a static asset failing to read is a different problem — there is
+ * no earlier concept to "regenerate" in that case — so it keeps a separate
+ * message that doesn't imply one.
  */
-async function readSourceImage(sourceAssetPath: string): Promise<{ mimeType: string; base64: string } | null> {
+async function readSourceImage(sourceAssetPath: string): Promise<{ mimeType: string; base64: string }> {
   const storedId = resultIdFromPath(sourceAssetPath);
   if (storedId) {
     const stored = getStoredResult(storedId);
-    return stored ? { mimeType: stored.mimeType, base64: stored.base64 } : null;
+    if (!stored) throw new Error(SOURCE_EXPIRED_MESSAGE);
+    return { mimeType: stored.mimeType, base64: stored.base64 };
   }
-  return readPublicFileAsBase64(sourceAssetPath);
+  const publicFile = await readPublicFileAsBase64(sourceAssetPath);
+  if (!publicFile) {
+    throw new Error('The source image for this generation could not be loaded. Please try again.');
+  }
+  return publicFile;
 }
 
 /**
@@ -62,13 +75,10 @@ export const nanoBananaProvider: MediaGenerationProvider = {
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [{ text: input.prompt }];
     if (input.sourceAssetPath) {
+      // readSourceImage throws (rather than returning null) when the source
+      // can't be loaded, so a text-only prompt is never silently substituted
+      // and paid for in place of the intended image-to-image edit.
       const source = await readSourceImage(input.sourceAssetPath);
-      // The prompt is written to refine a specific source image; if that
-      // source can't be loaded (e.g. an approved concept that expired from the
-      // store), fail before spending a paid generation on a text-only prompt.
-      if (!source) {
-        throw new Error('The source image for this generation could not be loaded (it may have expired). Please regenerate the concept and try again.');
-      }
       parts.push({ inlineData: { mimeType: source.mimeType, data: source.base64 } });
     }
 

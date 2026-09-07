@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { resolveProviderForSubmit } from '@/lib/ai/registry.server';
 import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.server';
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
-import { resultIdFromPath } from '@/lib/ai/resultStore.server';
+import { isSourceExpiredError, resultIdFromPath } from '@/lib/ai/resultStore.server';
 import { isSubmitTimeout } from '@/lib/ai/higgsfield.server';
 import { reserveIdempotentSubmission } from '@/lib/ai/idempotency.server';
 import { buildHiggsfieldPrompt } from '@/data/roomPrompts';
@@ -79,6 +79,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ jobId, demoMode, provider: demoMode ? 'mock' : 'higgsfield' });
   } catch (error) {
     console.error('[higgsfield/generate] submission failed:', error);
+    // This is a definite, pre-billing failure — assertSourceStillAvailable
+    // rejects it before the request ever reaches Higgsfield's servers — so,
+    // unlike isSubmitTimeout below, there is nothing ambiguous to preserve.
+    // A distinct status (rather than the generic 502) is what lets the
+    // client recognize it and clear the stale approved source, instead of
+    // retrying the exact same request and failing the same way forever.
+    if (isSourceExpiredError(error)) {
+      return NextResponse.json({ error: (error as Error).message }, { status: 410 });
+    }
     // The Higgsfield SDK call cannot be cancelled once in flight, so a
     // timeout here does NOT mean the submission definitely failed — it may
     // still be accepted and running (and billed) server-side with no

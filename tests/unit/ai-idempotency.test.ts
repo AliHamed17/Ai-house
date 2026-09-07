@@ -62,6 +62,29 @@ describe('reserveIdempotentSubmission (reconciles a retried submission instead o
     expect(run).toHaveBeenCalledTimes(2);
   });
 
+  it('extends an ambiguous reservation well past the ordinary TTL, so a visitor who steps away can still come back and reconcile (regression)', async () => {
+    vi.useFakeTimers();
+    try {
+      const ambiguousError = new Error('ambiguous timeout');
+      const run = vi.fn().mockRejectedValueOnce(ambiguousError).mockResolvedValueOnce('job-should-not-be-reached');
+      const isAmbiguousFailure = (error: unknown) => error === ambiguousError;
+
+      const first = reserveIdempotentSubmission('ambiguous-ttl-key', run, { isAmbiguousFailure });
+      await expect(first).rejects.toThrow('ambiguous timeout');
+      // Let the internal .catch() cleanup upgrade the entry's TTL.
+      await vi.runAllTimersAsync();
+
+      // Past the ordinary 10-minute TTL, but well within the extended
+      // ambiguous-failure window — the reservation must still be held.
+      vi.advanceTimersByTime(20 * 60_000);
+      const second = reserveIdempotentSubmission('ambiguous-ttl-key', run, { isAmbiguousFailure });
+      await expect(second).rejects.toThrow('ambiguous timeout');
+      expect(run).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reserves the key before run() settles, so a concurrent call with the same key joins instead of starting a second run (regression)', async () => {
     let resolveRun: (value: string) => void = () => {};
     const runPromise = new Promise<string>((resolve) => {

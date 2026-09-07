@@ -37,6 +37,55 @@ interface LiveStatus {
   higgsfield: boolean;
 }
 
+// Mirrors recoverableJobId/recoverableSubmission into localStorage so a paid
+// (or possibly-paid) generation whose fate is still unknown is not silently
+// forgotten if the visitor reloads or closes the tab mid-flight — in-memory
+// React state alone does not survive that. Restored on mount into the exact
+// same recoverableJobId/recoverableSubmission state and rendered by the
+// existing "Resume checking status" / "Resume submission" banners, so
+// resuming still requires the visitor's own click rather than silently
+// firing a request on page load.
+const RECOVERY_STORAGE_KEY = 'ai-studio:unresolved-generation';
+// Generous rather than tight: a real provider-side job (especially a live
+// Higgsfield video) can plausibly still be worth checking on well beyond a
+// typical "retry soon" window. This only bounds how long an old entry can
+// resurrect a recovery banner at all, not anything billing-relevant.
+const RECOVERY_MAX_AGE_MS = 24 * 60 * 60_000;
+
+type RecoveryEntry =
+  | { kind: 'job'; jobId: string; roomId: RoomId; outputType: GenerationOutputType; createdAt: number }
+  | { kind: 'submission'; endpoint: string; body: Record<string, unknown>; roomId: RoomId; outputType: GenerationOutputType; createdAt: number };
+
+function readRecoveryEntry(): RecoveryEntry | null {
+  try {
+    const raw = localStorage.getItem(RECOVERY_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as RecoveryEntry;
+    if (Date.now() - parsed.createdAt > RECOVERY_MAX_AGE_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeRecoveryEntry(entry: RecoveryEntry): void {
+  try {
+    localStorage.setItem(RECOVERY_STORAGE_KEY, JSON.stringify(entry));
+  } catch {
+    // Best-effort (private browsing, storage disabled, quota) — the
+    // in-memory state this mirrors still works for as long as the tab
+    // stays open either way, so a write failure here is not fatal.
+  }
+}
+
+function clearRecoveryEntry(): void {
+  try {
+    localStorage.removeItem(RECOVERY_STORAGE_KEY);
+  } catch {
+    // best-effort, see writeRecoveryEntry
+  }
+}
+
 export function AIStudioPanel() {
   const [roomId, setRoomId] = useState<RoomId>('living');
   const [styleVariant, setStyleVariant] = useState(materialVariants[0].id);
@@ -80,6 +129,30 @@ export function AIStudioPanel() {
 
   useEffect(() => () => {
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+  }, []);
+
+  // Restores a paid-job recovery point left behind by a previous page load
+  // (see writeRecoveryEntry) into the same recoverableJobId/recoverableSubmission
+  // state a same-session outage would have produced — reusing the existing
+  // "Resume checking status" / "Resume submission" banners rather than
+  // silently resuming anything itself. roomId/outputType are restored
+  // alongside it so the locked selectors reflect the room the outstanding
+  // job actually belongs to, not the default the component mounted with.
+  useEffect(() => {
+    const entry = readRecoveryEntry();
+    if (!entry) return;
+    // Restoring from an external system (localStorage) on mount, not
+    // deriving from other React state — see MobileControls.tsx for the same
+    // sanctioned pattern and rule exception.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setRoomId(entry.roomId);
+    setOutputType(entry.outputType);
+    if (entry.kind === 'job') {
+      setRecoverableJobId(entry.jobId);
+    } else {
+      setRecoverableSubmission({ endpoint: entry.endpoint, body: entry.body });
+    }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   // Sync which providers are live (billed) vs. demo, so the UI can require
@@ -202,6 +275,10 @@ export function AIStudioPanel() {
   // unresolved one (handleResumeStatusCheck) so both get identical
   // retry/backoff behavior from one place.
   function startPolling(jobId: string, token: number) {
+    // Written up front — not only once retries are exhausted — so a reload
+    // during an otherwise-healthy poll still leaves a recovery breadcrumb;
+    // right now that case loses the job with no trace at all.
+    writeRecoveryEntry({ kind: 'job', jobId, roomId, outputType, createdAt: Date.now() });
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     const MAX_TRANSIENT_FAILURES = 5;
     let transientFailures = 0;
@@ -230,6 +307,7 @@ export function AIStudioPanel() {
         if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
           setSubmitting(false);
           setRecoverableJobId(null);
+          clearRecoveryEntry();
           return;
         }
         pollTimerRef.current = setTimeout(poll, 1000);
@@ -270,6 +348,12 @@ export function AIStudioPanel() {
   //    accepted and billed (see isSubmitTimeout in higgsfield.server) —
   //    this DID reach the client as a normal response, but is exactly as
   //    ambiguous as a dropped connection would have been.
+  // A 410 (from either route) is a third, definite case that still gets
+  // special handling: the approved source it named expired from the
+  // server's cache before this request used it (see SOURCE_EXPIRED_MESSAGE).
+  // Nothing was billed, so it isn't kept as recoverableSubmission — instead
+  // approvedSource is cleared so the next Generate uses a fresh source
+  // rather than retrying this exact request and failing the same way again.
   // Shared between a fresh submission (handleGenerate) and resuming one
   // (handleResumeSubmission).
   async function submitOnce(endpoint: string, body: Record<string, unknown>, token: number): Promise<string | null> {
@@ -284,7 +368,19 @@ export function AIStudioPanel() {
       if (!res.ok) {
         setError(data.error ?? 'Generation request failed.');
         setSubmitting(false);
-        if (res.status === 504) setRecoverableSubmission({ endpoint, body });
+        // Cleared unconditionally first: a stale entry from an earlier
+        // ambiguous attempt on this same request (see handleResumeSubmission)
+        // must not survive a now-definite outcome, whichever way it resolved.
+        clearRecoveryEntry();
+        if (res.status === 504) {
+          setRecoverableSubmission({ endpoint, body });
+          writeRecoveryEntry({ kind: 'submission', endpoint, body, roomId, outputType, createdAt: Date.now() });
+        }
+        // A definite, pre-billing failure — the approved source this request
+        // named fell out of the server's cache. Nothing to resume: clear it
+        // so the next Generate falls back to a fresh source instead of
+        // retrying the same request and failing the same way forever.
+        if (res.status === 410) setApprovedSource(null);
         return null;
       }
       return data.jobId as string;
@@ -293,6 +389,7 @@ export function AIStudioPanel() {
       setError('Could not reach the generation service. If it was already submitted, Resume below reuses the exact same request instead of starting a new one.');
       setSubmitting(false);
       setRecoverableSubmission({ endpoint, body });
+      writeRecoveryEntry({ kind: 'submission', endpoint, body, roomId, outputType, createdAt: Date.now() });
       return null;
     }
   }
@@ -320,6 +417,7 @@ export function AIStudioPanel() {
     // unresolved job is the visitor's own informed choice, not silent loss.
     setRecoverableJobId(null);
     setRecoverableSubmission(null);
+    clearRecoveryEntry();
 
     const endpoint = outputType === 'image' ? '/api/nano-banana/generate' : '/api/higgsfield/generate';
     // Once a concept for THIS room has been approved, both a refinement and a

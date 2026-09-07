@@ -3,7 +3,7 @@ import { BlockList, isIP } from 'node:net';
 import type { GenerationInput, GenerationJob, GenerationStatus, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
 import { toAbsoluteUrl } from './publicAsset.server';
-import { getStoredResult, resultIdFromPath } from './resultStore.server';
+import { getStoredResult, resultIdFromPath, SOURCE_EXPIRED_MESSAGE } from './resultStore.server';
 import { retryOnce, withTimeout } from './resilience.server';
 
 /**
@@ -110,7 +110,7 @@ export function isHiggsfieldConfigured(): boolean {
 export function assertSourceStillAvailable(sourceAssetPath: string | undefined): void {
   const storedId = resultIdFromPath(sourceAssetPath ?? '');
   if (storedId && !getStoredResult(storedId)) {
-    throw new Error('The approved source image has expired from the server cache. Please regenerate and re-approve it, then try again.');
+    throw new Error(SOURCE_EXPIRED_MESSAGE);
   }
 }
 

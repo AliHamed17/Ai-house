@@ -44,11 +44,11 @@ describe('POST /api/higgsfield/generate (server-side live-source enforcement)', 
     const { POST } = await import('@/app/api/higgsfield/generate/route');
     // No real Higgsfield credentials/network exist in this test, and this id
     // was never actually stored — assertSourceStillAvailable() further
-    // downstream rejects it as expired (502), not this route's own 400
+    // downstream rejects it as expired (410), not this route's own 400
     // "requires an approved... source" check, proving that check itself let
     // a genuine stored-result-shaped path through rather than blocking it.
     const res = await POST(makeRequest({ roomId: 'living', sourceAssetPath: '/api/generation/result/not-a-real-id' }));
-    expect(res.status).not.toBe(400);
+    expect(res.status).toBe(410);
   });
 
   it('does not restrict the source path in demo mode (no live credentials)', async () => {

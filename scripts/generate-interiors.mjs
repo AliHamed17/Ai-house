@@ -37,6 +37,10 @@ const VARIANTS = [
     palette:
       'Warm ivory lime-plaster walls, natural rift-cut oak joinery, pale honed limestone and travertine floors, '
       + 'oatmeal and sand textiles, dark-bronze metal. Layered 2700K light, late-afternoon golden sun raking in.',
+    furniture:
+      'A low curved modular sofa in sand bouclé, sculptural cognac-leather lounge chairs, nested travertine and '
+      + 'oak tables, a deep-pile wool rug, slim dark-bronze reading lights, and flush oak cabinetry with '
+      + 'shadow-gap detailing.',
   },
   {
     id: 'cool-stone',
@@ -45,6 +49,10 @@ const VARIANTS = [
       'Cool pale quartzite-grey stone floors with soft veining, smoked greyed-oak joinery, chalk off-white walls, '
       + 'pale grey and stone-coloured textiles, champagne and brushed-nickel metal. Crisp bright north daylight, '
       + 'cooler 3000K fill, cleaner and more gallery-like.',
+    furniture:
+      'A crisp low-back sofa in pale grey wool with tight upholstery, curved swivel chairs, a slab stone coffee '
+      + 'table, handleless push-to-open cabinetry, a slim champagne-metal floor lamp, and a flat-weave rug in '
+      + 'stone and chalk.',
   },
   {
     id: 'sand-linen',
@@ -53,6 +61,46 @@ const VARIANTS = [
       'Sand and clay tones throughout, deep taupe and mushroom plaster walls, warm travertine floors, '
       + 'heavy washed linen and boucle in ecru and terracotta, aged unlacquered brass, one ochre accent. '
       + 'Soft diffused warm light, cocooning and textile-led, deeper contrast in the shadows.',
+    furniture:
+      'Deep low-slung sofas in washed linen with loose covers, rounded boucle armchairs, chunky solid-timber '
+      + 'plinth tables, ribbed and fluted cabinet fronts, thick woven rugs with visible texture, ceramic table '
+      + 'lamps with linen shades, and one large hand-thrown vessel per room.',
+  },
+  {
+    id: 'walnut-brass',
+    label: 'Dark Walnut & Brass',
+    palette:
+      'Deep American walnut joinery with visible grain, dark marble with strong dramatic veining, '
+      + 'forest-green and petrol-blue velvet, warm unlacquered brass and antique bronze, near-black lacquer '
+      + 'detailing, dark bronze-tinted mirror. Low warm evening light, pools of lamplight, rich shadow.',
+    furniture:
+      'A tufted or channel-stitched velvet sofa, cane-back and leather club chairs, marble-topped pedestal '
+      + 'and gueridon side tables, a brass arc floor lamp, fluted walnut cabinetry, a bar cabinet with an '
+      + 'antique-mirror interior, and framed art with slim brass surrounds.',
+  },
+  {
+    id: 'lime-terracotta',
+    label: 'Levantine Lime & Terracotta',
+    palette:
+      'Hand-troweled lime plaster and tadelakt in warm chalk and apricot, terracotta and glazed zellige tile, '
+      + 'olive and cedar timber, aged blackened iron, unglazed clay. Bright Mediterranean sun with hard shadow, '
+      + 'rooted in this region rather than a catalogue.',
+    furniture:
+      'A low slung sofa in heavy natural cotton, rattan and rush-seated lounge chairs, carved olive-wood low '
+      + 'tables, handwoven wool kilims and flatweave rugs, arched plaster niches used as shelving, hammered '
+      + 'copper and unglazed terracotta vessels, rush pendant shades, and a solid timber bench.',
+  },
+  {
+    id: 'japandi-ink',
+    label: 'Japandi Oak & Ink',
+    palette:
+      'Pale white oak and ash, blackened steel, chalk-white and warm grey plaster, paper-diffused light, '
+      + 'muted clay and celadon ceramics, charcoal-ink accents. Restrained and horizontal, with deliberate '
+      + 'empty space and very few objects, each one chosen.',
+    furniture:
+      'A low platform sofa with a slim timber frame, spindle-back and Windsor-influenced chairs, blackened '
+      + 'steel and oak open shelving, paper lantern pendants, a long low sideboard, floor cushions, and one '
+      + 'branch in a tall stoneware vase. Nothing decorative that is not also useful.',
   },
 ];
 
@@ -62,6 +110,9 @@ const CAMERA = [
 ].join(' ');
 
 const NEGATIVE = [
+  'Return ONE single continuous photograph that fills the entire frame edge to edge.',
+  'Do not return a collage, diptych, grid, contact sheet, before/after pair, split panel,',
+  'multiple views, or any image divided by white or black bands.',
   'No people, no pets, no text, no watermark, no logos, no floating objects,',
   'no warped or melted furniture, no impossible reflections, no extra doors or windows,',
   'no resized or relocated openings, no cartoon or CGI-plastic look, no fisheye distortion.',
@@ -167,6 +218,58 @@ const ROOMS = [
   },
 ];
 
+let sharpMod;
+async function loadSharp() {
+  if (sharpMod !== undefined) return sharpMod;
+  try {
+    sharpMod = (await import('sharp')).default;
+  } catch {
+    sharpMod = null;
+  }
+  return sharpMod;
+}
+
+/** Gemini occasionally returns a diptych or grid instead of one photograph.
+ * The giveaway is a run of near-uniform, near-white or near-black lines. */
+async function isCollage(buf) {
+  const sharp = await loadSharp();
+  if (!sharp) return false;
+  const { data, info } = await sharp(buf).greyscale().raw().toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  const stats = (n, get) => {
+    const out = [];
+    for (let i = 0; i < n; i += 1) {
+      let sum = 0;
+      let sumSq = 0;
+      const m = get.length;
+      for (let j = 0; j < m; j += 1) {
+        const v = data[get.at(i, j)];
+        sum += v;
+        sumSq += v * v;
+      }
+      const mean = sum / m;
+      out.push({ mean, std: Math.sqrt(Math.max(0, sumSq / m - mean * mean)) });
+    }
+    return out;
+  };
+  const rows = stats(height, { length: width, at: (y, x) => y * width + x });
+  const cols = stats(width, { length: height, at: (x, y) => y * width + x });
+  const hasGap = (lines) => {
+    let run = 0;
+    for (let i = Math.floor(lines.length * 0.1); i < Math.floor(lines.length * 0.9); i += 1) {
+      const l = lines[i];
+      if (l.std < 3 && (l.mean > 240 || l.mean < 20)) {
+        run += 1;
+        if (run >= 3) return true;
+      } else {
+        run = 0;
+      }
+    }
+    return false;
+  };
+  return hasGap(rows) || hasGap(cols);
+}
+
 function heroFrame(roomId) {
   const dir = path.join(FRAMES, roomId);
   if (!existsSync(dir)) return null;
@@ -183,6 +286,10 @@ function buildPrompt(room, variant) {
     'Do not add, remove, resize or move any opening. Do not change the room shape.',
     `Design brief: ${room.brief}`,
     `Material and colour direction — "${variant.label}": ${variant.palette}`,
+    `Furniture language for this direction: ${variant.furniture}`,
+    'Fill the room with real, specific, buildable furniture and soft furnishings that a person actually lives',
+    'with — seating, tables, storage, lighting, rugs, textiles, ceramics and a few personal objects. It must',
+    'read as a furnished, inhabited home, not an empty showroom with one chair in it.',
     'This is high-end architectural visualization in the language of a luxury property film.',
     CAMERA,
     'The result must look like a photograph of a real, buildable, finished room — not a 3D render.',
@@ -282,19 +389,32 @@ async function main() {
       process.stdout.write(`  ${room.id.padEnd(18)} `);
       const started = Date.now();
       try {
-        const res = await ai.models.generateContent({
-          model: MODEL,
-          contents: [
-            { text: buildPrompt(room, variant) },
-            { inlineData: { mimeType: 'image/jpeg', data: readFileSync(ref).toString('base64') } },
-          ],
-        });
-        const parts = res.candidates?.[0]?.content?.parts ?? [];
-        const img = parts.find((p) => p.inlineData?.data);
-        if (!img) throw new Error('no image in response');
-        const buf = Buffer.from(img.inlineData.data, 'base64');
+        let buf = null;
+        let note = '';
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const extra = attempt === 0
+            ? ''
+            : ' IMPORTANT: your previous attempt returned a split-panel collage. Return exactly ONE photograph filling the whole frame.';
+          const res = await ai.models.generateContent({
+            model: MODEL,
+            contents: [
+              { text: buildPrompt(room, variant) + extra },
+              { inlineData: { mimeType: 'image/jpeg', data: readFileSync(ref).toString('base64') } },
+            ],
+          });
+          const parts = res.candidates?.[0]?.content?.parts ?? [];
+          const img = parts.find((p) => p.inlineData?.data);
+          if (!img) throw new Error('no image in response');
+          const candidate = Buffer.from(img.inlineData.data, 'base64');
+          if (!(await isCollage(candidate))) {
+            buf = candidate;
+            note = attempt ? '  (retried past a collage)' : '';
+            break;
+          }
+        }
+        if (!buf) throw new Error('returned a collage twice, not written');
         writeFileSync(out, buf);
-        console.log(`ok  ${Math.round(buf.length / 1024)}KB  ${((Date.now() - started) / 1000).toFixed(1)}s`);
+        console.log(`ok  ${Math.round(buf.length / 1024)}KB  ${((Date.now() - started) / 1000).toFixed(1)}s${note}`);
         ok += 1;
       } catch (err) {
         console.log(`FAILED  ${err.message}`);

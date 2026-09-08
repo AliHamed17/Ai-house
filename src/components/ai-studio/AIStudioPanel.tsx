@@ -286,6 +286,22 @@ export function AIStudioPanel() {
     if (!entry) return;
     setRoomId(entry.roomId);
     setOutputType(entry.outputType);
+    // A settled job (or its approval) this tab was showing a moment ago
+    // belongs to whatever room it was actually generated for, not
+    // necessarily the room this adoption is about to switch to — the
+    // Approve handler below pairs job.resultUrl with the panel's CURRENT
+    // roomId state, not the job's own, so leaving a stale job/approval
+    // displayed here would let clicking Approve record that image's URL
+    // under the wrong (newly adopted) room, and a later live refinement or
+    // video could then be billed using the wrong room's source. error is
+    // deliberately NOT cleared here: unlike job/approved/approvedSource it
+    // carries no billing risk, and clearing it would wipe a message the
+    // very same call path just set for THIS attempt's own definite outcome
+    // (e.g. submitOnce's non-504 branch reporting a real failure right
+    // before clearOwnRecoveryEntry happens to also adopt a sibling).
+    setJob(null);
+    setApproved(false);
+    setApprovedSource(null);
     if (entry.kind === 'job') {
       setRecoverableJobId(entry.jobId);
     } else {
@@ -328,6 +344,28 @@ export function AIStudioPanel() {
   useEffect(() => {
     function handleStorageEvent(event: StorageEvent) {
       if (event.key !== null && !event.key.startsWith(RECOVERY_STORAGE_PREFIX)) return;
+
+      // If this tab is currently tracking an entry — whether it originally
+      // submitted it or only ever adopted a sibling tab's — and THIS event
+      // is that exact entry's own key being removed (newValue === null),
+      // the record is gone regardless of why (most commonly: the owning
+      // tab just resolved or abandoned it). Without reacting here, the
+      // guard below would keep blocking this tab forever on a Resume banner
+      // for a record that no longer exists anywhere, since it already has
+      // a non-null recoverable state of its own.
+      const trackedId =
+        recoverableJobId !== null
+          ? jobRecoveryId(recoverableJobId)
+          : recoverableSubmission !== null
+            ? submissionRecoveryId(recoverableSubmission.body.idempotencyKey as string)
+            : null;
+      if (trackedId !== null && event.key === recoveryStorageKey(trackedId) && event.newValue === null) {
+        setRecoverableJobId(null);
+        setRecoverableSubmission(null);
+        adoptRecoveryEntry();
+        return;
+      }
+
       // submitOnce writes THIS tab's own pre-fetch entry to storage before it
       // has any chance to settle, but only ever mirrors it into
       // recoverableSubmission/recoverableJobId once something has gone
@@ -644,17 +682,30 @@ export function AIStudioPanel() {
           return null;
         }
         setError(data.error ?? 'Generation request failed.');
-        // Cleared unconditionally first: a stale entry from an earlier
-        // ambiguous attempt on this same request (see handleResumeSubmission)
-        // must not survive a now-definite outcome, whichever way it resolved.
-        clearOwnRecoveryEntry(submissionRecoveryId(idempotencyKey));
         if (res.status === 504) {
+          // NOT a genuine settle-to-idle moment — this same submission's own
+          // entry is about to be immediately re-written below (upgraded to
+          // ambiguous: true), never abandoned, so this must not adopt a
+          // sibling out from under it the way clearOwnRecoveryEntry would:
+          // adopting here would change roomId/outputType to the sibling's,
+          // while recoverableSubmission (re-set right below) stays this
+          // request's own — a mismatch that would let the eventual job this
+          // resume produces get recorded and displayed under the wrong room.
+          // writeRecoveryEntry below overwrites this same key directly, so
+          // there is nothing to clear first.
           setRecoverableSubmission({ endpoint, body });
           // ambiguous: true, with a FRESH timestamp — mirrors isSubmitTimeout
           // server-side (the only way either generate route returns a 504),
           // which is exactly when idempotency.server refreshes createdAt and
           // upgrades to the longer AMBIGUOUS_TTL_MS for this same reservation.
           writeRecoveryEntry({ kind: 'submission', ambiguous: true, idempotencyKey, endpoint, body, roomId, outputType, createdAt: Date.now() });
+        } else {
+          // A genuinely definite, terminal outcome (whichever way it
+          // resolved) — a stale entry from an earlier ambiguous attempt on
+          // this same request (see handleResumeSubmission) must not survive
+          // it, and this tab's own slot is now genuinely empty, so checking
+          // for a remaining sibling is correct here.
+          clearOwnRecoveryEntry(submissionRecoveryId(idempotencyKey));
         }
         // A definite, pre-billing failure — the approved source this request
         // named fell out of the server's cache. Nothing to resume: clear it

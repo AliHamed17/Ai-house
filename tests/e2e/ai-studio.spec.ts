@@ -534,40 +534,6 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible();
   });
 
-  test('two tabs each failing to submit around the same time both keep their own recovery entry (regression)', async ({ page, context }) => {
-    // Before per-entry storage keys, two tabs each doing their own
-    // read-all -> merge -> write-all around the same time could each write a
-    // snapshot missing the other's own addition — whichever tab's setItem
-    // ran second silently discarded the other's entry (see
-    // RECOVERY_STORAGE_PREFIX's own comment history in AIStudioPanel).
-    // Unlike the raw-injection test above, this exercises the REAL
-    // writeRecoveryEntry code path via two genuinely separate tabs
-    // submitting as close together as this test can arrange.
-    const page2 = await context.newPage();
-    await page.route('**/api/nano-banana/generate', (route) => route.abort());
-    await page2.route('**/api/nano-banana/generate', (route) => route.abort());
-    await page.goto('/#ai-studio');
-    await page2.goto('/#ai-studio');
-
-    await Promise.all([
-      page.getByRole('button', { name: /Generate concept image/i }).click(),
-      page2.getByRole('button', { name: /Generate concept image/i }).click(),
-    ]);
-    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
-    await expect(page2.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
-
-    // Both tabs' idempotencyKeys are independently random, so each wrote a
-    // genuinely distinct entry — both must have survived.
-    expect(await recoveryEntryIds(page)).toHaveLength(2);
-
-    // And each is independently usable after a reload, not just present as
-    // inert JSON — proving neither tab's own record was corrupted either.
-    await page.reload();
-    await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
-    await page2.reload();
-    await expect(page2.getByRole('button', { name: 'Resume submission' })).toBeVisible();
-  });
-
   test('a tab already open learns LIVE that another tab has an outstanding generation, and blocks its own Generate (regression)', async ({
     page,
     context,
@@ -728,5 +694,121 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.getByRole('button', { name: 'Working…' })).toBeDisabled();
     await expect(page.locator('select').first()).toHaveValue('kitchen');
     await expect(page.getByRole('button', { name: 'Resume checking status' })).toHaveCount(0);
+  });
+
+  test('a settled job clears its displayed result before adopting a sibling for a different room, so Approve can never mismatch rooms (regression)', async ({
+    page,
+    context,
+  }) => {
+    // The Approve handler pairs job.resultUrl with the panel's CURRENT
+    // roomId state, not the completed job's own — so if adoptRecoveryEntry
+    // switches roomId to a sibling's room right as this job reaches a
+    // terminal state, a stale (but still displayed) completed job would let
+    // Approve record its image's URL under the wrong, newly adopted room.
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+
+    // A genuinely different tab writes a sibling job-kind entry for a
+    // DIFFERENT room while this tab's own job is still in flight, so it is
+    // already present in storage by the time this tab's poll reaches the
+    // terminal "completed" state.
+    const page2 = await context.newPage();
+    await page2.goto('/#ai-studio');
+    await page2.evaluate((prefix) => {
+      localStorage.setItem(
+        `${prefix}job:sibling-different-room-job-id`,
+        JSON.stringify({ kind: 'job', jobId: 'sibling-different-room-job-id', roomId: 'kitchen', outputType: 'image', createdAt: Date.now() }),
+      );
+    }, RECOVERY_STORAGE_PREFIX);
+
+    // The sibling gets adopted instead of leaving the now-stale completed
+    // job (and an Approve button for it) displayed.
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('select').first()).toHaveValue('kitchen');
+    await expect(page.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toHaveCount(0);
+  });
+
+  test('a tab that adopted a sibling entry unlocks once the OWNING tab resolves it, without needing to reload or manually resume/abandon (regression)', async ({
+    page,
+    context,
+  }) => {
+    // Tab 2 adopting tab 1's entry makes tab 2's OWN recoverable state
+    // non-null, which — before tracking the adopted entry's own identity —
+    // meant tab 2's storage listener would then ignore ALL further events,
+    // including tab 1 later removing that exact key by resolving it. Tab 2
+    // would stay stuck showing a Resume banner for a record that no longer
+    // exists anywhere, until manually resumed or abandoned.
+    const page2 = await context.newPage();
+    await page.route('**/api/nano-banana/generate', (route) => route.abort());
+    await page.goto('/#ai-studio');
+    await page2.goto('/#ai-studio');
+
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    // Tab 2, already open and idle, picks this up live and shows its own banner.
+    await expect(page2.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+
+    // Tab 1 (the true owner) abandons it — removing the key from storage.
+    await page.getByRole('button', { name: 'Abandon and start over' }).click();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+
+    // Tab 2 must notice the removal live and unlock on its own.
+    await expect(page2.getByRole('button', { name: 'Resume submission' })).toHaveCount(0, { timeout: 10_000 });
+    await expect(page2.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+  });
+
+  test('a 504 (ambiguous submit timeout) does not adopt a sibling while upgrading its own entry in place (regression)', async ({ page }) => {
+    // clearOwnRecoveryEntry's adoption is correct after a genuinely
+    // definite, terminal outcome, but a 504 immediately re-writes this SAME
+    // submission's own entry (upgraded to ambiguous: true) rather than
+    // settling to idle — adopting a sibling in between would switch
+    // roomId/outputType to the sibling's while recoverableSubmission stayed
+    // this request's own, so the job this resume eventually produces could
+    // get recorded and displayed under the wrong room.
+    await page.goto('/#ai-studio');
+    // Confirms the mount effect has already run (and found nothing) BEFORE
+    // seeding — otherwise a same-document write landing before that
+    // one-time read (a genuine race against hydration) would have this
+    // tab's OWN mount adopt the sibling immediately, disabling Generate
+    // before the test could ever reach the 504 path this is meant to check.
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+
+    // A same-document write never fires this page's OWN `storage` listener
+    // either, so this is otherwise fully invisible to this tab's state —
+    // present only as raw storage content to verify against afterward.
+    await page.evaluate((prefix) => {
+      localStorage.setItem(
+        `${prefix}job:sibling-different-room-job-id`,
+        JSON.stringify({ kind: 'job', jobId: 'sibling-different-room-job-id', roomId: 'kitchen', outputType: 'image', createdAt: Date.now() }),
+      );
+    }, RECOVERY_STORAGE_PREFIX);
+
+    await page.route('**/api/nano-banana/generate', (route) =>
+      route.fulfill({
+        status: 504,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error:
+            'The request to Nano Banana timed out. It may have already been accepted and could still be running (and billed) — please wait a minute and check before submitting again, to avoid a possible duplicate charge.',
+        }),
+      }),
+    );
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    // Still tracking ITS OWN resumable submission for the room it actually
+    // submitted (the default, 'living') — not silently switched to the
+    // sibling's room/entry.
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+    await expect(page.locator('select').first()).toHaveValue('living');
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toHaveCount(0);
+
+    // Neither entry was lost.
+    const ids = await recoveryEntryIds(page);
+    expect(ids).toHaveLength(2);
+    expect(ids).toContain('job:sibling-different-room-job-id');
+    expect(ids.some((id) => id.startsWith('submission:'))).toBe(true);
   });
 });

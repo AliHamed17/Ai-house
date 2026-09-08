@@ -1,7 +1,7 @@
 import 'server-only';
 import type { GenerationInput, GenerationJob, GenerationStatus, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
-import { resultIdFromPath, touchStoredResult } from './resultStore.server';
+import { getStoredResult, resultIdFromPath, touchStoredResult } from './resultStore.server';
 
 const QUEUED_UNTIL_MS = 900;
 const IN_PROGRESS_UNTIL_MS = 2600;
@@ -78,7 +78,18 @@ export const mockProvider: MediaGenerationProvider = {
     };
 
     if (status === 'completed') {
-      job.resultUrl = payload.mockSourceResultPath ?? `/generated/concepts/${payload.roomId}.svg`;
+      // touchStoredResult at submit time only guarantees the source survives
+      // THIS mock job's own short completion delay (IN_PROGRESS_UNTIL_MS,
+      // 2.6s) — it says nothing about a job whose status check is delayed or
+      // resumed much later (recoverableJobId's own ceiling allows up to 24h;
+      // see RECOVERY_MAX_AGE_MS.job in AIStudioPanel). By then the source has
+      // almost certainly fallen out of the 10-minute TTL store, and baking
+      // its path into a job reported as "completed" would render a broken
+      // preview. Re-validating existence here, on every completed check
+      // (not just once at submit), is what catches that.
+      const storedSourceId = payload.mockSourceResultPath ? resultIdFromPath(payload.mockSourceResultPath) : undefined;
+      const sourceStillAvailable = Boolean(storedSourceId && getStoredResult(storedSourceId));
+      job.resultUrl = sourceStillAvailable ? payload.mockSourceResultPath : `/generated/concepts/${payload.roomId}.svg`;
       job.resultWidth = 800;
       job.resultHeight = 600;
     } else if (status === 'failed') {

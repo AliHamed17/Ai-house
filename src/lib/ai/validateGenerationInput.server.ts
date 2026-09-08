@@ -16,6 +16,7 @@ export interface ValidatedGenerationRequest {
   simulate?: 'success' | 'failure' | 'moderated';
   editInstruction?: string;
   idempotencyKey?: string;
+  liveRunConfirmed: boolean;
 }
 
 export type ValidationResult =
@@ -64,5 +65,13 @@ export function validateGenerationRequest(body: unknown): ValidationResult {
     idempotencyKey = b.idempotencyKey;
   }
 
-  return { ok: true, data: { roomId: b.roomId as RoomId, styleVariant, sourceAssetPath, simulate, editInstruction, idempotencyKey } };
+  // Only ever true when the client's own confirmation step actually ran (see
+  // handleGenerateClick in AIStudioPanel) — never inferred from anything else
+  // in the request, since this is exactly what the route checks before
+  // allowing a live (billed) provider to run. A missing, non-boolean, or
+  // merely truthy-looking value must be treated the same as an explicit
+  // false: this field's whole purpose is to fail closed.
+  const liveRunConfirmed = b.liveRunConfirmed === true;
+
+  return { ok: true, data: { roomId: b.roomId as RoomId, styleVariant, sourceAssetPath, simulate, editInstruction, idempotencyKey, liveRunConfirmed } };
 }

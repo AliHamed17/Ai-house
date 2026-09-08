@@ -64,4 +64,44 @@ describe('nanoBananaProvider.submit refuses a paid call once the result store is
       expect(isResultStoreAtCapacityError(error)).toBe(true);
     }
   });
+
+  it('does not let two concurrent submissions both claim the one free slot before either has stored a result (regression)', async () => {
+    // A plain read-only size check (the P2 finding this replaced) would let
+    // BOTH of these calls observe the same pre-generation store.size and
+    // pass, since neither has reached putStoredResult yet when the other's
+    // own check runs — reserveResultSlot must claim the slot synchronously,
+    // before either submit() call's first await, to close this race.
+    process.env.GEMINI_API_KEY = 'test-key-not-real';
+    vi.resetModules();
+    const { nanoBananaProvider } = await import('@/lib/ai/nanoBanana.server');
+    const { putStoredResult, RESULT_STORE_AT_CAPACITY_MESSAGE } = await import('@/lib/ai/resultStore.server');
+    generateContentMock.mockResolvedValue({
+      candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aGVsbG8=' } }] } }],
+    });
+
+    // One slot free: 99 already-stored (unpolled) results.
+    for (let i = 0; i < 99; i++) putStoredResult('image/png', `entry-${i}`);
+
+    const input = {
+      provider: 'nano-banana' as const,
+      outputType: 'image' as const,
+      roomId: 'living' as const,
+      styleVariant: 'warm-oak',
+      prompt: 'test prompt',
+    };
+    // Issued back-to-back, neither awaited yet — each submit() call runs
+    // synchronously through its own reserveResultSlot() before yielding at
+    // generateContent's await, so this genuinely exercises both calls'
+    // reservation checks racing against each other, not just one after the
+    // other's result is already known.
+    const first = nanoBananaProvider.submit(input);
+    const second = nanoBananaProvider.submit(input);
+
+    const results = await Promise.allSettled([first, second]);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0].reason as Error).message).toBe(RESULT_STORE_AT_CAPACITY_MESSAGE);
+  });
 });

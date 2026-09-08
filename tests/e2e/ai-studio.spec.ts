@@ -1,13 +1,34 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// Mirrors AIStudioPanel's own keyed-collection storage shape (a job's own
-// jobId, or a submission's own idempotencyKey, as the record's key) rather
-// than a single shared slot — see jobRecoveryId/submissionRecoveryId there.
+// Mirrors AIStudioPanel's own per-entry storage shape: each entry lives under
+// its own key (this prefix plus its own id — a job's jobId, or a
+// submission's idempotencyKey — see jobRecoveryId/submissionRecoveryId/
+// recoveryStorageKey there), never sharing one key's JSON blob with any
+// other entry.
+const RECOVERY_STORAGE_PREFIX = 'ai-studio:unresolved-generation:';
+
 async function writeRawRecoveryEntry(page: Page, entry: Record<string, unknown>) {
-  await page.addInitScript((e) => {
-    const id = e.kind === 'job' ? `job:${e.jobId}` : `submission:${e.idempotencyKey}`;
-    localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify({ [id]: e }));
-  }, entry);
+  await page.addInitScript(
+    ({ e, prefix }) => {
+      const id = e.kind === 'job' ? `job:${e.jobId}` : `submission:${e.idempotencyKey}`;
+      localStorage.setItem(`${prefix}${id}`, JSON.stringify(e));
+    },
+    { e: entry, prefix: RECOVERY_STORAGE_PREFIX },
+  );
+}
+
+// Every currently-stored recovery entry's own id (the part after the shared
+// prefix) — replaces reading one shared key's JSON blob and inspecting its
+// keys, since each entry is now its own independent localStorage key.
+async function recoveryEntryIds(page: Page): Promise<string[]> {
+  return page.evaluate((prefix) => {
+    const ids: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) ids.push(key.slice(prefix.length));
+    }
+    return ids;
+  }, RECOVERY_STORAGE_PREFIX);
 }
 
 test.describe('AI Design Studio (demo mode)', () => {
@@ -247,6 +268,40 @@ test.describe('AI Design Studio (demo mode)', () => {
     expect(thirdRequestSourcePath).toBe('/evidence/frames/00-00-16_open-social-zone.jpg');
   });
 
+  test('a 428 (server-side live-run confirmation required) is never treated as recoverable, and does not lock out a fresh attempt (regression)', async ({ page }) => {
+    // The server returns this when its own demoMode resolution disagrees
+    // with what this tab's cached mode probe believed (see
+    // LIVE_RUN_NOT_CONFIRMED_MESSAGE) — nothing was billed, so like a 410
+    // this is a definite, pre-billing failure with nothing to resume.
+    let requestCount = 0;
+    await page.route('**/api/nano-banana/generate', (route) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return route.fulfill({
+          status: 428,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'This request would start a live, billed generation, but no cost confirmation was received for it. Please try again.',
+          }),
+        });
+      }
+      return route.continue();
+    });
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/no cost confirmation was received/i)).toBeVisible({ timeout: 10_000 });
+    // A definite failure — not recoverable, and does not lock selection.
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toHaveCount(0);
+    await expect(page.locator('select').first()).toBeEnabled();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+
+    // Not a permanent lockout — a later attempt (once the deployment's mode
+    // is genuinely reconciled) still completes normally.
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+  });
+
   test('a rate limit (429) on Resume preserves the recoverable submission instead of discarding it (regression)', async ({ page }) => {
     // A 429 on a Resume click means only that THIS attempt was throttled —
     // it says nothing about whether the original ambiguous submission it
@@ -443,17 +498,16 @@ test.describe('AI Design Studio (demo mode)', () => {
       createdAt: Date.now(),
     };
     // A one-time page.evaluate (not addInitScript, which would re-fire and
-    // resurrect this seed on the later reload below) writing both entries
-    // in one merged blob, matching the app's own keyed-collection shape.
+    // resurrect this seed on the later reload below) writing each entry
+    // under its own key, matching the app's own per-entry storage shape.
     await page.evaluate(
-      ({ older, newer }) => {
+      ({ older, newer, prefix }) => {
         const asJob = older as { kind: string; jobId: string };
         const asSubmission = newer as { kind: string; idempotencyKey: string };
-        const olderId = `job:${asJob.jobId}`;
-        const newerId = `submission:${asSubmission.idempotencyKey}`;
-        localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify({ [olderId]: older, [newerId]: newer }));
+        localStorage.setItem(`${prefix}job:${asJob.jobId}`, JSON.stringify(older));
+        localStorage.setItem(`${prefix}submission:${asSubmission.idempotencyKey}`, JSON.stringify(newer));
       },
-      { older: olderEntry, newer: newerEntry },
+      { older: olderEntry, newer: newerEntry, prefix: RECOVERY_STORAGE_PREFIX },
     );
 
     await page.route('**/api/nano-banana/generate', (route) =>
@@ -465,21 +519,53 @@ test.describe('AI Design Studio (demo mode)', () => {
     await page.reload();
     await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
 
-    const storedBeforeResolve = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
-    expect(Object.keys(JSON.parse(storedBeforeResolve ?? '{}'))).toHaveLength(2);
+    expect(await recoveryEntryIds(page)).toHaveLength(2);
 
     // Resolving the tracked entry to a definite, terminal outcome must clear
     // ONLY its own key.
     await page.getByRole('button', { name: 'Resume submission' }).click();
     await expect(page.getByText('boom')).toBeVisible({ timeout: 10_000 });
 
-    const storedAfterResolve = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
-    expect(Object.keys(JSON.parse(storedAfterResolve ?? '{}'))).toEqual(['job:untouched-sibling-job-id']);
+    expect(await recoveryEntryIds(page)).toEqual(['job:untouched-sibling-job-id']);
 
     // And the untouched sibling is genuinely usable, not just inert JSON
     // left behind — a reload restores its own recovery banner.
     await page.reload();
     await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible();
+  });
+
+  test('two tabs each failing to submit around the same time both keep their own recovery entry (regression)', async ({ page, context }) => {
+    // Before per-entry storage keys, two tabs each doing their own
+    // read-all -> merge -> write-all around the same time could each write a
+    // snapshot missing the other's own addition — whichever tab's setItem
+    // ran second silently discarded the other's entry (see
+    // RECOVERY_STORAGE_PREFIX's own comment history in AIStudioPanel).
+    // Unlike the raw-injection test above, this exercises the REAL
+    // writeRecoveryEntry code path via two genuinely separate tabs
+    // submitting as close together as this test can arrange.
+    const page2 = await context.newPage();
+    await page.route('**/api/nano-banana/generate', (route) => route.abort());
+    await page2.route('**/api/nano-banana/generate', (route) => route.abort());
+    await page.goto('/#ai-studio');
+    await page2.goto('/#ai-studio');
+
+    await Promise.all([
+      page.getByRole('button', { name: /Generate concept image/i }).click(),
+      page2.getByRole('button', { name: /Generate concept image/i }).click(),
+    ]);
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page2.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    // Both tabs' idempotencyKeys are independently random, so each wrote a
+    // genuinely distinct entry — both must have survived.
+    expect(await recoveryEntryIds(page)).toHaveLength(2);
+
+    // And each is independently usable after a reload, not just present as
+    // inert JSON — proving neither tab's own record was corrupted either.
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+    await page2.reload();
+    await expect(page2.getByRole('button', { name: 'Resume submission' })).toBeVisible();
   });
 
   test('a tab already open learns LIVE that another tab has an outstanding generation, and blocks its own Generate (regression)', async ({
@@ -523,8 +609,7 @@ test.describe('AI Design Studio (demo mode)', () => {
 
     // Not just hidden in memory — actually gone from storage, or a reload
     // would resurrect the same deadlock.
-    const stored = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
-    expect(stored).toBeNull();
+    expect(await recoveryEntryIds(page)).toEqual([]);
   });
 
   test('abandoning a recoverable submission clears its recovery record and unlocks Generate (regression)', async ({ page }) => {
@@ -537,8 +622,7 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
     await expect(page.locator('select').first()).toBeEnabled();
 
-    const stored = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
-    expect(stored).toBeNull();
+    expect(await recoveryEntryIds(page)).toEqual([]);
   });
 
   test('abandoning a recoverable job while a genuinely different tab\'s entry is still outstanding surfaces THAT entry instead of unlocking Generate (regression)', async ({ page }) => {
@@ -567,15 +651,13 @@ test.describe('AI Design Studio (demo mode)', () => {
     // One-time seed of both entries (see the two-independently-tracked test
     // above for why page.evaluate, not addInitScript, is used here).
     await page.evaluate(
-      ({ sibling, own }) => {
+      ({ sibling, own, prefix }) => {
         const asSibling = sibling as { jobId: string };
         const asOwn = own as { jobId: string };
-        localStorage.setItem(
-          'ai-studio:unresolved-generation',
-          JSON.stringify({ [`job:${asSibling.jobId}`]: sibling, [`job:${asOwn.jobId}`]: own }),
-        );
+        localStorage.setItem(`${prefix}job:${asSibling.jobId}`, JSON.stringify(sibling));
+        localStorage.setItem(`${prefix}job:${asOwn.jobId}`, JSON.stringify(own));
       },
-      { sibling: siblingEntry, own: ownEntry },
+      { sibling: siblingEntry, own: ownEntry, prefix: RECOVERY_STORAGE_PREFIX },
     );
 
     // Reload so the mount effect adopts the newer (own) entry as this tab's
@@ -593,8 +675,7 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible();
     await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
 
-    const stored = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
-    expect(Object.keys(JSON.parse(stored ?? '{}'))).toEqual(['job:sibling-still-outstanding-job-id']);
+    expect(await recoveryEntryIds(page)).toEqual(['job:sibling-still-outstanding-job-id']);
   });
 
   test('a genuinely different tab\'s recovery write is ignored while THIS tab has its own submission in flight, so it can never hijack the room mid-request (regression)', async ({
@@ -628,18 +709,18 @@ test.describe('AI Design Studio (demo mode)', () => {
     // could ever create a genuinely different entry of its own.)
     const page2 = await context.newPage();
     await page2.goto('/#ai-studio');
-    await page2.evaluate(() => {
-      const key = 'ai-studio:unresolved-generation';
-      const existing = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>;
-      existing['job:unrelated-other-tab-job-id'] = {
-        kind: 'job',
-        jobId: 'unrelated-other-tab-job-id',
-        roomId: 'living',
-        outputType: 'image',
-        createdAt: Date.now(),
-      };
-      localStorage.setItem(key, JSON.stringify(existing));
-    });
+    await page2.evaluate((prefix) => {
+      localStorage.setItem(
+        `${prefix}job:unrelated-other-tab-job-id`,
+        JSON.stringify({
+          kind: 'job',
+          jobId: 'unrelated-other-tab-job-id',
+          roomId: 'living',
+          outputType: 'image',
+          createdAt: Date.now(),
+        }),
+      );
+    }, RECOVERY_STORAGE_PREFIX);
 
     // Tab 1's own in-flight request must be completely unaffected — still
     // showing "Working…", still locked to its OWN room ('kitchen'), never

@@ -46,3 +46,20 @@ export function resolveProviderForSubmit(requested: GenerationProviderId): { pro
 export function resolveProviderById(id: GenerationProviderId): MediaGenerationProvider {
   return providersById[id] ?? mockProvider;
 }
+
+/**
+ * The client only shows its "Yes, generate (may incur cost)" confirmation
+ * when ITS OWN cached /api/generation/mode probe says the target provider is
+ * live — but that cache can go stale (a rolling deploy, an env var flip)
+ * between the probe and this exact submission, so a client that still
+ * believes it's in free demo mode never shows that confirmation at all and
+ * submits believing nothing will be billed. The client is directly
+ * reachable regardless of what it renders, so this route must independently
+ * re-verify: whenever ITS OWN authoritative demoMode resolution above says a
+ * request is about to bill a real provider, the request must carry an
+ * explicit confirmation the client only ever sets after that same
+ * confirmation step actually ran (see handleGenerateClick in
+ * AIStudioPanel) — never trust the client's belief about its own mode.
+ */
+export const LIVE_RUN_NOT_CONFIRMED_MESSAGE =
+  'This request would start a live, billed generation, but no cost confirmation was received for it. Please try again.';

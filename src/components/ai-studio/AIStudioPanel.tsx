@@ -45,7 +45,17 @@ interface LiveStatus {
 // existing "Resume checking status" / "Resume submission" banners, so
 // resuming still requires the visitor's own click rather than silently
 // firing a request on page load.
-const RECOVERY_STORAGE_KEY = 'ai-studio:unresolved-generation';
+// Each entry lives under its OWN key (this prefix plus its own recoveryEntryId
+// — see recoveryStorageKey below), never sharing one key's JSON blob with any
+// other entry. Two tabs each persisting their own entry around the same time
+// previously shared one key: both could read that key's blob before either
+// wrote back, so each write was a stale snapshot missing the other's own
+// addition — whichever tab's setItem ran second silently discarded the
+// other's entry (a lost-update regression a single JSON blob under one key
+// can never fully avoid, since localStorage has no atomic read-modify-write
+// across tabs). Per-entry keys make every write/clear a single, independent
+// localStorage call that can never race with — or clobber — any other entry.
+const RECOVERY_STORAGE_PREFIX = 'ai-studio:unresolved-generation:';
 // Ceilings mirror exactly what the server can actually still back up, so an
 // entry is never offered for Resume past the point its server-side
 // reservation (idempotency.server) could already be gone — at which point
@@ -122,20 +132,83 @@ function recoveryEntryId(entry: RecoveryEntry): string {
   return entry.kind === 'job' ? jobRecoveryId(entry.jobId) : submissionRecoveryId(entry.idempotencyKey);
 }
 
-function readAllRecoveryEntries(): Record<string, RecoveryEntry> {
-  try {
-    const raw = localStorage.getItem(RECOVERY_STORAGE_KEY);
-    if (!raw) return {};
-    return JSON.parse(raw) as Record<string, RecoveryEntry>;
-  } catch {
-    return {};
-  }
+function recoveryStorageKey(id: string): string {
+  return `${RECOVERY_STORAGE_PREFIX}${id}`;
 }
 
-function writeAllRecoveryEntries(all: Record<string, RecoveryEntry>): void {
+// A snapshot array, not a live view — later localStorage.removeItem calls
+// (e.g. while pruning in readAllRecoveryEntries below) never affect indices
+// already collected here, so callers can freely remove keys while iterating
+// this result without the re-indexing hazards of mutating storage mid-scan.
+function recoveryStorageKeys(): string[] {
+  const keys: string[] = [];
   try {
-    if (Object.keys(all).length === 0) localStorage.removeItem(RECOVERY_STORAGE_KEY);
-    else localStorage.setItem(RECOVERY_STORAGE_KEY, JSON.stringify(all));
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(RECOVERY_STORAGE_PREFIX)) keys.push(key);
+    }
+  } catch {
+    // Best-effort (private browsing, storage disabled) — same as every
+    // other localStorage access here.
+  }
+  return keys;
+}
+
+// Reads every still-valid entry across all of this tab's origin's recovery
+// keys, opportunistically removing any that have expired or turned out to be
+// corrupt — each removal is its own independent localStorage.removeItem
+// (never a shared blob rewritten wholesale), so pruning one entry can never
+// lose or race with a genuinely different tab's own concurrent write to a
+// DIFFERENT entry's key.
+function readAllRecoveryEntries(): Record<string, RecoveryEntry> {
+  const all: Record<string, RecoveryEntry> = {};
+  for (const key of recoveryStorageKeys()) {
+    let raw: string | null;
+    try {
+      raw = localStorage.getItem(key);
+    } catch {
+      continue;
+    }
+    if (!raw) continue;
+    let entry: RecoveryEntry;
+    try {
+      entry = JSON.parse(raw) as RecoveryEntry;
+    } catch {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // best-effort
+      }
+      continue;
+    }
+    if (Date.now() - entry.createdAt > recoveryMaxAgeMs(entry)) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // best-effort
+      }
+      continue;
+    }
+    all[key.slice(RECOVERY_STORAGE_PREFIX.length)] = entry;
+  }
+  return all;
+}
+
+// Restores the most recently written still-valid entry — a reasonable choice
+// when more than one is present (see the multi-tab note above); this tab's
+// own subsequent actions then track that ONE entry by its own identity, same
+// as any other restore.
+function readRecoveryEntry(): RecoveryEntry | null {
+  let newest: RecoveryEntry | null = null;
+  for (const entry of Object.values(readAllRecoveryEntries())) {
+    if (!newest || entry.createdAt > newest.createdAt) newest = entry;
+  }
+  return newest;
+}
+
+function writeRecoveryEntry(entry: RecoveryEntry): void {
+  try {
+    localStorage.setItem(recoveryStorageKey(recoveryEntryId(entry)), JSON.stringify(entry));
   } catch {
     // Best-effort (private browsing, storage disabled, quota) — the
     // in-memory state this mirrors still works for as long as the tab
@@ -143,38 +216,12 @@ function writeAllRecoveryEntries(all: Record<string, RecoveryEntry>): void {
   }
 }
 
-// Restores the most recently written still-valid entry (a reasonable choice
-// when more than one is present — see the multi-tab note above; this tab's
-// own subsequent actions then track that ONE entry by its own identity, same
-// as any other restore) and opportunistically prunes every expired entry so
-// the store does not grow unboundedly across many abandoned tabs over time.
-function readRecoveryEntry(): RecoveryEntry | null {
-  const all = readAllRecoveryEntries();
-  let newest: RecoveryEntry | null = null;
-  let changed = false;
-  for (const [id, entry] of Object.entries(all)) {
-    if (Date.now() - entry.createdAt > recoveryMaxAgeMs(entry)) {
-      delete all[id];
-      changed = true;
-      continue;
-    }
-    if (!newest || entry.createdAt > newest.createdAt) newest = entry;
-  }
-  if (changed) writeAllRecoveryEntries(all);
-  return newest;
-}
-
-function writeRecoveryEntry(entry: RecoveryEntry): void {
-  const all = readAllRecoveryEntries();
-  all[recoveryEntryId(entry)] = entry;
-  writeAllRecoveryEntries(all);
-}
-
 function clearRecoveryEntry(id: string): void {
-  const all = readAllRecoveryEntries();
-  if (!(id in all)) return;
-  delete all[id];
-  writeAllRecoveryEntries(all);
+  try {
+    localStorage.removeItem(recoveryStorageKey(id));
+  } catch {
+    // best-effort
+  }
 }
 
 export function AIStudioPanel() {
@@ -280,7 +327,7 @@ export function AIStudioPanel() {
   // needed to catch up.
   useEffect(() => {
     function handleStorageEvent(event: StorageEvent) {
-      if (event.key !== null && event.key !== RECOVERY_STORAGE_KEY) return;
+      if (event.key !== null && !event.key.startsWith(RECOVERY_STORAGE_PREFIX)) return;
       // submitOnce writes THIS tab's own pre-fetch entry to storage before it
       // has any chance to settle, but only ever mirrors it into
       // recoverableSubmission/recoverableJobId once something has gone
@@ -401,8 +448,16 @@ export function AIStudioPanel() {
       setConfirmingLiveRun(true);
       return;
     }
+    // True only on the click that actually passed through the confirmation
+    // step above (isLiveForOutput && confirmingLiveRun were both true just
+    // now) — false whenever this tab believed the run was free and skipped
+    // that step entirely, which is exactly the case the server itself must
+    // independently re-verify before billing anything (see
+    // LIVE_RUN_NOT_CONFIRMED_MESSAGE in registry.server.ts): this tab's own
+    // cached mode probe can go stale between the probe and this exact click.
+    const liveRunConfirmed = Boolean(isLiveForOutput) && confirmingLiveRun;
     setConfirmingLiveRun(false);
-    void handleGenerate();
+    void handleGenerate(liveRunConfirmed);
   }
 
   // Self-scheduling poll: the next status request is only queued after the
@@ -606,6 +661,16 @@ export function AIStudioPanel() {
         // so the next Generate falls back to a fresh source instead of
         // retrying the same request and failing the same way forever.
         if (res.status === 410) setApprovedSource(null);
+        // The server's own mode resolution disagreed with what this tab's
+        // cached probe believed (see LIVE_RUN_NOT_CONFIRMED_MESSAGE) —
+        // nothing was billed, but this tab's cached liveStatus is now known
+        // to be stale. Force a fresh probe so the next click sees the
+        // deployment's actual current mode and shows the confirmation this
+        // attempt skipped, rather than failing the same way again.
+        if (res.status === 428) {
+          setModeConfirmed(false);
+          setModeProbeRetryNonce((n) => n + 1);
+        }
         return null;
       }
       return data.jobId as string;
@@ -643,7 +708,7 @@ export function AIStudioPanel() {
     })();
   }
 
-  async function handleGenerate() {
+  async function handleGenerate(liveRunConfirmed: boolean) {
     const token = ++pollTokenRef.current;
     setSubmitting(true);
     setError(null);
@@ -673,6 +738,7 @@ export function AIStudioPanel() {
       editInstruction: editInstruction || undefined,
       simulate,
       idempotencyKey: crypto.randomUUID(),
+      liveRunConfirmed,
     };
 
     const jobId = await submitOnce(endpoint, body, token);

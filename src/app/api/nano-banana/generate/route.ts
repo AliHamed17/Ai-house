@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { resolveProviderForSubmit } from '@/lib/ai/registry.server';
+import { LIVE_RUN_NOT_CONFIRMED_MESSAGE, resolveProviderForSubmit } from '@/lib/ai/registry.server';
 import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.server';
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
 import { buildNanoBananaEditPrompt, buildNanoBananaPrompt } from '@/data/roomPrompts';
@@ -31,6 +31,10 @@ export async function POST(request: NextRequest) {
   }
 
   const { provider, demoMode } = resolveProviderForSubmit('nano-banana');
+
+  if (!demoMode && !validated.data.liveRunConfirmed) {
+    return NextResponse.json({ error: LIVE_RUN_NOT_CONFIRMED_MESSAGE }, { status: 428 });
+  }
 
   // The edit-prompt framing ("refine this approved concept") only makes sense
   // when the source is actually a prior generated-and-approved result — never

@@ -22,7 +22,7 @@ describe('POST /api/higgsfield/generate (server-side live-source enforcement)', 
     process.env.AI_ALLOW_LIVE = 'true';
     vi.resetModules();
     const { POST } = await import('@/app/api/higgsfield/generate/route');
-    const res = await POST(makeRequest({ roomId: 'living', sourceAssetPath: '/generated/concepts/living.svg' }));
+    const res = await POST(makeRequest({ roomId: 'living', sourceAssetPath: '/generated/concepts/living.svg', liveRunConfirmed: true }));
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toMatch(/approved, previously generated concept image/i);
@@ -33,7 +33,9 @@ describe('POST /api/higgsfield/generate (server-side live-source enforcement)', 
     process.env.AI_ALLOW_LIVE = 'true';
     vi.resetModules();
     const { POST } = await import('@/app/api/higgsfield/generate/route');
-    const res = await POST(makeRequest({ roomId: 'living', sourceAssetPath: '/evidence/frames/00-00-16_open-social-zone.jpg' }));
+    const res = await POST(
+      makeRequest({ roomId: 'living', sourceAssetPath: '/evidence/frames/00-00-16_open-social-zone.jpg', liveRunConfirmed: true }),
+    );
     expect(res.status).toBe(400);
   });
 
@@ -47,7 +49,7 @@ describe('POST /api/higgsfield/generate (server-side live-source enforcement)', 
     // downstream rejects it as expired (410), not this route's own 400
     // "requires an approved... source" check, proving that check itself let
     // a genuine stored-result-shaped path through rather than blocking it.
-    const res = await POST(makeRequest({ roomId: 'living', sourceAssetPath: '/api/generation/result/not-a-real-id' }));
+    const res = await POST(makeRequest({ roomId: 'living', sourceAssetPath: '/api/generation/result/not-a-real-id', liveRunConfirmed: true }));
     expect(res.status).toBe(410);
   });
 

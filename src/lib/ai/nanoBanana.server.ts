@@ -5,8 +5,9 @@ import { decodeJobId, encodeJobId } from './jobId';
 import { readPublicFileAsBase64 } from './publicAsset.server';
 import {
   getStoredResult,
-  isResultStoreAtCapacity,
   putStoredResult,
+  releaseResultSlot,
+  reserveResultSlot,
   RESULT_STORE_AT_CAPACITY_MESSAGE,
   RESULT_URL_PREFIX,
   resultIdFromPath,
@@ -95,63 +96,68 @@ async function readSourceImage(sourceAssetPath: string): Promise<{ mimeType: str
 export const nanoBananaProvider: MediaGenerationProvider = {
   id: 'nano-banana',
   async submit(input: GenerationInput) {
-    // Checked before the paid call below (not left to putStoredResult once
-    // the result already exists) — see isResultStoreAtCapacity's own doc
-    // comment for why capacity can only be safely refused here, before
-    // spending money, rather than by evicting something after the fact.
-    if (isResultStoreAtCapacity()) {
+    // Claimed synchronously before the paid call below, and released no
+    // matter how this generation ends (success or failure) — see
+    // reserveResultSlot's own doc comment for why a plain read-only capacity
+    // check isn't enough on its own (a check-then-act race across
+    // concurrent submissions) and why claiming a slot up front is.
+    if (!reserveResultSlot()) {
       throw new Error(RESULT_STORE_AT_CAPACITY_MESSAGE);
     }
 
-    const ai = getClient();
+    try {
+      const ai = getClient();
 
-    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [{ text: input.prompt }];
-    if (input.sourceAssetPath) {
-      // readSourceImage throws (rather than returning null) when the source
-      // can't be loaded, so a text-only prompt is never silently substituted
-      // and paid for in place of the intended image-to-image edit.
-      const source = await readSourceImage(input.sourceAssetPath);
-      parts.push({ inlineData: { mimeType: source.mimeType, data: source.base64 } });
+      const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [{ text: input.prompt }];
+      if (input.sourceAssetPath) {
+        // readSourceImage throws (rather than returning null) when the source
+        // can't be loaded, so a text-only prompt is never silently substituted
+        // and paid for in place of the intended image-to-image edit.
+        const source = await readSourceImage(input.sourceAssetPath);
+        parts.push({ inlineData: { mimeType: source.mimeType, data: source.base64 } });
+      }
+
+      const response = await withTimeout(
+        (signal) =>
+          ai.models.generateContent({
+            model: NANO_BANANA_MODEL,
+            contents: parts,
+            config: {
+              abortSignal: signal,
+              // Without an explicit IMAGE modality, Gemini can return a
+              // text-only response — the paid call still completes and is
+              // billed, but the inlineData check below then fails as if
+              // generation itself had failed. Mirrors the offline generator
+              // (scripts/generate-concepts.py) so both paths behave the same.
+              responseModalities: [Modality.IMAGE],
+              imageConfig: { aspectRatio: '4:3', imageSize: '2K' },
+            },
+          }),
+        45_000,
+        SUBMIT_TIMEOUT_MESSAGE,
+      );
+
+      const candidateParts = response.candidates?.[0]?.content?.parts ?? [];
+      const imagePart = candidateParts.find((p): p is { inlineData: { mimeType?: string; data?: string } } => Boolean((p as { inlineData?: unknown }).inlineData));
+      if (!imagePart?.inlineData?.data) {
+        throw new Error('Nano Banana returned no image data for this prompt.');
+      }
+
+      const mimeType = imagePart.inlineData.mimeType || 'image/png';
+      const resultKey = putStoredResult(mimeType, imagePart.inlineData.data);
+      const jobId = encodeJobId({
+        provider: 'nano-banana',
+        roomId: input.roomId,
+        outputType: 'image',
+        styleVariant: input.styleVariant,
+        prompt: input.prompt,
+        createdAt: Date.now(),
+        nanoBananaResultKey: resultKey,
+      });
+      return { jobId };
+    } finally {
+      releaseResultSlot();
     }
-
-    const response = await withTimeout(
-      (signal) =>
-        ai.models.generateContent({
-          model: NANO_BANANA_MODEL,
-          contents: parts,
-          config: {
-            abortSignal: signal,
-            // Without an explicit IMAGE modality, Gemini can return a
-            // text-only response — the paid call still completes and is
-            // billed, but the inlineData check below then fails as if
-            // generation itself had failed. Mirrors the offline generator
-            // (scripts/generate-concepts.py) so both paths behave the same.
-            responseModalities: [Modality.IMAGE],
-            imageConfig: { aspectRatio: '4:3', imageSize: '2K' },
-          },
-        }),
-      45_000,
-      SUBMIT_TIMEOUT_MESSAGE,
-    );
-
-    const candidateParts = response.candidates?.[0]?.content?.parts ?? [];
-    const imagePart = candidateParts.find((p): p is { inlineData: { mimeType?: string; data?: string } } => Boolean((p as { inlineData?: unknown }).inlineData));
-    if (!imagePart?.inlineData?.data) {
-      throw new Error('Nano Banana returned no image data for this prompt.');
-    }
-
-    const mimeType = imagePart.inlineData.mimeType || 'image/png';
-    const resultKey = putStoredResult(mimeType, imagePart.inlineData.data);
-    const jobId = encodeJobId({
-      provider: 'nano-banana',
-      roomId: input.roomId,
-      outputType: 'image',
-      styleVariant: input.styleVariant,
-      prompt: input.prompt,
-      createdAt: Date.now(),
-      nanoBananaResultKey: resultKey,
-    });
-    return { jobId };
   },
 
   async status(jobId: string): Promise<GenerationJob> {

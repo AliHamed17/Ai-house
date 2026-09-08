@@ -156,6 +156,35 @@ describe('mock generation provider', () => {
     vi.useRealTimers();
   });
 
+  it('falls back to the placeholder if the stored source expires between submission and a much-later (recovered) status check, not just checked once at submit time (regression)', async () => {
+    // touchStoredResult at submit time only refreshes the TTL enough to
+    // survive THIS job's own short completion delay (a few seconds) — it
+    // says nothing about a status check delayed or resumed much later, e.g.
+    // via "Resume checking status" after a page reload (whose own recovery
+    // ceiling allows up to 24h — RECOVERY_MAX_AGE_MS.job in AIStudioPanel).
+    // By then the source has almost certainly fallen out of the 10-minute
+    // TTL store; status() must re-check existence at THAT moment too,
+    // instead of blindly trusting the path baked into the job id at submit
+    // time and reporting "completed" with a since-expired, broken URL.
+    vi.useFakeTimers();
+    const start = Date.now();
+    const storedId = putStoredResult('image/png', 'aGVsbG8=');
+    const storedPath = `${RESULT_URL_PREFIX}${storedId}`;
+    const { jobId } = await mockProvider.submit({
+      provider: 'higgsfield',
+      outputType: 'video',
+      roomId: 'living',
+      styleVariant: 'warm-oak',
+      prompt: 'p',
+      sourceAssetPath: storedPath,
+    });
+    // Past even touchStoredResult's freshly-refreshed 10-minute TTL.
+    vi.setSystemTime(start + 11 * 60_000);
+    const completed = await mockProvider.status(jobId);
+    expect(completed.resultUrl).toBe('/generated/concepts/living.svg');
+    vi.useRealTimers();
+  });
+
   it('does not reuse a stored source for an IMAGE job (the placeholder concept art is the intended demo result there)', async () => {
     vi.useFakeTimers();
     const start = Date.now();

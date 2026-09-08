@@ -113,7 +113,12 @@ describe('POST /api/nano-banana/generate returns a 410 (never the generic 502) f
     vi.resetModules();
     const { POST } = await import('@/app/api/nano-banana/generate/route');
 
-    const body = { roomId: 'living', sourceAssetPath: '/api/generation/result/expired-id', idempotencyKey: 'nb-source-expired-key' };
+    const body = {
+      roomId: 'living',
+      sourceAssetPath: '/api/generation/result/expired-id',
+      idempotencyKey: 'nb-source-expired-key',
+      liveRunConfirmed: true,
+    };
     const res1 = await POST(makeRequest('http://localhost:3000/api/nano-banana/generate', body));
     expect(res1.status).toBe(410);
     expect((await res1.json()).error).toMatch(/expired/i);
@@ -154,7 +159,12 @@ describe('POST /api/higgsfield/generate returns a 410 (never the generic 502) fo
     vi.resetModules();
     const { POST } = await import('@/app/api/higgsfield/generate/route');
 
-    const body = { roomId: 'living', sourceAssetPath: '/api/generation/result/expired-id', idempotencyKey: 'hf-source-expired-key' };
+    const body = {
+      roomId: 'living',
+      sourceAssetPath: '/api/generation/result/expired-id',
+      idempotencyKey: 'hf-source-expired-key',
+      liveRunConfirmed: true,
+    };
     const res1 = await POST(makeRequest('http://localhost:3000/api/higgsfield/generate', body));
     expect(res1.status).toBe(410);
     expect((await res1.json()).error).toMatch(/expired/i);

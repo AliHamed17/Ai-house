@@ -46,7 +46,9 @@ describe('POST /api/higgsfield/generate (ambiguous-timeout handling)', () => {
     }));
     vi.resetModules();
     const { POST } = await import('@/app/api/higgsfield/generate/route');
-    const res = await POST(makeRequest({ roomId: 'living', sourceAssetPath: '/api/generation/result/some-real-looking-id' }));
+    const res = await POST(
+      makeRequest({ roomId: 'living', sourceAssetPath: '/api/generation/result/some-real-looking-id', liveRunConfirmed: true }),
+    );
     expect(res.status).toBe(504);
     const data = await res.json();
     expect(data.error).toMatch(/may have already been accepted/i);
@@ -67,7 +69,12 @@ describe('POST /api/higgsfield/generate (ambiguous-timeout handling)', () => {
     vi.resetModules();
     const { POST } = await import('@/app/api/higgsfield/generate/route');
 
-    const body = { roomId: 'living', sourceAssetPath: '/api/generation/result/some-real-looking-id', idempotencyKey: 'hf-timeout-retry-key' };
+    const body = {
+      roomId: 'living',
+      sourceAssetPath: '/api/generation/result/some-real-looking-id',
+      idempotencyKey: 'hf-timeout-retry-key',
+      liveRunConfirmed: true,
+    };
     const res1 = await POST(makeRequest(body));
     expect(res1.status).toBe(504);
     const res2 = await POST(makeRequest(body));
@@ -94,7 +101,9 @@ describe('POST /api/higgsfield/generate (ambiguous-timeout handling)', () => {
     }));
     vi.resetModules();
     const { POST } = await import('@/app/api/higgsfield/generate/route');
-    const res = await POST(makeRequest({ roomId: 'living', sourceAssetPath: '/api/generation/result/some-real-looking-id' }));
+    const res = await POST(
+      makeRequest({ roomId: 'living', sourceAssetPath: '/api/generation/result/some-real-looking-id', liveRunConfirmed: true }),
+    );
     expect(res.status).toBe(502);
     const data = await res.json();
     expect(data.error).not.toMatch(/may have already been accepted/i);

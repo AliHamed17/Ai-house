@@ -22,6 +22,11 @@ interface StoredResult {
 const TTL_MS = 10 * 60_000;
 const MAX_ENTRIES = 100;
 const store = new Map<string, StoredResult>();
+// Slots claimed by a generation that is currently paying for a result but
+// hasn't stored it yet (see reserveResultSlot). Counted alongside store.size
+// so concurrent in-flight generations can never collectively overshoot
+// MAX_ENTRIES just because none of them has called putStoredResult yet.
+let reservedSlots = 0;
 
 function prune(): void {
   const now = Date.now();
@@ -31,18 +36,31 @@ function prune(): void {
 }
 
 /**
- * Whether the store is full of genuinely unexpired entries right now. A
- * caller about to start a paid, billed generation should check this FIRST —
- * see isSubmitTimeout's sibling reasoning in nanoBanana.server.ts — and
- * refuse the request rather than let it run. Checking only here (before the
- * paid call) rather than by evicting inside putStoredResult below is what
- * makes rejection possible at all: putStoredResult is called only after the
- * result already exists and has already been paid for, by which point there
- * is nothing left to safely refuse.
+ * Synchronously checks AND claims one slot in a single step — a caller about
+ * to start a paid, billed generation must call this FIRST (see
+ * isSubmitTimeout's sibling reasoning in nanoBanana.server.ts) and refuse
+ * the request if it returns false, then call releaseResultSlot exactly once
+ * — on ANY outcome, success or failure — once it's done. A plain read-only
+ * size check (store.size >= MAX_ENTRIES) is NOT enough on its own: every one
+ * of N concurrent submissions arriving before any of them finishes would
+ * observe the SAME pre-generation size and all pass, since nothing is
+ * claimed between the check and the eventual putStoredResult call — a
+ * classic check-then-act race (the P2 finding this replaced: 101 concurrent
+ * requests against an empty store could all start paid work at once). This
+ * function has no `await` between its read and its write, so — Node being
+ * single-threaded for synchronous code — no other call can observe a
+ * half-updated state in between, making the claim genuinely atomic.
  */
-export function isResultStoreAtCapacity(): boolean {
+export function reserveResultSlot(): boolean {
   prune();
-  return store.size >= MAX_ENTRIES;
+  if (store.size + reservedSlots >= MAX_ENTRIES) return false;
+  reservedSlots++;
+  return true;
+}
+
+/** Releases a slot claimed by reserveResultSlot. Must be called exactly once per successful reservation, regardless of outcome. */
+export function releaseResultSlot(): void {
+  reservedSlots = Math.max(0, reservedSlots - 1);
 }
 
 export const RESULT_STORE_AT_CAPACITY_MESSAGE = 'Too many generated images are cached right now. Please try again in a moment.';
@@ -54,6 +72,7 @@ export function isResultStoreAtCapacityError(error: unknown): boolean {
 /** Test-only: resets the module-level store so capacity tests start from zero. */
 export function _clearStoreForTests(): void {
   store.clear();
+  reservedSlots = 0;
 }
 
 /**
@@ -61,13 +80,10 @@ export function _clearStoreForTests(): void {
  * evicts an unexpired entry to make room — by the time a result reaches
  * here the provider call has already completed and been paid for, so
  * discarding another, still-unpolled entry to fit it would only turn that
- * OTHER entry's client-side poll into a false "expired" failure instead
- * (see the P2 finding this replaced: a 101st completion evicting an
- * unpolled 1st). isResultStoreAtCapacity above is what keeps the store
- * bounded in the ordinary case, by refusing new paid calls before they
- * start; a transient handful of entries over MAX_ENTRIES from requests that
- * both passed that check concurrently is an accepted, self-correcting
- * (TTL-bounded) trade-off against ever discarding a paid, unpolled result.
+ * OTHER entry's client-side poll into a false "expired" failure instead (see
+ * the P2 finding this replaced: a 101st completion evicting an unpolled
+ * 1st). reserveResultSlot above is what keeps the store bounded in the
+ * ordinary case, by claiming capacity before a paid call even starts.
  */
 export function putStoredResult(mimeType: string, base64: string): string {
   prune();

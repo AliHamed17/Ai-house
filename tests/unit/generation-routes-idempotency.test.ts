@@ -32,7 +32,7 @@ describe('idempotency reconciliation on the generation routes (a lost response m
     vi.resetModules();
     const { POST } = await import('@/app/api/nano-banana/generate/route');
 
-    const body = { roomId: 'living', idempotencyKey: 'nb-retry-key-1' };
+    const body = { roomId: 'living', idempotencyKey: 'nb-retry-key-1', liveRunConfirmed: true };
     const res1 = await POST(makeRequest('http://localhost:3000/api/nano-banana/generate', body));
     const data1 = await res1.json();
     const res2 = await POST(makeRequest('http://localhost:3000/api/nano-banana/generate', body));
@@ -60,7 +60,12 @@ describe('idempotency reconciliation on the generation routes (a lost response m
     vi.resetModules();
     const { POST } = await import('@/app/api/higgsfield/generate/route');
 
-    const body = { roomId: 'living', sourceAssetPath: '/api/generation/result/some-real-looking-id', idempotencyKey: 'hf-retry-key-1' };
+    const body = {
+      roomId: 'living',
+      sourceAssetPath: '/api/generation/result/some-real-looking-id',
+      idempotencyKey: 'hf-retry-key-1',
+      liveRunConfirmed: true,
+    };
     const res1 = await POST(makeRequest('http://localhost:3000/api/higgsfield/generate', body));
     const data1 = await res1.json();
     const res2 = await POST(makeRequest('http://localhost:3000/api/higgsfield/generate', body));
@@ -96,7 +101,7 @@ describe('idempotency reconciliation on the generation routes (a lost response m
     vi.resetModules();
     const { POST } = await import('@/app/api/nano-banana/generate/route');
 
-    const body = { roomId: 'living', idempotencyKey: 'nb-concurrent-key-1' };
+    const body = { roomId: 'living', idempotencyKey: 'nb-concurrent-key-1', liveRunConfirmed: true };
     const p1 = POST(makeRequest('http://localhost:3000/api/nano-banana/generate', body));
     const p2 = POST(makeRequest('http://localhost:3000/api/nano-banana/generate', body));
     // Let both requests' own async work (reading the request body, etc.)
@@ -129,8 +134,12 @@ describe('idempotency reconciliation on the generation routes (a lost response m
     vi.resetModules();
     const { POST } = await import('@/app/api/nano-banana/generate/route');
 
-    const res1 = await POST(makeRequest('http://localhost:3000/api/nano-banana/generate', { roomId: 'living', idempotencyKey: 'distinct-key-x' }));
-    const res2 = await POST(makeRequest('http://localhost:3000/api/nano-banana/generate', { roomId: 'living', idempotencyKey: 'distinct-key-y' }));
+    const res1 = await POST(
+      makeRequest('http://localhost:3000/api/nano-banana/generate', { roomId: 'living', idempotencyKey: 'distinct-key-x', liveRunConfirmed: true }),
+    );
+    const res2 = await POST(
+      makeRequest('http://localhost:3000/api/nano-banana/generate', { roomId: 'living', idempotencyKey: 'distinct-key-y', liveRunConfirmed: true }),
+    );
 
     expect(submitMock).toHaveBeenCalledTimes(2);
     expect((await res1.json()).jobId).toBe('job-x');
@@ -154,14 +163,18 @@ describe('idempotency reconciliation on the generation routes (a lost response m
     vi.resetModules();
     const { POST } = await import('@/app/api/nano-banana/generate/route');
 
-    const res1 = await POST(makeRequest('http://localhost:3000/api/nano-banana/generate', { roomId: 'living', idempotencyKey: 'reused-key-mismatch' }));
+    const res1 = await POST(
+      makeRequest('http://localhost:3000/api/nano-banana/generate', { roomId: 'living', idempotencyKey: 'reused-key-mismatch', liveRunConfirmed: true }),
+    );
     expect(res1.status).toBe(200);
     expect((await res1.json()).jobId).toBe('job-room-living');
 
     // Same key, a genuinely different request (different room) — must be
     // refused, not silently handed the "living" job nor allowed to start a
     // second, separately billed submission under the same key.
-    const res2 = await POST(makeRequest('http://localhost:3000/api/nano-banana/generate', { roomId: 'kitchen', idempotencyKey: 'reused-key-mismatch' }));
+    const res2 = await POST(
+      makeRequest('http://localhost:3000/api/nano-banana/generate', { roomId: 'kitchen', idempotencyKey: 'reused-key-mismatch', liveRunConfirmed: true }),
+    );
     expect(res2.status).toBe(409);
     expect((await res2.json()).error).toMatch(/already used for a different request/i);
     expect(submitMock).toHaveBeenCalledTimes(1);
@@ -184,12 +197,22 @@ describe('idempotency reconciliation on the generation routes (a lost response m
     vi.resetModules();
     const { POST } = await import('@/app/api/higgsfield/generate/route');
 
-    const body1 = { roomId: 'living', sourceAssetPath: '/api/generation/result/source-a', idempotencyKey: 'hf-reused-key-mismatch' };
+    const body1 = {
+      roomId: 'living',
+      sourceAssetPath: '/api/generation/result/source-a',
+      idempotencyKey: 'hf-reused-key-mismatch',
+      liveRunConfirmed: true,
+    };
     const res1 = await POST(makeRequest('http://localhost:3000/api/higgsfield/generate', body1));
     expect(res1.status).toBe(200);
     expect((await res1.json()).jobId).toBe('job-source-a');
 
-    const body2 = { roomId: 'living', sourceAssetPath: '/api/generation/result/source-b', idempotencyKey: 'hf-reused-key-mismatch' };
+    const body2 = {
+      roomId: 'living',
+      sourceAssetPath: '/api/generation/result/source-b',
+      idempotencyKey: 'hf-reused-key-mismatch',
+      liveRunConfirmed: true,
+    };
     const res2 = await POST(makeRequest('http://localhost:3000/api/higgsfield/generate', body2));
     expect(res2.status).toBe(409);
     expect((await res2.json()).error).toMatch(/already used for a different request/i);

@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   _clearStoreForTests,
   getStoredResult,
-  isResultStoreAtCapacity,
   isResultStoreAtCapacityError,
   putStoredResult,
+  releaseResultSlot,
+  reserveResultSlot,
   RESULT_STORE_AT_CAPACITY_MESSAGE,
   RESULT_URL_PREFIX,
   resultIdFromPath,
@@ -77,9 +78,9 @@ describe('in-memory generation result store', () => {
       // putStoredResult used to evict the single oldest entry once the store
       // reached MAX_ENTRIES — this test originally proved a touch protected
       // itself from that eviction. putStoredResult no longer evicts anything
-      // (see isResultStoreAtCapacity below: capacity is refused BEFORE a
-      // paid call starts, not by discarding an unpolled result afterward),
-      // so the entry this touch used to displace into eviction must now
+      // (see reserveResultSlot below: capacity is claimed BEFORE a paid call
+      // starts, not enforced by discarding an unpolled result afterward), so
+      // the entry this touch used to displace into eviction must now
       // survive right alongside it.
       const touchedId = putStoredResult('image/png', 'first');
       const otherId = putStoredResult('image/png', 'second');
@@ -94,7 +95,7 @@ describe('in-memory generation result store', () => {
     });
   });
 
-  describe('isResultStoreAtCapacity / RESULT_STORE_AT_CAPACITY_MESSAGE (reserves capacity before a paid call, instead of evicting an unpolled result after one)', () => {
+  describe('reserveResultSlot / releaseResultSlot / RESULT_STORE_AT_CAPACITY_MESSAGE (claims capacity before a paid call, instead of evicting an unpolled result after one)', () => {
     beforeEach(() => {
       // Every other describe block above shares the module-level store and
       // never clears it, which is fine there since none of those tests
@@ -103,21 +104,39 @@ describe('in-memory generation result store', () => {
       _clearStoreForTests();
     });
 
-    it('is false below MAX_ENTRIES and true once it is reached', () => {
-      expect(isResultStoreAtCapacity()).toBe(false);
-      for (let i = 0; i < 99; i++) putStoredResult('image/png', `entry-${i}`);
-      expect(isResultStoreAtCapacity()).toBe(false);
-      putStoredResult('image/png', 'entry-99');
-      expect(isResultStoreAtCapacity()).toBe(true);
+    it('succeeds up to MAX_ENTRIES reservations and refuses the next one, even though nothing has been stored yet (regression)', () => {
+      // A plain read-only size check (store.size >= MAX_ENTRIES) would let
+      // every one of these 100 reservations — and a 101st — pass, since
+      // putStoredResult is never called here at all; nothing this loop does
+      // ever grows store.size. Only a synchronous claim-a-slot-immediately
+      // mechanism can correctly refuse the 101st concurrent submission
+      // before any of the other 100 have finished generating and stored
+      // their result.
+      for (let i = 0; i < 100; i++) expect(reserveResultSlot()).toBe(true);
+      expect(reserveResultSlot()).toBe(false);
     });
 
-    it('does not count already-expired entries toward capacity', () => {
+    it('releaseResultSlot frees a claimed slot for a later reservation', () => {
+      for (let i = 0; i < 100; i++) expect(reserveResultSlot()).toBe(true);
+      expect(reserveResultSlot()).toBe(false);
+      releaseResultSlot();
+      expect(reserveResultSlot()).toBe(true);
+    });
+
+    it('releasing more than was ever reserved never grants capacity beyond MAX_ENTRIES', () => {
+      releaseResultSlot();
+      releaseResultSlot();
+      for (let i = 0; i < 100; i++) expect(reserveResultSlot()).toBe(true);
+      expect(reserveResultSlot()).toBe(false);
+    });
+
+    it('does not count an already-expired stored entry toward capacity', () => {
       vi.useFakeTimers();
       try {
         for (let i = 0; i < 100; i++) putStoredResult('image/png', `entry-${i}`);
-        expect(isResultStoreAtCapacity()).toBe(true);
+        expect(reserveResultSlot()).toBe(false);
         vi.advanceTimersByTime(11 * 60_000); // past the 10-minute TTL
-        expect(isResultStoreAtCapacity()).toBe(false);
+        expect(reserveResultSlot()).toBe(true);
       } finally {
         vi.useRealTimers();
       }

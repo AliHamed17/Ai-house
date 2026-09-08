@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { resolveProviderForSubmit } from '@/lib/ai/registry.server';
+import { LIVE_RUN_NOT_CONFIRMED_MESSAGE, resolveProviderForSubmit } from '@/lib/ai/registry.server';
 import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.server';
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
 import { isSourceExpiredError, resultIdFromPath } from '@/lib/ai/resultStore.server';
@@ -34,6 +34,10 @@ export async function POST(request: NextRequest) {
   }
 
   const { provider, demoMode } = resolveProviderForSubmit('higgsfield');
+
+  if (!demoMode && !validated.data.liveRunConfirmed) {
+    return NextResponse.json({ error: LIVE_RUN_NOT_CONFIRMED_MESSAGE }, { status: 428 });
+  }
 
   // The client only shows a "must approve a real image first" gate as a UX
   // nicety — this route is directly reachable, so that check alone can't stop

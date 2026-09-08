@@ -799,6 +799,44 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page2.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
   });
 
+  test('abandoning an ADOPTED sibling entry never disturbs the OWNING tab\'s own tracking (regression)', async ({ page, context }) => {
+    // The mirror image of the test above: here it's the ADOPTER (tab 2, not
+    // the true owner) that clicks Abandon. Before this fix, Abandon always
+    // deleted the shared storage entry outright — which fired the TRUE
+    // owner's (tab 1's) own storage listener and silently cleared its
+    // tracking too, even though tab 1's own submission outcome was still
+    // genuinely unresolved, letting both tabs believe it was safe to start
+    // a fresh (possibly duplicate-billed) generation.
+    let blockGenerate = true;
+    await page.route('**/api/nano-banana/generate', (route) => (blockGenerate ? route.abort() : route.continue()));
+
+    const page2 = await context.newPage();
+    await page.goto('/#ai-studio');
+    await page2.goto('/#ai-studio');
+
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    // Tab 2, already open and idle, picks this up live and shows its own banner.
+    await expect(page2.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+
+    // Tab 2 — the ADOPTER, not the true owner — abandons it.
+    await page2.getByRole('button', { name: 'Abandon and start over' }).click();
+    await expect(page2.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+
+    // Tab 1 (the true owner) is completely unaffected: still shows its own
+    // banner, its shared storage entry still exists, and it can still
+    // genuinely Resume and complete — proving its OWN tracking, not just
+    // the storage key, survived.
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+    await expect(page.locator('select').first()).toBeDisabled();
+    expect(await recoveryEntryIds(page)).toHaveLength(1);
+
+    blockGenerate = false;
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+  });
+
   test('a 504 (ambiguous submit timeout) does not adopt a sibling while upgrading its own entry in place (regression)', async ({ page }) => {
     // clearOwnRecoveryEntry's adoption is correct after a genuinely
     // definite, terminal outcome, but a 504 immediately re-writes this SAME

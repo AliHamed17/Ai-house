@@ -94,7 +94,7 @@ const RECOVERY_MAX_AGE_MS = {
 } as const;
 
 type RecoveryEntry =
-  | { kind: 'job'; jobId: string; roomId: RoomId; outputType: GenerationOutputType; createdAt: number }
+  | { kind: 'job'; jobId: string; roomId: RoomId; outputType: GenerationOutputType; createdAt: number; ownerTabId?: string }
   | {
       kind: 'submission';
       ambiguous: boolean;
@@ -104,7 +104,28 @@ type RecoveryEntry =
       roomId: RoomId;
       outputType: GenerationOutputType;
       createdAt: number;
+      ownerTabId?: string;
     };
+
+// sessionStorage, unlike localStorage, is never shared with any other
+// browser tab (not even a duplicate of this one) but DOES survive a reload
+// of THIS same tab — exactly the "did I actually write this entry" signal
+// abandonRecoveryEntry needs, to tell "safe to delete, I wrote it (even if
+// before a reload)" apart from "merely adopted from a genuinely different,
+// possibly still-active tab" (see abandonRecoveryEntry below).
+const TAB_SESSION_ID_KEY = 'ai-studio:tab-session-id';
+function getTabSessionId(): string | undefined {
+  try {
+    let id = sessionStorage.getItem(TAB_SESSION_ID_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      sessionStorage.setItem(TAB_SESSION_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return undefined;
+  }
+}
 
 function recoveryMaxAgeMs(entry: RecoveryEntry): number {
   if (entry.kind === 'job') return RECOVERY_MAX_AGE_MS.job;
@@ -194,21 +215,12 @@ function readAllRecoveryEntries(): Record<string, RecoveryEntry> {
   return all;
 }
 
-// Restores the most recently written still-valid entry — a reasonable choice
-// when more than one is present (see the multi-tab note above); this tab's
-// own subsequent actions then track that ONE entry by its own identity, same
-// as any other restore.
-function readRecoveryEntry(): RecoveryEntry | null {
-  let newest: RecoveryEntry | null = null;
-  for (const entry of Object.values(readAllRecoveryEntries())) {
-    if (!newest || entry.createdAt > newest.createdAt) newest = entry;
-  }
-  return newest;
-}
-
 function writeRecoveryEntry(entry: RecoveryEntry): void {
   try {
-    localStorage.setItem(recoveryStorageKey(recoveryEntryId(entry)), JSON.stringify(entry));
+    // Stamped here (one choke point) rather than requiring every call site
+    // to remember it — see abandonRecoveryEntry for why this matters.
+    const stamped: RecoveryEntry = { ...entry, ownerTabId: getTabSessionId() };
+    localStorage.setItem(recoveryStorageKey(recoveryEntryId(entry)), JSON.stringify(stamped));
   } catch {
     // Best-effort (private browsing, storage disabled, quota) — the
     // in-memory state this mirrors still works for as long as the tab
@@ -264,6 +276,12 @@ export function AIStudioPanel() {
   // bails if a newer run has superseded it, so a slow/out-of-order status
   // response can never overwrite the current job's state.
   const pollTokenRef = useRef(0);
+  // Entries this tab has locally abandoned WITHOUT deleting from shared
+  // storage (see abandonRecoveryEntry) — never persisted, so a reload of
+  // this same tab is free to re-adopt one, but adoptRecoveryEntry must skip
+  // them for the rest of THIS session or it would immediately re-adopt the
+  // exact entry Abandon just tried to stop tracking.
+  const locallyIgnoredIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => () => {
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
@@ -282,7 +300,16 @@ export function AIStudioPanel() {
   // selectors reflect the room the outstanding job actually belongs to, not
   // whatever this tab happened to have selected.
   function adoptRecoveryEntry() {
-    const entry = readRecoveryEntry();
+    // Picks the most recently written still-valid entry — a reasonable
+    // choice when more than one is present (see the multi-tab note above) —
+    // excluding anything THIS tab has locally abandoned (see
+    // abandonRecoveryEntry): otherwise this would immediately re-adopt the
+    // exact entry Abandon just tried to stop tracking.
+    let entry: RecoveryEntry | null = null;
+    for (const [id, candidate] of Object.entries(readAllRecoveryEntries())) {
+      if (locallyIgnoredIdsRef.current.has(id)) continue;
+      if (!entry || candidate.createdAt > entry.createdAt) entry = candidate;
+    }
     if (!entry) return;
     setRoomId(entry.roomId);
     setOutputType(entry.outputType);
@@ -322,6 +349,39 @@ export function AIStudioPanel() {
   function clearOwnRecoveryEntry(id: string): void {
     clearRecoveryEntry(id);
     adoptRecoveryEntry();
+  }
+
+  // Used by Abandon (never by a settle/resolve path, which always owns what
+  // it's clearing). Deletes the shared storage entry only when THIS tab is
+  // confident nothing else could depend on it: it genuinely wrote the entry
+  // itself (ownerTabId matches this tab's own stable-across-reloads
+  // sessionStorage id — see getTabSessionId/writeRecoveryEntry), or the
+  // entry predates that field entirely (no ownerTabId at all — legacy data,
+  // treated as ours). Otherwise — a genuinely different tab's own entry —
+  // the shared record is left completely untouched: deleting it would fire
+  // THAT tab's own `storage` listener and silently clear its unrelated
+  // tracking too (see handleStorageEvent), letting both tabs believe a
+  // possibly-still-billing job is resolved when neither has confirmed that
+  // (regression). Abandoning is then purely local, exactly what the banner
+  // already promises ("stops checking locally").
+  function abandonRecoveryEntry(id: string): void {
+    let owned = true;
+    try {
+      const raw = localStorage.getItem(recoveryStorageKey(id));
+      if (raw) {
+        const entry = JSON.parse(raw) as RecoveryEntry;
+        owned = !entry.ownerTabId || entry.ownerTabId === getTabSessionId();
+      }
+    } catch {
+      // Can't verify either way — err toward NOT deleting a possibly shared entry.
+      owned = false;
+    }
+    if (owned) {
+      clearOwnRecoveryEntry(id);
+    } else {
+      locallyIgnoredIdsRef.current.add(id);
+      adoptRecoveryEntry();
+    }
   }
 
   useEffect(() => {
@@ -581,9 +641,10 @@ export function AIStudioPanel() {
     // abandoned poll loop drops its result instead of acting on it — the
     // same guard startPolling's own responses already rely on.
     ++pollTokenRef.current;
+    const id = jobRecoveryId(recoverableJobId);
     setRecoverableJobId(null);
     setError(null);
-    clearOwnRecoveryEntry(jobRecoveryId(recoverableJobId));
+    abandonRecoveryEntry(id);
   }
 
   // Same reasoning as handleAbandonJob, for a submission whose outcome is
@@ -591,9 +652,10 @@ export function AIStudioPanel() {
   function handleAbandonSubmission() {
     if (!recoverableSubmission) return;
     ++pollTokenRef.current;
+    const id = submissionRecoveryId(recoverableSubmission.body.idempotencyKey as string);
     setRecoverableSubmission(null);
     setError(null);
-    clearOwnRecoveryEntry(submissionRecoveryId(recoverableSubmission.body.idempotencyKey as string));
+    abandonRecoveryEntry(id);
   }
 
   // Submits one generation request. On a definite failure (a non-OK HTTP

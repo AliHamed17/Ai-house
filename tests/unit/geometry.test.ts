@@ -296,3 +296,22 @@ describe('living room spawn (must never start the player embedded inside a struc
     }
   });
 });
+
+describe('every room camera spawn is clear of every wall\'s collision envelope (regression)', () => {
+  it('never starts the player already colliding with a wall', () => {
+    // wc_guest's spawn was 0.30m from hs_south (z=4.3) — inside the
+    // wall-half-thickness + PLAYER_RADIUS_M 0.38m envelope required to be
+    // collision-free — so the player spawned already embedded in the wall
+    // and was immediately shoved off it on the very first movement input,
+    // same failure mode as the column case above but for walls. Since
+    // resolveCollision only ever pushes a point OUT of a solid span it
+    // starts inside (never moves one that's already clear — see "leaves a
+    // point far from every structural column untouched" above), an
+    // unchanged spawn after resolution proves it was clear to begin with.
+    for (const room of houseModel.rooms) {
+      const resolved = resolveCollision(room.cameraSpawn, PLAYER_RADIUS_M, builtWalls);
+      expect(resolved.x).toBeCloseTo(room.cameraSpawn.x, 5);
+      expect(resolved.z).toBeCloseTo(room.cameraSpawn.z, 5);
+    }
+  });
+});

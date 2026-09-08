@@ -362,7 +362,7 @@ const rooms: RoomDef[] = [
       // 0.56 m collision diameter regardless of how the twin_bed doorway
       // itself was shaped (regression). wc_guest is assumption-sized
       // (medium confidence, no plan measurement), so its matching
-      // wcguest_e/floorPolygon boundary is nudged the same 0.3 m below.
+      // floorPolygon boundary is nudged the same 0.3 m below.
       wall('hs_link_w_wc', v(10.8, 5.2), v(10.8, 4.3), false),
       wall('hs_south', v(10.8, 4.3), v(4.9, 4.3), false),
     ],
@@ -458,7 +458,10 @@ const rooms: RoomDef[] = [
     confidence: 'medium',
     floorPolygon: [v(9.9, 4.3), v(10.8, 4.3), v(10.8, 5.2), v(9.9, 5.2)],
     walls: [
-      wall('wcguest_e', v(10.8, 4.3), v(10.8, 5.2), false),
+      // The east edge (x=10.8, z 4.3-5.2) is already authored once, in
+      // reverse, as hall_south's own hs_link_w_wc — that shared boundary is
+      // owned there, not duplicated here (regression: two coincident wall
+      // boxes with different materials used to flicker on the depth test).
       wall('wcguest_s', v(10.8, 5.2), v(9.9, 5.2), true),
     ],
     ceilingHeightM: CEILING_HEIGHT_M,
@@ -470,7 +473,13 @@ const rooms: RoomDef[] = [
     connectedRoomIds: ['hall_south'],
     visibleFeatures: ['small WC compartment opens near social circulation'],
     unresolvedQuestions: [],
-    cameraSpawn: v(10.35, 4.6),
+    // Room center (x already centered at 9.9-10.8; z was 4.6, only 0.30 m
+    // from hs_south at z=4.3 — inside the wall-half-thickness + player-radius
+    // 0.38 m collision envelope, so the player spawned already colliding and
+    // snapped away from it on the first movement input, regression). At
+    // z=4.75 every one of this fully enclosed room's four walls is 0.45 m
+    // away, comfortably clear on all sides.
+    cameraSpawn: v(10.35, 4.75),
     cameraSpawnYaw: 0,
     hotspotLabel: 'Guest WC',
   },

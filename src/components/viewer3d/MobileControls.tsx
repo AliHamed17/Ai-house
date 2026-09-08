@@ -39,6 +39,27 @@ export function MobileControls() {
     };
   }, [mode, setMobileMove]);
 
+  // The browser losing focus or the tab becoming hidden while the joystick
+  // is held (switching apps, a permission dialog, minimizing) commonly never
+  // delivers a pointerup — without this, activePointerId and the shared
+  // mobileMove vector stay stuck nonzero, and the camera keeps walking on
+  // its own once focus returns, until another joystick touch or a remount.
+  // Same lost-release scenario the look-drag controller already guards
+  // against in FirstPersonControls.
+  useEffect(() => {
+    function resetJoystick() {
+      activePointerId.current = null;
+      setKnob({ x: 0, y: 0 });
+      setMobileMove({ x: 0, z: 0 });
+    }
+    window.addEventListener('blur', resetJoystick);
+    document.addEventListener('visibilitychange', resetJoystick);
+    return () => {
+      window.removeEventListener('blur', resetJoystick);
+      document.removeEventListener('visibilitychange', resetJoystick);
+    };
+  }, [setMobileMove]);
+
   if (!isTouchDevice || mode !== 'first-person') return null;
 
   function updateFromPointer(clientX: number, clientY: number) {

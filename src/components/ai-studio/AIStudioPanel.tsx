@@ -818,6 +818,13 @@ export function AIStudioPanel() {
     if (!readAllRecoveryEntries()[submissionRecoveryId(idempotencyKey)]) {
       setRecoverableSubmission(null);
       setError('This recovery has expired. Please start a new generation — resuming now could risk starting a second, separately billed one.');
+      // The expired entry was already removed from storage by the scan
+      // above, but that's a same-document write, which never fires this
+      // tab's own storage listener — without re-checking here, a remaining
+      // SIBLING entry (a genuinely different, still-unresolved job) would
+      // stay unadopted and Generate would incorrectly re-enable while it's
+      // still outstanding (regression).
+      adoptRecoveryEntry();
       return;
     }
     const token = ++pollTokenRef.current;

@@ -290,3 +290,66 @@ describe('FirstPersonControls: losing focus while a drag-to-look pointer is held
     expect(camera.rotation.y).not.toBe(yawAfterFirstDrag);
   });
 });
+
+describe('FirstPersonControls: joystick movement preserves its own magnitude (regression)', () => {
+  beforeEach(() => {
+    const camera = new THREE.PerspectiveCamera();
+    const canvas = document.createElement('canvas');
+    threeRef.current = { camera, gl: { domElement: canvas } };
+    frameRef.current = null;
+    useViewerStore.setState({
+      mode: 'first-person',
+      playerPose: { x: 0, z: 0, yaw: 0 },
+      teleportTarget: null,
+      teleportToken: 0,
+      mobileMove: { x: 0, z: 0 },
+      mobileLookDelta: { dx: 0, dy: 0 },
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('a small joystick deflection moves proportionally less than full speed, not boosted to it (regression)', () => {
+    render(<FirstPersonControls />);
+    const { camera } = threeRef.current!;
+
+    // ~10% deflection. Under the old (always-normalize-to-1) behavior this
+    // would move exactly as far as a full deflection, making fine
+    // positioning in narrow rooms/doorways impossible.
+    useViewerStore.setState({ mobileMove: { x: 0, z: 0.1 } });
+    tick(FRAME_DT);
+
+    const expectedFullSpeedDistance = 2.2 * FRAME_DT; // MOVE_SPEED_M_S * dt
+    const actualDistance = Math.hypot(camera.position.x, camera.position.z);
+    expect(actualDistance).toBeCloseTo(expectedFullSpeedDistance * 0.1, 5);
+  });
+
+  it('a full joystick deflection still moves at full speed (baseline)', () => {
+    render(<FirstPersonControls />);
+    const { camera } = threeRef.current!;
+
+    useViewerStore.setState({ mobileMove: { x: 0, z: 1 } });
+    tick(FRAME_DT);
+
+    const expectedFullSpeedDistance = 2.2 * FRAME_DT;
+    const actualDistance = Math.hypot(camera.position.x, camera.position.z);
+    expect(actualDistance).toBeCloseTo(expectedFullSpeedDistance, 5);
+  });
+
+  it('keyboard diagonal movement is still capped at the same speed as a single direction (baseline, unchanged by the joystick fix)', () => {
+    render(<FirstPersonControls />);
+    const { camera } = threeRef.current!;
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyD' }));
+    tick(FRAME_DT);
+
+    const expectedFullSpeedDistance = 2.2 * FRAME_DT;
+    const diagonalDistance = Math.hypot(camera.position.x, camera.position.z);
+    // Without capping, this would be sqrt(2) times faster than a single
+    // direction — the classic diagonal-speed-boost bug.
+    expect(diagonalDistance).toBeCloseTo(expectedFullSpeedDistance, 5);
+  });
+});

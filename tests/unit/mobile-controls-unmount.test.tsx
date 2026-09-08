@@ -16,6 +16,9 @@ describe('MobileControls: resets mobileMove on unmount (regression)', () => {
         removeEventListener: vi.fn(),
       })),
     });
+    // jsdom also has no Pointer Capture implementation; the joystick's own
+    // onPointerDown calls it unconditionally.
+    HTMLElement.prototype.setPointerCapture = vi.fn();
     useViewerStore.setState({ mode: 'first-person', mobileMove: { x: 0, z: 0 } });
   });
 
@@ -47,5 +50,93 @@ describe('MobileControls: resets mobileMove on unmount (regression)', () => {
       useViewerStore.setState({ mode: 'orbit' });
     });
     expect(useViewerStore.getState().mobileMove).toEqual({ x: 0, z: 0 });
+  });
+});
+
+describe('MobileControls: resets the joystick on lost focus while a pointer is actively dragging it (regression)', () => {
+  beforeEach(() => {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: true,
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    });
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    useViewerStore.setState({ mode: 'first-person', mobileMove: { x: 0, z: 0 } });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  function pointerDownAt(base: HTMLElement, pointerId: number, clientX: number) {
+    // getBoundingClientRect is all-zero in jsdom (no real layout), so
+    // clientX/clientY here ARE the raw dx/dy updateFromPointer computes.
+    act(() => {
+      base.dispatchEvent(new PointerEvent('pointerdown', { pointerId, clientX, clientY: 0, bubbles: true }));
+    });
+  }
+
+  it('a pointerup delivered normally resets it (baseline)', () => {
+    const { getByLabelText } = render(<MobileControls />);
+    const base = getByLabelText(/Move \(drag this joystick/i);
+
+    pointerDownAt(base, 1, 20);
+    expect(useViewerStore.getState().mobileMove.x).toBeCloseTo(20 / 44);
+
+    // setPointerCapture is stubbed as a no-op above (jsdom has no real
+    // implementation), so — unlike a real browser, where a captured
+    // pointer's events retarget to the capturing element regardless of
+    // where they're released — this must be dispatched on the base itself
+    // to reach its onPointerUp handler at all.
+    act(() => {
+      base.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, bubbles: true }));
+    });
+    expect(useViewerStore.getState().mobileMove).toEqual({ x: 0, z: 0 });
+  });
+
+  it('a dropped pointerup (window blur) still resets it, so the camera does not keep walking on its own after focus returns (regression)', () => {
+    const { getByLabelText } = render(<MobileControls />);
+    const base = getByLabelText(/Move \(drag this joystick/i);
+
+    pointerDownAt(base, 1, 20);
+    expect(useViewerStore.getState().mobileMove.x).toBeCloseTo(20 / 44);
+
+    // No pointerup — switching apps/tabs or a permission dialog while the
+    // joystick is still physically held commonly never delivers one.
+    act(() => {
+      window.dispatchEvent(new Event('blur'));
+    });
+    expect(useViewerStore.getState().mobileMove).toEqual({ x: 0, z: 0 });
+  });
+
+  it('a dropped pointerup (document visibilitychange) also resets it (regression)', () => {
+    const { getByLabelText } = render(<MobileControls />);
+    const base = getByLabelText(/Move \(drag this joystick/i);
+
+    pointerDownAt(base, 1, 20);
+    expect(useViewerStore.getState().mobileMove.x).toBeCloseTo(20 / 44);
+
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(useViewerStore.getState().mobileMove).toEqual({ x: 0, z: 0 });
+  });
+
+  it('a fresh pointerdown after a blur-triggered reset still works normally (the reset does not permanently break the joystick)', () => {
+    const { getByLabelText } = render(<MobileControls />);
+    const base = getByLabelText(/Move \(drag this joystick/i);
+
+    pointerDownAt(base, 1, 20);
+    act(() => {
+      window.dispatchEvent(new Event('blur'));
+    });
+    expect(useViewerStore.getState().mobileMove).toEqual({ x: 0, z: 0 });
+
+    pointerDownAt(base, 2, 30);
+    expect(useViewerStore.getState().mobileMove.x).toBeCloseTo(30 / 44);
   });
 });

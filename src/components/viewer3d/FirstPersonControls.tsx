@@ -254,8 +254,16 @@ export function FirstPersonControls() {
 
     const len = Math.hypot(moveRight, moveForward);
     if (len > 1e-4) {
-      const nRight = moveRight / len;
-      const nForward = moveForward / len;
+      // Caps the magnitude at 1 (keyboard diagonals, or keyboard+joystick
+      // combined, can exceed it) WITHOUT boosting anything already at or
+      // under 1 up to exactly 1 — the joystick's own vector is already
+      // properly bounded (see MobileControls' clamped drag radius) and
+      // deliberately analog: a small nudge must stay slow, not jump to full
+      // MOVE_SPEED_M_S, or fine positioning in narrow rooms/doorways
+      // becomes impossible (regression).
+      const scale = len > 1 ? 1 / len : 1;
+      const nRight = moveRight * scale;
+      const nForward = moveForward * scale;
       const yaw = yawRef.current;
       const forward = { x: -Math.sin(yaw), z: -Math.cos(yaw) };
       const right = { x: Math.cos(yaw), z: -Math.sin(yaw) };

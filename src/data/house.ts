@@ -391,12 +391,14 @@ const rooms: RoomDef[] = [
     // in hall_south) — the doors moved with it already, but this floor
     // polygon (and bathmain_e below) did not, leaving a 0.3m strip where
     // this room's floor and hall_south's now-larger one coplanar-overlapped
-    // (regression).
-    floorPolygon: [v(7.3, 4.3), v(8.8, 4.3), v(8.8, 6.35), v(7.3, 6.35)],
+    // (regression). South edge 6.35 -> 6.65 restores the declared 2.35m
+    // depth that moving only the north edge had silently shrunk to 2.05m
+    // (regression); bathmain_s is exterior, so nothing else borders it here.
+    floorPolygon: [v(7.3, 4.3), v(8.8, 4.3), v(8.8, 6.65), v(7.3, 6.65)],
     walls: [
-      wall('bathmain_e', v(8.8, 4.3), v(8.8, 6.35), false),
-      wall('bathmain_s', v(8.8, 6.35), v(7.3, 6.35), true),
-      wall('bathmain_w', v(7.3, 6.35), v(7.3, 4.3), true),
+      wall('bathmain_e', v(8.8, 4.3), v(8.8, 6.65), false),
+      wall('bathmain_s', v(8.8, 6.65), v(7.3, 6.65), true),
+      wall('bathmain_w', v(7.3, 6.65), v(7.3, 4.3), true),
     ],
     ceilingHeightM: CEILING_HEIGHT_M,
     floorMaterialId: 'stone-wet',
@@ -419,11 +421,14 @@ const rooms: RoomDef[] = [
     dimensions: { widthM: 1.1, depthM: 1.5 },
     dimensionSource: 'assumption — adjacency-based; exact dimensions not legible on the supplied plan crop',
     confidence: 'medium',
-    // North edge 4.0 -> 4.3, same reasoning as bathroom_main above.
-    floorPolygon: [v(8.8, 4.3), v(9.9, 4.3), v(9.9, 5.5), v(8.8, 5.5)],
+    // North edge 4.0 -> 4.3, same reasoning as bathroom_main above. South
+    // edge 5.5 -> 5.8 likewise restores the declared 1.5m depth that moving
+    // only the north edge had silently shrunk to 1.2m (regression);
+    // bathensuite_s is exterior, so nothing else borders it here.
+    floorPolygon: [v(8.8, 4.3), v(9.9, 4.3), v(9.9, 5.8), v(8.8, 5.8)],
     walls: [
-      wall('bathensuite_e', v(9.9, 4.3), v(9.9, 5.5), false),
-      wall('bathensuite_s', v(9.9, 5.5), v(8.8, 5.5), true),
+      wall('bathensuite_e', v(9.9, 4.3), v(9.9, 5.8), false),
+      wall('bathensuite_s', v(9.9, 5.8), v(8.8, 5.8), true),
     ],
     ceilingHeightM: CEILING_HEIGHT_M,
     floorMaterialId: 'stone-wet',

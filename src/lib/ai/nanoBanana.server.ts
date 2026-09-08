@@ -3,7 +3,15 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import type { GenerationInput, GenerationJob, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
 import { readPublicFileAsBase64 } from './publicAsset.server';
-import { getStoredResult, putStoredResult, RESULT_URL_PREFIX, resultIdFromPath, SOURCE_EXPIRED_MESSAGE } from './resultStore.server';
+import {
+  getStoredResult,
+  isResultStoreAtCapacity,
+  putStoredResult,
+  RESULT_STORE_AT_CAPACITY_MESSAGE,
+  RESULT_URL_PREFIX,
+  resultIdFromPath,
+  SOURCE_EXPIRED_MESSAGE,
+} from './resultStore.server';
 import { withTimeout } from './resilience.server';
 
 /**
@@ -87,6 +95,14 @@ async function readSourceImage(sourceAssetPath: string): Promise<{ mimeType: str
 export const nanoBananaProvider: MediaGenerationProvider = {
   id: 'nano-banana',
   async submit(input: GenerationInput) {
+    // Checked before the paid call below (not left to putStoredResult once
+    // the result already exists) — see isResultStoreAtCapacity's own doc
+    // comment for why capacity can only be safely refused here, before
+    // spending money, rather than by evicting something after the fact.
+    if (isResultStoreAtCapacity()) {
+      throw new Error(RESULT_STORE_AT_CAPACITY_MESSAGE);
+    }
+
     const ai = getClient();
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [{ text: input.prompt }];

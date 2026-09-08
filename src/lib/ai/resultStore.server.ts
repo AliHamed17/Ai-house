@@ -23,18 +23,56 @@ const TTL_MS = 10 * 60_000;
 const MAX_ENTRIES = 100;
 const store = new Map<string, StoredResult>();
 
-export function putStoredResult(mimeType: string, base64: string): string {
+function prune(): void {
   const now = Date.now();
   for (const [key, value] of store) {
     if (now - value.createdAt > TTL_MS) store.delete(key);
   }
-  while (store.size >= MAX_ENTRIES) {
-    const oldest = store.keys().next().value;
-    if (oldest === undefined) break;
-    store.delete(oldest);
-  }
+}
+
+/**
+ * Whether the store is full of genuinely unexpired entries right now. A
+ * caller about to start a paid, billed generation should check this FIRST —
+ * see isSubmitTimeout's sibling reasoning in nanoBanana.server.ts — and
+ * refuse the request rather than let it run. Checking only here (before the
+ * paid call) rather than by evicting inside putStoredResult below is what
+ * makes rejection possible at all: putStoredResult is called only after the
+ * result already exists and has already been paid for, by which point there
+ * is nothing left to safely refuse.
+ */
+export function isResultStoreAtCapacity(): boolean {
+  prune();
+  return store.size >= MAX_ENTRIES;
+}
+
+export const RESULT_STORE_AT_CAPACITY_MESSAGE = 'Too many generated images are cached right now. Please try again in a moment.';
+
+export function isResultStoreAtCapacityError(error: unknown): boolean {
+  return error instanceof Error && error.message === RESULT_STORE_AT_CAPACITY_MESSAGE;
+}
+
+/** Test-only: resets the module-level store so capacity tests start from zero. */
+export function _clearStoreForTests(): void {
+  store.clear();
+}
+
+/**
+ * Stores a just-generated (already billed) result. Never refuses and never
+ * evicts an unexpired entry to make room — by the time a result reaches
+ * here the provider call has already completed and been paid for, so
+ * discarding another, still-unpolled entry to fit it would only turn that
+ * OTHER entry's client-side poll into a false "expired" failure instead
+ * (see the P2 finding this replaced: a 101st completion evicting an
+ * unpolled 1st). isResultStoreAtCapacity above is what keeps the store
+ * bounded in the ordinary case, by refusing new paid calls before they
+ * start; a transient handful of entries over MAX_ENTRIES from requests that
+ * both passed that check concurrently is an accepted, self-correcting
+ * (TTL-bounded) trade-off against ever discarding a paid, unpolled result.
+ */
+export function putStoredResult(mimeType: string, base64: string): string {
+  prune();
   const id = randomUUID();
-  store.set(id, { mimeType, base64, createdAt: now });
+  store.set(id, { mimeType, base64, createdAt: Date.now() });
   return id;
 }
 
@@ -58,14 +96,6 @@ export function getStoredResult(id: string | undefined): StoredResult | undefine
  * wasting a paid job on a 404. Touching it gives it a fresh, full TTL_MS
  * from this exact moment, which comfortably outlasts any realistic
  * provider fetch time.
- *
- * Deletes and re-sets the entry (rather than mutating createdAt in place) so
- * it also moves to the end of the Map's iteration order. putStoredResult's
- * capacity eviction below walks that same order and removes whatever is
- * first — a mutate-in-place touch leaves a just-refreshed entry sitting
- * exactly where it was, so a concurrent unrelated submission that fills the
- * store to capacity would evict it immediately despite the fresh TTL,
- * letting an already-started billed job 404 the moment it fetches the URL.
  */
 export function touchStoredResult(id: string | undefined): boolean {
   if (!id) return false;
@@ -75,8 +105,7 @@ export function touchStoredResult(id: string | undefined): boolean {
     store.delete(id);
     return false;
   }
-  store.delete(id);
-  store.set(id, { ...entry, createdAt: Date.now() });
+  entry.createdAt = Date.now();
   return true;
 }
 

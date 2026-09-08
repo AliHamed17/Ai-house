@@ -540,4 +540,60 @@ test.describe('AI Design Studio (demo mode)', () => {
     const stored = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
     expect(stored).toBeNull();
   });
+
+  test('abandoning a recoverable job while a genuinely different tab\'s entry is still outstanding surfaces THAT entry instead of unlocking Generate (regression)', async ({ page }) => {
+    // clearRecoveryEntry alone only ever removed the abandoned entry from
+    // storage — a same-document write never fires this same tab's own
+    // `storage` listener (see handleStorageEvent in AIStudioPanel), so
+    // without also re-checking what's left (clearOwnRecoveryEntry), Generate
+    // would incorrectly re-enable here even though a genuinely different
+    // tab's own, possibly-billed job is still unresolved.
+    await page.goto('/#ai-studio');
+
+    const siblingEntry = {
+      kind: 'job',
+      jobId: 'sibling-still-outstanding-job-id',
+      roomId: 'living',
+      outputType: 'image',
+      createdAt: Date.now() - 60_000,
+    };
+    const ownEntry = {
+      kind: 'job',
+      jobId: 'own-job-about-to-be-abandoned-id',
+      roomId: 'living',
+      outputType: 'image',
+      createdAt: Date.now(),
+    };
+    // One-time seed of both entries (see the two-independently-tracked test
+    // above for why page.evaluate, not addInitScript, is used here).
+    await page.evaluate(
+      ({ sibling, own }) => {
+        const asSibling = sibling as { jobId: string };
+        const asOwn = own as { jobId: string };
+        localStorage.setItem(
+          'ai-studio:unresolved-generation',
+          JSON.stringify({ [`job:${asSibling.jobId}`]: sibling, [`job:${asOwn.jobId}`]: own }),
+        );
+      },
+      { sibling: siblingEntry, own: ownEntry },
+    );
+
+    // Reload so the mount effect adopts the newer (own) entry as this tab's
+    // own tracked one — the sibling entry is older but still well within its
+    // recovery ceiling, exactly like the single-entry seeding tests above.
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Abandon and start over' }).click();
+
+    // The sibling's own entry must be surfaced in its place, not silently
+    // dropped — Generate must stay disabled and the recovery banner must
+    // stay up (under the old behavior this would flip: the banner would
+    // disappear and Generate would re-enable).
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
+
+    const stored = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
+    expect(Object.keys(JSON.parse(stored ?? '{}'))).toEqual(['job:sibling-still-outstanding-job-id']);
+  });
 });

@@ -1,5 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
-import { getStoredResult, putStoredResult, RESULT_URL_PREFIX, resultIdFromPath, touchStoredResult } from '@/lib/ai/resultStore.server';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  _clearStoreForTests,
+  getStoredResult,
+  isResultStoreAtCapacity,
+  isResultStoreAtCapacityError,
+  putStoredResult,
+  RESULT_STORE_AT_CAPACITY_MESSAGE,
+  RESULT_URL_PREFIX,
+  resultIdFromPath,
+  touchStoredResult,
+} from '@/lib/ai/resultStore.server';
 
 describe('in-memory generation result store', () => {
   it('round-trips stored bytes by id', () => {
@@ -63,23 +73,61 @@ describe('in-memory generation result store', () => {
       }
     });
 
-    it('protects a touched entry from capacity eviction by moving it out of "oldest" position (regression)', () => {
-      // MAX_ENTRIES is 100. Fill the store to exactly capacity, then touch
-      // the very first entry inserted — the one capacity eviction would
-      // otherwise remove first. If touch only refreshed createdAt without
-      // also moving the entry in the Map's iteration order, it would still
-      // be evicted immediately by the very next insert despite the fresh
-      // TTL, letting an already-started billed job 404 against it.
-      const victimId = putStoredResult('image/png', 'first');
-      const nextOldestId = putStoredResult('image/png', 'second');
+    it('does not evict the next-oldest entry just because a touch moved another one past it (regression)', () => {
+      // putStoredResult used to evict the single oldest entry once the store
+      // reached MAX_ENTRIES — this test originally proved a touch protected
+      // itself from that eviction. putStoredResult no longer evicts anything
+      // (see isResultStoreAtCapacity below: capacity is refused BEFORE a
+      // paid call starts, not by discarding an unpolled result afterward),
+      // so the entry this touch used to displace into eviction must now
+      // survive right alongside it.
+      const touchedId = putStoredResult('image/png', 'first');
+      const otherId = putStoredResult('image/png', 'second');
       for (let i = 2; i < 100; i++) putStoredResult('image/png', `entry-${i}`);
 
-      expect(touchStoredResult(victimId)).toBe(true);
+      expect(touchStoredResult(touchedId)).toBe(true);
 
       putStoredResult('image/png', 'one-past-capacity');
 
-      expect(getStoredResult(victimId)).toBeDefined();
-      expect(getStoredResult(nextOldestId)).toBeUndefined();
+      expect(getStoredResult(touchedId)).toBeDefined();
+      expect(getStoredResult(otherId)).toBeDefined();
+    });
+  });
+
+  describe('isResultStoreAtCapacity / RESULT_STORE_AT_CAPACITY_MESSAGE (reserves capacity before a paid call, instead of evicting an unpolled result after one)', () => {
+    beforeEach(() => {
+      // Every other describe block above shares the module-level store and
+      // never clears it, which is fine there since none of those tests
+      // depend on an exact count — this one does, so it needs a clean slate
+      // regardless of what earlier tests in this file already inserted.
+      _clearStoreForTests();
+    });
+
+    it('is false below MAX_ENTRIES and true once it is reached', () => {
+      expect(isResultStoreAtCapacity()).toBe(false);
+      for (let i = 0; i < 99; i++) putStoredResult('image/png', `entry-${i}`);
+      expect(isResultStoreAtCapacity()).toBe(false);
+      putStoredResult('image/png', 'entry-99');
+      expect(isResultStoreAtCapacity()).toBe(true);
+    });
+
+    it('does not count already-expired entries toward capacity', () => {
+      vi.useFakeTimers();
+      try {
+        for (let i = 0; i < 100; i++) putStoredResult('image/png', `entry-${i}`);
+        expect(isResultStoreAtCapacity()).toBe(true);
+        vi.advanceTimersByTime(11 * 60_000); // past the 10-minute TTL
+        expect(isResultStoreAtCapacity()).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('recognizes exactly the shared at-capacity message and nothing else', () => {
+      expect(isResultStoreAtCapacityError(new Error(RESULT_STORE_AT_CAPACITY_MESSAGE))).toBe(true);
+      expect(isResultStoreAtCapacityError(new Error('some other failure'))).toBe(false);
+      expect(isResultStoreAtCapacityError('not an Error instance')).toBe(false);
+      expect(isResultStoreAtCapacityError(undefined)).toBe(false);
     });
   });
 });

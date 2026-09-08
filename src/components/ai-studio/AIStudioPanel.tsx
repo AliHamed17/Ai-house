@@ -246,6 +246,21 @@ export function AIStudioPanel() {
     }
   }
 
+  // Clears this tab's own recovery record, then immediately re-checks for a
+  // remaining one. A same-document localStorage write never fires this same
+  // tab's `storage` listener (see handleStorageEvent below), so once this
+  // tab's own tracked job/submission settles or is abandoned, nothing else
+  // would notice a genuinely different tab's still-outstanding entry — the
+  // Generate button would incorrectly re-enable (hasUnresolvedJob false)
+  // while that other entry's possibly-billed outcome is still unresolved.
+  // Always call this instead of clearRecoveryEntry directly for an entry
+  // this tab currently owns. Safe unconditionally: adoptRecoveryEntry is a
+  // no-op when nothing remains.
+  function clearOwnRecoveryEntry(id: string): void {
+    clearRecoveryEntry(id);
+    adoptRecoveryEntry();
+  }
+
   useEffect(() => {
     // Restoring from an external system (localStorage) on mount, not
     // deriving from other React state — see MobileControls.tsx for the same
@@ -425,7 +440,7 @@ export function AIStudioPanel() {
         if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
           setSubmitting(false);
           setRecoverableJobId(null);
-          clearRecoveryEntry(jobRecoveryId(jobId));
+          clearOwnRecoveryEntry(jobRecoveryId(jobId));
           return;
         }
         pollTimerRef.current = setTimeout(poll, 1000);
@@ -463,9 +478,9 @@ export function AIStudioPanel() {
     // abandoned poll loop drops its result instead of acting on it — the
     // same guard startPolling's own responses already rely on.
     ++pollTokenRef.current;
-    clearRecoveryEntry(jobRecoveryId(recoverableJobId));
     setRecoverableJobId(null);
     setError(null);
+    clearOwnRecoveryEntry(jobRecoveryId(recoverableJobId));
   }
 
   // Same reasoning as handleAbandonJob, for a submission whose outcome is
@@ -473,9 +488,9 @@ export function AIStudioPanel() {
   function handleAbandonSubmission() {
     if (!recoverableSubmission) return;
     ++pollTokenRef.current;
-    clearRecoveryEntry(submissionRecoveryId(recoverableSubmission.body.idempotencyKey as string));
     setRecoverableSubmission(null);
     setError(null);
+    clearOwnRecoveryEntry(submissionRecoveryId(recoverableSubmission.body.idempotencyKey as string));
   }
 
   // Submits one generation request. On a definite failure (a non-OK HTTP
@@ -559,7 +574,7 @@ export function AIStudioPanel() {
             // fresh attempt before it got anywhere near reserveIdempotentSubmission.
             // The pre-fetch entry above was only ever a speculative just-in-case
             // write and can be discarded now that the outcome is known.
-            clearRecoveryEntry(submissionRecoveryId(idempotencyKey));
+            clearOwnRecoveryEntry(submissionRecoveryId(idempotencyKey));
           }
           return null;
         }
@@ -567,7 +582,7 @@ export function AIStudioPanel() {
         // Cleared unconditionally first: a stale entry from an earlier
         // ambiguous attempt on this same request (see handleResumeSubmission)
         // must not survive a now-definite outcome, whichever way it resolved.
-        clearRecoveryEntry(submissionRecoveryId(idempotencyKey));
+        clearOwnRecoveryEntry(submissionRecoveryId(idempotencyKey));
         if (res.status === 504) {
           setRecoverableSubmission({ endpoint, body });
           // ambiguous: true, with a FRESH timestamp — mirrors isSubmitTimeout

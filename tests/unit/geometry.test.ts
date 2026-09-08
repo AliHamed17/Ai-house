@@ -164,6 +164,22 @@ describe('collision resolution', () => {
     expect(pointInPolygon({ x: 9.3, z: 5.0 }, bathEnsuite.floorPolygon)).toBe(true);
   });
 
+  it('keeps bathroom_main/bathroom_ensuite floor depth consistent with their declared dimensions.depthM (regression)', () => {
+    // The overlap fix above was first made by moving only each room's north
+    // edge in to meet hs_south's new position — which silently shrunk the
+    // modeled depth (bathroom_main 2.35m -> 2.05m, bathroom_ensuite 1.5m ->
+    // 1.2m) while dimensions.depthM, and the UI that displays it, still
+    // claimed the original, evidence-sourced figure. The south edge (each
+    // room's own exterior wall, bordering nothing else) moved out instead,
+    // to keep the modeled floor and the declared dimensions in agreement.
+    const bathMain = getRoom('bathroom_main')!;
+    const bathEnsuite = getRoom('bathroom_ensuite')!;
+    const depthOf = (polygon: { z: number }[]) => Math.max(...polygon.map((p) => p.z)) - Math.min(...polygon.map((p) => p.z));
+
+    expect(depthOf(bathMain.floorPolygon)).toBeCloseTo(bathMain.dimensions.depthM, 5);
+    expect(depthOf(bathEnsuite.floorPolygon)).toBeCloseTo(bathEnsuite.dimensions.depthM, 5);
+  });
+
   it('pushes the player out of a structural column instead of letting them walk through it (regression)', () => {
     const column = houseModel.structuralFeatures.find((f) => f.id === 'column_living')!;
     const playerRadius = 0.28;

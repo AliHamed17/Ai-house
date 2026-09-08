@@ -164,7 +164,12 @@ const rooms: RoomDef[] = [
       'structural column visible in walkthrough 00:12-00:20',
     ],
     unresolvedQuestions: ['Exact facade curve radius is not legible; modeled as a configurable ~1.3 m chamfer.'],
-    cameraSpawn: v(2.5, 2.2),
+    // Was (2.5, 2.2) — only 0.283 m from column_living at (2.3, 2.0), inside
+    // the column+player collision radius (0.5 m). Entering or teleporting
+    // here assigns the camera position directly; collision resolution only
+    // runs once movement begins, so the camera would start out rendered
+    // inside the column (regression).
+    cameraSpawn: v(2.5, 3.0),
     cameraSpawnYaw: Math.PI / 2,
     hotspotLabel: 'Living Room',
   },
@@ -289,7 +294,15 @@ const rooms: RoomDef[] = [
     walls: [
       wall('twin_n', v(10.8, 0), v(15.19, 0), true),
       wall('twin_e', v(15.19, 0), v(15.19, 3.5), true),
-      wall('twin_s', v(15.19, 3.5), v(10.8, 3.5), false),
+      // Pulled back from x=10.8 to x=11.6: unlike twin_w, this wall carries
+      // no opening of its own, so its un-shortened endpoint sat exactly on
+      // the doorway's own crossing line — its player-radius-expanded corner
+      // (reaching to x=10.8+~0.28) overlapped mamad_e's own expanded corner
+      // there, leaving no collision-free path through, regardless of how
+      // wide the void cut into twin_w/hs_twin was (regression). 11.6 keeps
+      // this wall's own reach (11.6-radius) past x=11.18 — mamad_e's own
+      // expanded corner on the OTHER axis — so the two never overlap at all.
+      wall('twin_s', v(15.19, 3.5), v(11.6, 3.5), false),
       wall('twin_w', v(10.8, 3.5), v(10.8, 0), false),
     ],
     ceilingHeightM: CEILING_HEIGHT_M,
@@ -326,18 +339,32 @@ const rooms: RoomDef[] = [
       v(11.9, 3.7),
       v(11.9, 9.85),
       v(10.8, 9.85),
-      v(10.8, 4.0),
-      v(4.9, 4.0),
+      // 4.0 -> 4.3, matching hs_south/hs_link_w_wc below — see the comment
+      // on hs_link_w_wc for why (a too-narrow gap to wc_guest, regression).
+      v(10.8, 4.3),
+      v(4.9, 4.3),
     ],
     walls: [
       wall('hs_twin', v(10.8, 3.0), v(10.8, 3.7), false),
-      wall('hs_link_top', v(10.8, 3.7), v(11.9, 3.7), true),
+      // Same reasoning as twin_s's shortening above: this wall's own
+      // unshortened endpoint also sat exactly on the doorway's crossing
+      // line (x=10.8), so it created the identical corner-overlap problem
+      // from the opposite side once twin_s no longer blocked there
+      // (regression) — pulled back to x=11.6 for the same margin as twin_s.
+      wall('hs_link_top', v(11.6, 3.7), v(11.9, 3.7), true),
       wall('hs_link_e_void', v(11.9, 3.7), v(11.9, 6.35), true),
       wall('hs_link_e_parents', v(11.9, 6.35), v(11.9, 9.85), false),
       wall('hs_link_bottom', v(11.9, 9.85), v(10.8, 9.85), true),
       wall('hs_link_w_void', v(10.8, 9.85), v(10.8, 5.2), true),
-      wall('hs_link_w_wc', v(10.8, 5.2), v(10.8, 4.0), false),
-      wall('hs_south', v(10.8, 4.0), v(4.9, 4.0), false),
+      // z=4.0 -> 4.3: at z=4.0, this wall's own player-radius-expanded
+      // corner (4.0-radius=3.72) overlapped mamad_e's (3.0+radius=3.28) by
+      // 0.56 m, leaving only a 0.44 m gap — narrower than the player's
+      // 0.56 m collision diameter regardless of how the twin_bed doorway
+      // itself was shaped (regression). wc_guest is assumption-sized
+      // (medium confidence, no plan measurement), so its matching
+      // wcguest_e/floorPolygon boundary is nudged the same 0.3 m below.
+      wall('hs_link_w_wc', v(10.8, 5.2), v(10.8, 4.3), false),
+      wall('hs_south', v(10.8, 4.3), v(4.9, 4.3), false),
     ],
     ceilingHeightM: CEILING_HEIGHT_M,
     floorMaterialId: 'stone-entry',
@@ -410,12 +437,17 @@ const rooms: RoomDef[] = [
     nameEn: 'Guest WC',
     nameHe: null,
     function: 'Separate powder room.',
-    dimensions: { widthM: 0.9, depthM: 1.2 },
+    // depthM 1.2 -> 0.9 (north edge z=4.0 -> 4.3): entirely within this
+    // room's own assumption-based sizing tolerance — see hs_link_w_wc's
+    // comment in hall_south for why (mamad_e sat only 1.0 m from this
+    // room's original edge, too tight a gap once collision expansion is
+    // applied, regardless of the twin_bed doorway's own shape).
+    dimensions: { widthM: 0.9, depthM: 0.9 },
     dimensionSource: 'assumption — adjacency-based; exact dimensions not legible on the supplied plan crop',
     confidence: 'medium',
-    floorPolygon: [v(9.9, 4.0), v(10.8, 4.0), v(10.8, 5.2), v(9.9, 5.2)],
+    floorPolygon: [v(9.9, 4.3), v(10.8, 4.3), v(10.8, 5.2), v(9.9, 5.2)],
     walls: [
-      wall('wcguest_e', v(10.8, 4.0), v(10.8, 5.2), false),
+      wall('wcguest_e', v(10.8, 4.3), v(10.8, 5.2), false),
       wall('wcguest_s', v(10.8, 5.2), v(9.9, 5.2), true),
     ],
     ceilingHeightM: CEILING_HEIGHT_M,

@@ -504,8 +504,16 @@ const openings: OpeningDef[] = [
   { id: 'door_entry_mamad', kind: 'door', position: v(7.3, 1.5), widthM: 1.0, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'entry_hall', roomB: 'mamad', confidence: 'high', isProtected: true, note: 'MAMAD protected door — never remove, resize, or relocate.' },
   { id: 'opening_entry_hallsouth', kind: 'open_threshold', position: v(6.1, 3.0), widthM: 1.5, sillM: 0, headM: 2.4, roomA: 'entry_hall', roomB: 'hall_south', confidence: 'low' },
   { id: 'door_hallsouth_twin', kind: 'door', position: v(10.8, 3.25), widthM: 1.0, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'hall_south', roomB: 'twin_bed', confidence: 'medium' },
-  { id: 'door_hallsouth_bathmain', kind: 'door', position: v(8.05, 4.0), widthM: 0.9, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'hall_south', roomB: 'bathroom_main', confidence: 'medium' },
-  { id: 'door_hallsouth_bathensuite', kind: 'door', position: v(9.35, 4.0), widthM: 0.9, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'hall_south', roomB: 'bathroom_ensuite', confidence: 'low' },
+  // z=4.0 -> 4.3, matching hs_south's own move in hall_south (see its
+  // comment there) — findOpeningsForWall only cuts an opening into a wall
+  // it projects within EPS (0.05m) of, so leaving these at the wall's old
+  // position left both doors uncut: a fully solid, collidable barrier
+  // across both bathroom entrances, reachable only by teleporting
+  // (regression). bathroom_main/bathroom_ensuite have no wall of their own
+  // at this boundary (open-plan from their side, same as wc_guest before
+  // its own wall needed moving), so only the door position needs updating.
+  { id: 'door_hallsouth_bathmain', kind: 'door', position: v(8.05, 4.3), widthM: 0.9, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'hall_south', roomB: 'bathroom_main', confidence: 'medium' },
+  { id: 'door_hallsouth_bathensuite', kind: 'door', position: v(9.35, 4.3), widthM: 0.9, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'hall_south', roomB: 'bathroom_ensuite', confidence: 'low' },
   { id: 'door_hallsouth_wcguest', kind: 'door', position: v(10.8, 4.6), widthM: 0.8, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'hall_south', roomB: 'wc_guest', confidence: 'low' },
   { id: 'door_hallsouth_parents', kind: 'door', position: v(11.9, 8.1), widthM: 1.0, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'hall_south', roomB: 'parents_bed', confidence: 'medium' },
   { id: 'opening_living_kitchen', kind: 'open_threshold', position: v(1.55, 4.0), widthM: 3.1, sillM: 0, headM: CEILING_HEIGHT_M, roomA: 'living', roomB: 'kitchen', confidence: 'high', note: 'Open social zone — no dividing wall.' },

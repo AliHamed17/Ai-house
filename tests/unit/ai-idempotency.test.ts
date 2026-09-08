@@ -1,5 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
-import { IDEMPOTENCY_KEY_MISMATCH_MESSAGE, isIdempotencyKeyMismatchError, reserveIdempotentSubmission } from '@/lib/ai/idempotency.server';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  _clearStoreForTests,
+  IDEMPOTENCY_KEY_MISMATCH_MESSAGE,
+  IDEMPOTENCY_STORE_AT_CAPACITY_MESSAGE,
+  isIdempotencyKeyMismatchError,
+  reserveIdempotentSubmission,
+} from '@/lib/ai/idempotency.server';
 
 // Most tests below don't exercise fingerprint matching itself — they reuse
 // the same literal fingerprint across paired calls so that behavior isn't
@@ -147,8 +153,16 @@ describe('reserveIdempotentSubmission fingerprint binding (a reused key must nev
   });
 });
 
-describe('reserveIdempotentSubmission at capacity (MAX_ENTRIES=200) — eviction must never target an in-flight reservation', () => {
-  it('never evicts an unsettled (still in-flight) entry to make room for a new key, even at capacity (regression)', async () => {
+describe('reserveIdempotentSubmission at capacity (MAX_ENTRIES=200) — a new key is rejected outright, nothing existing is ever evicted', () => {
+  // Each test below fills the store to exactly MAX_ENTRIES itself — a clean
+  // slate is required, or leftover entries from an earlier test (or an
+  // earlier describe block above) would make that fill overshoot capacity
+  // partway through and reject unexpectedly.
+  beforeEach(() => {
+    _clearStoreForTests();
+  });
+
+  it('rejects a new key at capacity without touching an existing UNSETTLED entry', async () => {
     // A run() that never settles, standing in for a submission still
     // genuinely in flight when a load spike fills the store to capacity.
     const neverResolve = () => new Promise<string>(() => {});
@@ -158,35 +172,64 @@ describe('reserveIdempotentSubmission at capacity (MAX_ENTRIES=200) — eviction
     }
 
     // A 201st, distinct key while all 200 are still pending — this pushes
-    // past MAX_ENTRIES and would normally trigger an eviction.
+    // past MAX_ENTRIES. Evicting the oldest (key-0) to make room would let
+    // a lost-response retry for it start a genuinely concurrent second
+    // submission; rejecting the new key outright is the safe outcome.
     const freshRun = vi.fn().mockResolvedValue('job-201');
-    const result = await reserveIdempotentSubmission('capacity-unsettled-key-200', 'fp-200', freshRun);
-    expect(result).toBe('job-201');
-    expect(freshRun).toHaveBeenCalledTimes(1);
+    await expect(reserveIdempotentSubmission('capacity-unsettled-key-200', 'fp-200', freshRun)).rejects.toThrow(
+      IDEMPOTENCY_STORE_AT_CAPACITY_MESSAGE,
+    );
+    expect(freshRun).not.toHaveBeenCalled();
 
-    // If eviction had removed the oldest (key-0) to make room, this would
-    // see an empty slot and invoke retryRun, and rejoined would be a
-    // different promise than the original. Neither may happen — key-0's
-    // run() is still executing, so it must still be reserved.
+    // key-0 must still be exactly the same in-flight reservation — not
+    // evicted, not re-run.
     const retryRun = vi.fn().mockResolvedValue('should-not-run');
     const rejoined = reserveIdempotentSubmission('capacity-unsettled-key-0', 'fp-0', retryRun);
     expect(retryRun).not.toHaveBeenCalled();
     expect(rejoined).toBe(firstPromise);
   });
 
-  it('does evict a SETTLED entry to make room at capacity (baseline — the cap still works under normal conditions)', async () => {
+  it('rejects a new key at capacity without touching an existing SETTLED (but not yet expired) entry (regression)', async () => {
+    // Regression target: an earlier version of this store evicted the
+    // oldest SETTLED entry to make room, regardless of how much of its TTL
+    // remained. A retry for that evicted key — reconciling a successful
+    // job it never got a response for, or an ambiguous failure still
+    // within its extended window — would then find no reservation at all
+    // and silently start a genuinely new, separately billed submission.
     for (let i = 0; i < 200; i++) {
       await reserveIdempotentSubmission(`capacity-settled-key-${i}`, `fp-${i}`, () => Promise.resolve(`job-${i}`));
     }
     const freshRun = vi.fn().mockResolvedValue('job-201-settled');
-    await reserveIdempotentSubmission('capacity-settled-key-200', 'fp-200', freshRun);
-    expect(freshRun).toHaveBeenCalledTimes(1);
+    await expect(reserveIdempotentSubmission('capacity-settled-key-200', 'fp-200', freshRun)).rejects.toThrow(
+      IDEMPOTENCY_STORE_AT_CAPACITY_MESSAGE,
+    );
+    expect(freshRun).not.toHaveBeenCalled();
 
-    // The oldest settled entry should have been evicted to make room —
-    // reserving the same key again now runs a genuinely new execution.
+    // key-0's settled reservation must still reconcile a retry to its
+    // ORIGINAL job — not have been evicted and silently re-run.
     const retryRun = vi.fn().mockResolvedValue('job-0-rerun');
     const result = await reserveIdempotentSubmission('capacity-settled-key-0', 'fp-0', retryRun);
-    expect(retryRun).toHaveBeenCalledTimes(1);
-    expect(result).toBe('job-0-rerun');
+    expect(retryRun).not.toHaveBeenCalled();
+    expect(result).toBe('job-0');
+  });
+
+  it('is not a permanent lockout — a new key succeeds again once genuinely expired entries free up room', async () => {
+    vi.useFakeTimers();
+    try {
+      for (let i = 0; i < 200; i++) {
+        await reserveIdempotentSubmission(`capacity-expiring-key-${i}`, `fp-${i}`, () => Promise.resolve(`job-${i}`));
+      }
+      // Past the ordinary TTL_MS (10 min) — every one of those 200 entries
+      // is now genuinely expired, so prune() (run at the top of the next
+      // call) removes them before the capacity check even runs.
+      vi.advanceTimersByTime(11 * 60_000);
+
+      const freshRun = vi.fn().mockResolvedValue('job-after-expiry');
+      const result = await reserveIdempotentSubmission('capacity-after-expiry-key', 'fp-fresh', freshRun);
+      expect(result).toBe('job-after-expiry');
+      expect(freshRun).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

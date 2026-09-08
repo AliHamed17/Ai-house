@@ -124,6 +124,22 @@ describe('collision resolution', () => {
     expect(builtSouth.collisionSolidSpans).toHaveLength(2);
   });
 
+  it('cuts both bathroom doors into hs_south after its z-position moved (regression)', () => {
+    // hs_south moved from z=4.0 to z=4.3 (see the comment on it in
+    // house.ts), but door_hallsouth_bathmain/bathensuite were left at their
+    // original z=4.0 — findOpeningsForWall only cuts an opening into a wall
+    // it projects within EPS (0.05m) of, so both doors silently stopped
+    // being cut at all, leaving a fully solid, collidable wall across both
+    // bathroom entrances.
+    const hallSouth = getRoom('hall_south')!;
+    const wallSpec = hallSouth.walls.find((w) => w.id === 'hs_south')!;
+    const built = buildWall(wallSpec, hallSouth, houseModel.openings);
+    expect(built.voids).toHaveLength(2);
+    expect(built.voids.map((v) => v.openingId).sort()).toEqual(['door_hallsouth_bathensuite', 'door_hallsouth_bathmain'].sort());
+    expect(built.doorSpans).toHaveLength(2);
+    expect(built.collisionSolidSpans).toHaveLength(3); // solid before, between, and after the two doorway gaps
+  });
+
   it('pushes the player out of a structural column instead of letting them walk through it (regression)', () => {
     const column = houseModel.structuralFeatures.find((f) => f.id === 'column_living')!;
     const playerRadius = 0.28;

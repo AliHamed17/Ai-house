@@ -19,14 +19,6 @@ interface IdempotencyEntry {
   createdAt: number;
   ttlMs: number;
   fingerprint: string;
-  // Whether run() has settled (succeeded or failed, ambiguously or not) —
-  // distinct from ttlMs/createdAt, which govern how long a SETTLED entry
-  // stays around for retry-reconciliation. This instead guards eviction: an
-  // entry whose run() is STILL executing must never be evicted to make room
-  // for a new key, or a retry that arrives after the eviction would start a
-  // genuinely concurrent second invocation of run() — exactly the duplicate
-  // idempotency exists to prevent, just triggered by capacity instead of TTL.
-  settled: boolean;
 }
 
 // idempotencyKey is entirely client-supplied with no enforced format or
@@ -41,6 +33,18 @@ export const IDEMPOTENCY_KEY_MISMATCH_MESSAGE = 'This idempotencyKey was already
 
 export function isIdempotencyKeyMismatchError(error: unknown): boolean {
   return error instanceof Error && error.message === IDEMPOTENCY_KEY_MISMATCH_MESSAGE;
+}
+
+// Every entry still in the store after prune() (see reserveIdempotentSubmission
+// below) is, by definition, not yet expired — so at capacity there is no
+// entry that can be evicted without risking the exact duplicate-billing
+// failure this whole store exists to prevent (see that function's own doc
+// comment). A caller sees this as an ordinary, definite (never billed)
+// failure — nothing to reconcile, same as any other rejected submission.
+export const IDEMPOTENCY_STORE_AT_CAPACITY_MESSAGE = 'Too many generations are being tracked right now. Please try again in a moment.';
+
+export function isIdempotencyStoreAtCapacityError(error: unknown): boolean {
+  return error instanceof Error && error.message === IDEMPOTENCY_STORE_AT_CAPACITY_MESSAGE;
 }
 
 // AIStudioPanel.tsx's client-side RECOVERY_MAX_AGE_MS.submissionOrdinary is
@@ -67,6 +71,15 @@ const TTL_MS = 10 * 60_000;
 const AMBIGUOUS_TTL_MS = 60 * 60_000;
 const MAX_ENTRIES = 200;
 const store = new Map<string, IdempotencyEntry>();
+
+// This module-level store otherwise persists for the life of the process (or
+// the test file, since tests share one module instance) — exposed only so a
+// test exercising MAX_ENTRIES capacity behavior can start from a clean slate
+// instead of being at the mercy of whatever earlier tests in the same file
+// already left behind.
+export function _clearStoreForTests(): void {
+  store.clear();
+}
 
 function prune(): void {
   const now = Date.now();
@@ -112,12 +125,18 @@ function prune(): void {
  * is rejected with IDEMPOTENCY_KEY_MISMATCH_MESSAGE rather than silently
  * handed the wrong caller's job or allowed to bypass the dedupe entirely.
  *
- * At MAX_ENTRIES capacity, only an already-SETTLED entry is evicted to make
- * room for a new key — never one whose run() is still executing. Evicting
- * an in-flight entry under a load spike would let a lost-response retry for
- * that same key start a genuinely concurrent second submission the instant
- * after eviction, which is the exact failure mode this whole mechanism
- * exists to prevent; a temporary over-capacity store is the safer outcome.
+ * At MAX_ENTRIES capacity, a genuinely new key is rejected outright rather
+ * than evicting an existing entry to make room. Every entry remaining after
+ * prune() (above) is, by construction, not yet expired — so there is no
+ * entry left that can be evicted without risk: an in-flight one would let a
+ * lost-response retry start a genuinely concurrent second submission the
+ * instant after eviction, and a settled-but-unexpired one (a success, or an
+ * ambiguous failure still within its extended AMBIGUOUS_TTL_MS window) would
+ * strand a legitimate retry with nothing to reconcile against, silently
+ * starting a genuinely new, separately billed one instead — the same
+ * duplicate-billing failure this whole mechanism exists to prevent, just
+ * triggered by capacity instead of TTL. A temporarily-at-capacity store
+ * (rather than evicting anything) is the safer outcome either way.
  *
  * With no key supplied (an older client), every call runs independently.
  */
@@ -138,36 +157,18 @@ export function reserveIdempotentSubmission(
     return existing.promise;
   }
 
-  while (store.size >= MAX_ENTRIES) {
-    let evictedKey: string | undefined;
-    for (const [candidateKey, candidateEntry] of store) {
-      if (candidateEntry.settled) {
-        evictedKey = candidateKey;
-        break;
-      }
-    }
-    // Every entry is still in flight (an extreme load spike) — leave the
-    // store temporarily over its soft cap rather than evict one of them;
-    // evicting an in-flight entry to make room is exactly what would let a
-    // lost-response retry start a genuinely concurrent second submission.
-    if (evictedKey === undefined) break;
-    store.delete(evictedKey);
+  if (store.size >= MAX_ENTRIES) {
+    return Promise.reject(new Error(IDEMPOTENCY_STORE_AT_CAPACITY_MESSAGE));
   }
 
   const promise = run();
-  promise.then(
-    () => {
-      const current = store.get(key);
-      if (current && current.promise === promise) current.settled = true;
-    },
-    (error: unknown) => {
-      if (options?.isAmbiguousFailure?.(error)) {
-        store.set(key, { promise, createdAt: Date.now(), ttlMs: AMBIGUOUS_TTL_MS, fingerprint, settled: true });
-      } else {
-        store.delete(key);
-      }
-    },
-  );
-  store.set(key, { promise, createdAt: Date.now(), ttlMs: TTL_MS, fingerprint, settled: false });
+  promise.catch((error: unknown) => {
+    if (options?.isAmbiguousFailure?.(error)) {
+      store.set(key, { promise, createdAt: Date.now(), ttlMs: AMBIGUOUS_TTL_MS, fingerprint });
+    } else {
+      store.delete(key);
+    }
+  });
+  store.set(key, { promise, createdAt: Date.now(), ttlMs: TTL_MS, fingerprint });
   return promise;
 }

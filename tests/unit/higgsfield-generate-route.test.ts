@@ -20,6 +20,7 @@ describe('POST /api/higgsfield/generate (server-side live-source enforcement)', 
   it('rejects a static concept-image path as the source for a LIVE submission', async () => {
     process.env.HF_CREDENTIALS = 'test-id:test-secret';
     process.env.AI_ALLOW_LIVE = 'true';
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     vi.resetModules();
     const { POST } = await import('@/app/api/higgsfield/generate/route');
     const res = await POST(makeRequest({ roomId: 'living', sourceAssetPath: '/generated/concepts/living.svg', liveRunConfirmed: true }));
@@ -31,6 +32,7 @@ describe('POST /api/higgsfield/generate (server-side live-source enforcement)', 
   it('rejects a static evidence-frame path as the source for a LIVE submission', async () => {
     process.env.HF_CREDENTIALS = 'test-id:test-secret';
     process.env.AI_ALLOW_LIVE = 'true';
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     vi.resetModules();
     const { POST } = await import('@/app/api/higgsfield/generate/route');
     const res = await POST(
@@ -42,6 +44,7 @@ describe('POST /api/higgsfield/generate (server-side live-source enforcement)', 
   it('lets a stored-result-shaped path through this check for a LIVE submission', async () => {
     process.env.HF_CREDENTIALS = 'test-id:test-secret';
     process.env.AI_ALLOW_LIVE = 'true';
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     vi.resetModules();
     const { POST } = await import('@/app/api/higgsfield/generate/route');
     // No real Higgsfield credentials/network exist in this test, and this id

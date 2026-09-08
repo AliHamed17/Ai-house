@@ -10,7 +10,16 @@ const WINDOW_MS = 60_000;
 const MAX_REQUESTS_PER_WINDOW = 12;
 const hitsByKey = new Map<string, number[]>();
 
-export function checkRateLimit(key: string): { allowed: boolean; retryAfterMs: number } {
+// Status polling during an active job runs on its own ~1-1.5s client cadence
+// (see AIStudioPanel's poll loop) — far more frequent than a generate
+// submission — so reusing the 12-per-window generate limit would throttle a
+// single legitimate in-progress job within seconds. The status route also
+// keys by job id rather than by caller (see its own comment), so this ceiling
+// bounds how many times any ONE job id can be looked up per window, not how
+// many distinct jobs a caller can start.
+export const STATUS_MAX_REQUESTS_PER_WINDOW = 90;
+
+export function checkRateLimit(key: string, maxRequests: number = MAX_REQUESTS_PER_WINDOW): { allowed: boolean; retryAfterMs: number } {
   const now = Date.now();
   // Sweeps every key, not just the one being checked — the filter below only
   // ever prunes the CURRENT key's own timestamps, so a distinct client key
@@ -22,7 +31,7 @@ export function checkRateLimit(key: string): { allowed: boolean; retryAfterMs: n
   }
 
   const recent = (hitsByKey.get(key) ?? []).filter((t) => now - t < WINDOW_MS);
-  if (recent.length >= MAX_REQUESTS_PER_WINDOW) {
+  if (recent.length >= maxRequests) {
     return { allowed: false, retryAfterMs: WINDOW_MS - (now - recent[0]) };
   }
   recent.push(now);

@@ -1,5 +1,35 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { decodeJobId, encodeJobId, type JobIdPayload } from '@/lib/ai/jobId';
+
+const ORIGINAL_ENV = { ...process.env };
+
+describe('hasStableJobIdSigningSecret (gates whether live generation may proceed)', () => {
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+    vi.resetModules();
+  });
+
+  it('is false when JOB_ID_SIGNING_SECRET is unset', async () => {
+    delete process.env.JOB_ID_SIGNING_SECRET;
+    vi.resetModules();
+    const { hasStableJobIdSigningSecret } = await import('@/lib/ai/jobId');
+    expect(hasStableJobIdSigningSecret()).toBe(false);
+  });
+
+  it('is false when JOB_ID_SIGNING_SECRET is set to an empty string', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = '';
+    vi.resetModules();
+    const { hasStableJobIdSigningSecret } = await import('@/lib/ai/jobId');
+    expect(hasStableJobIdSigningSecret()).toBe(false);
+  });
+
+  it('is true once JOB_ID_SIGNING_SECRET is configured', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'a-real-deployment-secret';
+    vi.resetModules();
+    const { hasStableJobIdSigningSecret } = await import('@/lib/ai/jobId');
+    expect(hasStableJobIdSigningSecret()).toBe(true);
+  });
+});
 
 // Job ids are the one thing an unauthenticated caller fully controls on a
 // later request (/api/generation/status/[id]), and this app keeps no

@@ -26,6 +26,16 @@ describe('checkRateLimit (in-memory sliding-window limiter)', () => {
     }
   });
 
+  it('accepts a custom ceiling per key, defaulting to 12 when omitted (regression)', () => {
+    const defaultKey = `default-ceiling-${Math.random()}`;
+    for (let i = 0; i < 12; i++) expect(checkRateLimit(defaultKey).allowed).toBe(true);
+    expect(checkRateLimit(defaultKey).allowed).toBe(false);
+
+    const customKey = `custom-ceiling-${Math.random()}`;
+    for (let i = 0; i < 20; i++) expect(checkRateLimit(customKey, 20).allowed).toBe(true);
+    expect(checkRateLimit(customKey, 20).allowed).toBe(false);
+  });
+
   it('does not grow without bound as distinct client keys age out (regression)', () => {
     vi.useFakeTimers();
     try {

@@ -89,11 +89,13 @@ describe('nanoBananaProvider.submit source-read failures (distinguishes expired-
 
 describe('POST /api/nano-banana/generate returns a 410 (never the generic 502) for an expired approved source', () => {
   afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
     vi.doUnmock('@/lib/ai/registry.server');
     vi.resetModules();
   });
 
   it('maps SOURCE_EXPIRED_MESSAGE to 410, and a retry with the same idempotencyKey calls submit again (not ambiguous, unlike a timeout)', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     const submitMock = vi
       .fn()
       .mockRejectedValueOnce(new Error('The approved source image has expired from the server cache. Please regenerate and re-approve it, then try again.'))
@@ -135,11 +137,13 @@ describe('POST /api/nano-banana/generate returns a 410 (never the generic 502) f
 
 describe('POST /api/higgsfield/generate returns a 410 (never the generic 502) for an expired approved source', () => {
   afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
     vi.doUnmock('@/lib/ai/registry.server');
     vi.resetModules();
   });
 
   it('maps SOURCE_EXPIRED_MESSAGE to 410, and a retry with the same idempotencyKey calls submit again (not ambiguous, unlike isSubmitTimeout)', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     const submitMock = vi
       .fn()
       .mockRejectedValueOnce(new Error('The approved source image has expired from the server cache. Please regenerate and re-approve it, then try again.'))

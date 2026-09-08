@@ -57,6 +57,23 @@ export interface JobIdPayload {
 // instances.
 const SIGNING_SECRET = process.env.JOB_ID_SIGNING_SECRET || randomBytes(32).toString('hex');
 
+// The random per-process fallback above is fine for demo mode (a job's
+// validity window — submit then poll, within one running instance — already
+// matches its lifetime), but NOT for a live, billed job: a status request
+// landing on a different serverless instance, or arriving after a restart,
+// would reject that job's otherwise-legitimate id with a different fallback
+// secret in play, permanently losing the only encoded request id needed to
+// retrieve a paid result. Callers that gate live submissions must check this
+// first and refuse to proceed without a configured secret — mirroring the
+// AI_ALLOW_LIVE / PUBLIC_ASSET_ORIGIN pattern of failing closed on a missing
+// deployer config rather than risking money on an unstated assumption.
+export function hasStableJobIdSigningSecret(): boolean {
+  return Boolean(process.env.JOB_ID_SIGNING_SECRET);
+}
+
+export const JOB_ID_SIGNING_SECRET_REQUIRED_MESSAGE =
+  'Live generation requires a stable, deployment-wide JOB_ID_SIGNING_SECRET so a paid job can still be verified after a restart or on a different instance. Please try again later.';
+
 function sign(payloadB64: string): string {
   return createHmac('sha256', SIGNING_SECRET).update(payloadB64).digest('base64url');
 }

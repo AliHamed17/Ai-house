@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { LIVE_RUN_NOT_CONFIRMED_MESSAGE } from '@/lib/ai/registry.server';
 
+const ORIGINAL_ENV = { ...process.env };
+
 function makeRequest(url: string, body: unknown): NextRequest {
   return new NextRequest(url, {
     method: 'POST',
@@ -19,11 +21,13 @@ function makeRequest(url: string, body: unknown): NextRequest {
 // bill a real provider (see registry.server.ts).
 describe('POST /api/nano-banana/generate independently re-verifies live-run confirmation before billing (regression)', () => {
   afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
     vi.doUnmock('@/lib/ai/registry.server');
     vi.resetModules();
   });
 
   it('returns 428 (never calling submit) when demoMode is false and liveRunConfirmed is missing, then succeeds once confirmed with the SAME idempotencyKey', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     const submitMock = vi.fn().mockResolvedValue({ jobId: 'job-live-confirmed' });
     vi.doMock('@/lib/ai/registry.server', () => ({
       resolveProviderForSubmit: () => ({
@@ -74,11 +78,13 @@ describe('POST /api/nano-banana/generate independently re-verifies live-run conf
 
 describe('POST /api/higgsfield/generate independently re-verifies live-run confirmation before billing (regression)', () => {
   afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
     vi.doUnmock('@/lib/ai/registry.server');
     vi.resetModules();
   });
 
   it('returns 428 (never calling submit) when demoMode is false and liveRunConfirmed is missing, then succeeds once confirmed with the SAME idempotencyKey', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     const submitMock = vi.fn().mockResolvedValue({ jobId: 'job-hf-live-confirmed' });
     vi.doMock('@/lib/ai/registry.server', () => ({
       resolveProviderForSubmit: () => ({

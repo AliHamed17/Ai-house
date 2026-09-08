@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
+const ORIGINAL_ENV = { ...process.env };
+
 function makeRequest(body: unknown): NextRequest {
   return new NextRequest('http://localhost:3000/api/higgsfield/generate', {
     method: 'POST',
@@ -21,11 +23,13 @@ describe('isSubmitTimeout (distinguishes an ambiguous, possibly-billed timeout f
 
 describe('POST /api/higgsfield/generate (ambiguous-timeout handling)', () => {
   afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
     vi.doUnmock('@/lib/ai/registry.server');
     vi.resetModules();
   });
 
   it('returns a distinct 504 warning (never the generic failure) when submit times out', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     // The Higgsfield SDK call cannot be cancelled, so this specific error
     // means the job may have already been accepted and billed server-side
     // even though our client-side wait gave up — the route must not tell
@@ -59,6 +63,7 @@ describe('POST /api/higgsfield/generate (ambiguous-timeout handling)', () => {
     // exact failure must not be allowed to start a second, separately
     // billed submission — even though the first one "failed" from this
     // route's point of view.
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     const submitMock = vi.fn().mockRejectedValue(new Error('Higgsfield submission timed out after 30s'));
     vi.doMock('@/lib/ai/registry.server', () => ({
       resolveProviderForSubmit: () => ({
@@ -85,6 +90,7 @@ describe('POST /api/higgsfield/generate (ambiguous-timeout handling)', () => {
   });
 
   it('still returns the generic 502 failure for a non-timeout submit error', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     vi.doMock('@/lib/ai/registry.server', () => ({
       resolveProviderForSubmit: () => ({
         demoMode: false,

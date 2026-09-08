@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { LIVE_RUN_NOT_CONFIRMED_MESSAGE, resolveProviderForSubmit } from '@/lib/ai/registry.server';
+import { hasStableJobIdSigningSecret, JOB_ID_SIGNING_SECRET_REQUIRED_MESSAGE } from '@/lib/ai/jobId';
 import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.server';
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
 import { buildNanoBananaEditPrompt, buildNanoBananaPrompt } from '@/data/roomPrompts';
@@ -31,6 +32,10 @@ export async function POST(request: NextRequest) {
   }
 
   const { provider, demoMode } = resolveProviderForSubmit('nano-banana');
+
+  if (!demoMode && !hasStableJobIdSigningSecret()) {
+    return NextResponse.json({ error: JOB_ID_SIGNING_SECRET_REQUIRED_MESSAGE }, { status: 500 });
+  }
 
   if (!demoMode && !validated.data.liveRunConfirmed) {
     return NextResponse.json({ error: LIVE_RUN_NOT_CONFIRMED_MESSAGE }, { status: 428 });

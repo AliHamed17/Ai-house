@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
+const ORIGINAL_ENV = { ...process.env };
+
 function makeRequest(url: string, body: unknown): NextRequest {
   return new NextRequest(url, {
     method: 'POST',
@@ -11,11 +13,13 @@ function makeRequest(url: string, body: unknown): NextRequest {
 
 describe('idempotency reconciliation on the generation routes (a lost response must not risk a duplicate billed job)', () => {
   afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
     vi.doUnmock('@/lib/ai/registry.server');
     vi.resetModules();
   });
 
   it('POST /api/nano-banana/generate: retrying with the same idempotencyKey never calls provider.submit twice', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     const submitMock = vi.fn().mockResolvedValue({ jobId: 'job-nb-1' });
     vi.doMock('@/lib/ai/registry.server', () => ({
       resolveProviderForSubmit: () => ({
@@ -44,6 +48,7 @@ describe('idempotency reconciliation on the generation routes (a lost response m
   });
 
   it('POST /api/higgsfield/generate: retrying with the same idempotencyKey never calls provider.submit twice', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     const submitMock = vi.fn().mockResolvedValue({ jobId: 'job-hf-1' });
     vi.doMock('@/lib/ai/registry.server', () => ({
       resolveProviderForSubmit: () => ({
@@ -77,6 +82,7 @@ describe('idempotency reconciliation on the generation routes (a lost response m
   });
 
   it('POST /api/nano-banana/generate: two concurrent requests with the same idempotencyKey never both call provider.submit (regression)', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     // Simulates a client retrying immediately — before the FIRST request's
     // provider.submit() has even resolved — which is exactly the window a
     // check-then-record (rather than reserve-before-await) implementation
@@ -118,6 +124,7 @@ describe('idempotency reconciliation on the generation routes (a lost response m
   });
 
   it('two distinct idempotency keys are never reconciled together', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     const submitMock = vi.fn().mockResolvedValueOnce({ jobId: 'job-x' }).mockResolvedValueOnce({ jobId: 'job-y' });
     vi.doMock('@/lib/ai/registry.server', () => ({
       resolveProviderForSubmit: () => ({
@@ -147,6 +154,7 @@ describe('idempotency reconciliation on the generation routes (a lost response m
   });
 
   it('POST /api/nano-banana/generate: reusing the same idempotencyKey for a DIFFERENT room is rejected (409), never returning the first room’s job (regression)', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     const submitMock = vi.fn().mockResolvedValueOnce({ jobId: 'job-room-living' }).mockResolvedValueOnce({ jobId: 'job-should-not-run' });
     vi.doMock('@/lib/ai/registry.server', () => ({
       resolveProviderForSubmit: () => ({
@@ -181,6 +189,7 @@ describe('idempotency reconciliation on the generation routes (a lost response m
   });
 
   it('POST /api/higgsfield/generate: reusing the same idempotencyKey for a DIFFERENT source is rejected (409) (regression)', async () => {
+    process.env.JOB_ID_SIGNING_SECRET = 'test-signing-secret';
     const submitMock = vi.fn().mockResolvedValueOnce({ jobId: 'job-source-a' }).mockResolvedValueOnce({ jobId: 'job-should-not-run' });
     vi.doMock('@/lib/ai/registry.server', () => ({
       resolveProviderForSubmit: () => ({

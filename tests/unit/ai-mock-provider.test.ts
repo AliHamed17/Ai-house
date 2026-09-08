@@ -126,6 +126,36 @@ describe('mock generation provider', () => {
     vi.useRealTimers();
   });
 
+  it('keeps a source alive through job completion even if it had only seconds left on its TTL at submit time (regression)', async () => {
+    // A source with almost no TTL left still legitimately EXISTS at the
+    // instant submit() checks it, but the mock job itself takes up to
+    // IN_PROGRESS_UNTIL_MS (2.6s) before status() reports "completed" — a
+    // plain existence check at submit time does not survive that gap, so
+    // the source could genuinely expire in between, and status() would
+    // still bake the (by-then-404) path into a job it reports as
+    // successful. submit() must refresh the source's TTL, not just check it.
+    vi.useFakeTimers();
+    const start = Date.now();
+    const storedId = putStoredResult('image/png', 'aGVsbG8=');
+    const storedPath = `${RESULT_URL_PREFIX}${storedId}`;
+    // 1 second short of resultStore's 10-minute TTL — still valid now, but
+    // would expire well before the mock job's own 2.6s completion delay
+    // elapses, if submit() only checked existence instead of refreshing it.
+    vi.setSystemTime(start + 9 * 60_000 + 59_000);
+    const { jobId } = await mockProvider.submit({
+      provider: 'higgsfield',
+      outputType: 'video',
+      roomId: 'living',
+      styleVariant: 'warm-oak',
+      prompt: 'p',
+      sourceAssetPath: storedPath,
+    });
+    vi.setSystemTime(start + 9 * 60_000 + 59_000 + 3000);
+    const completed = await mockProvider.status(jobId);
+    expect(completed.resultUrl).toBe(storedPath);
+    vi.useRealTimers();
+  });
+
   it('does not reuse a stored source for an IMAGE job (the placeholder concept art is the intended demo result there)', async () => {
     vi.useFakeTimers();
     const start = Date.now();

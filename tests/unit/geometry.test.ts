@@ -140,6 +140,30 @@ describe('collision resolution', () => {
     expect(built.collisionSolidSpans).toHaveLength(3); // solid before, between, and after the two doorway gaps
   });
 
+  it('does not leave bathroom_main/bathroom_ensuite floors overlapping hall_south\'s after hs_south moved (regression)', () => {
+    // hs_south (and the two bathroom doors) moved from z=4.0 to z=4.3, but
+    // these two rooms' own floor polygons were left starting at the old
+    // z=4.0 — since hall_south's polygon already covers the full z<4.3
+    // strip along this boundary (see its own notch comment), the 0.3m
+    // sliver z∈[4.0,4.3) was claimed by BOTH rooms' coplanar floors at
+    // once, producing depth-fighting / an incorrect wet-floor band.
+    const hallSouth = getRoom('hall_south')!;
+    const bathMain = getRoom('bathroom_main')!;
+    const bathEnsuite = getRoom('bathroom_ensuite')!;
+
+    const inBathMainSliver = { x: 7.5, z: 4.15 };
+    expect(pointInPolygon(inBathMainSliver, bathMain.floorPolygon)).toBe(false);
+    expect(pointInPolygon(inBathMainSliver, hallSouth.floorPolygon)).toBe(true);
+
+    const inBathEnsuiteSliver = { x: 9.3, z: 4.15 };
+    expect(pointInPolygon(inBathEnsuiteSliver, bathEnsuite.floorPolygon)).toBe(false);
+    expect(pointInPolygon(inBathEnsuiteSliver, hallSouth.floorPolygon)).toBe(true);
+
+    // Baseline: comfortably inside each bathroom's own (now-shifted) floor.
+    expect(pointInPolygon({ x: 7.5, z: 5.0 }, bathMain.floorPolygon)).toBe(true);
+    expect(pointInPolygon({ x: 9.3, z: 5.0 }, bathEnsuite.floorPolygon)).toBe(true);
+  });
+
   it('pushes the player out of a structural column instead of letting them walk through it (regression)', () => {
     const column = houseModel.structuralFeatures.find((f) => f.id === 'column_living')!;
     const playerRadius = 0.28;

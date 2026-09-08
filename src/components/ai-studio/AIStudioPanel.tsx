@@ -222,20 +222,21 @@ export function AIStudioPanel() {
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
   }, []);
 
-  // Restores a paid-job recovery point left behind by a previous page load
-  // (see writeRecoveryEntry) into the same recoverableJobId/recoverableSubmission
-  // state a same-session outage would have produced — reusing the existing
-  // "Resume checking status" / "Resume submission" banners rather than
-  // silently resuming anything itself. roomId/outputType are restored
-  // alongside it so the locked selectors reflect the room the outstanding
-  // job actually belongs to, not the default the component mounted with.
-  useEffect(() => {
+  // Restores a paid-job recovery point left behind by a previous page load,
+  // OR by a genuinely different tab sharing this origin's localStorage that
+  // has since written its own entry (see writeRecoveryEntry) — into the same
+  // recoverableJobId/recoverableSubmission state a same-session outage would
+  // have produced, reusing the existing "Resume checking status" / "Resume
+  // submission" banners rather than silently resuming anything itself. Only
+  // adopts an entry while THIS tab has none of its own tracked yet — never
+  // overrides an in-flight local one with a different tab's, which could
+  // otherwise strand this tab's own submission mid-flight with no way to
+  // reconcile it. roomId/outputType are restored alongside it so the locked
+  // selectors reflect the room the outstanding job actually belongs to, not
+  // whatever this tab happened to have selected.
+  function adoptRecoveryEntry() {
     const entry = readRecoveryEntry();
     if (!entry) return;
-    // Restoring from an external system (localStorage) on mount, not
-    // deriving from other React state — see MobileControls.tsx for the same
-    // sanctioned pattern and rule exception.
-    /* eslint-disable react-hooks/set-state-in-effect */
     setRoomId(entry.roomId);
     setOutputType(entry.outputType);
     if (entry.kind === 'job') {
@@ -243,8 +244,34 @@ export function AIStudioPanel() {
     } else {
       setRecoverableSubmission({ endpoint: entry.endpoint, body: entry.body });
     }
+  }
+
+  useEffect(() => {
+    // Restoring from an external system (localStorage) on mount, not
+    // deriving from other React state — see MobileControls.tsx for the same
+    // sanctioned pattern and rule exception.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    adoptRecoveryEntry();
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
+
+  // The mount effect above only ever runs once, so a tab that was ALREADY
+  // open before a genuinely different tab started its own generation would
+  // otherwise never learn that one now exists — hasUnresolvedJob would stay
+  // stuck at false, letting this tab start a second, separately billed
+  // submission for the same default room (regression). The browser's own
+  // `storage` event fires in every OTHER tab (never the one that made the
+  // write) whenever localStorage changes, which is exactly the live signal
+  // needed to catch up.
+  useEffect(() => {
+    function handleStorageEvent(event: StorageEvent) {
+      if (event.key !== null && event.key !== RECOVERY_STORAGE_KEY) return;
+      if (recoverableJobId !== null || recoverableSubmission !== null) return;
+      adoptRecoveryEntry();
+    }
+    window.addEventListener('storage', handleStorageEvent);
+    return () => window.removeEventListener('storage', handleStorageEvent);
+  }, [recoverableJobId, recoverableSubmission]);
 
   // Sync which providers are live (billed) vs. demo, so the UI can require
   // confirmation before a paid run instead of only learning the mode after

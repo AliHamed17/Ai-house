@@ -1,7 +1,7 @@
 import 'server-only';
 import type { GenerationInput, GenerationJob, GenerationStatus, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
-import { getStoredResult, resultIdFromPath } from './resultStore.server';
+import { resultIdFromPath, touchStoredResult } from './resultStore.server';
 
 const QUEUED_UNTIL_MS = 900;
 const IN_PROGRESS_UNTIL_MS = 2600;
@@ -26,9 +26,17 @@ export const mockProvider: MediaGenerationProvider = {
     // could have already fallen out of the TTL-bounded store by the time
     // this (demo, unbilled) submit runs, which would otherwise bake a
     // future-404 URL into a job that later reports "completed".
+    //
+    // touchStoredResult (not a plain existence check) also refreshes the
+    // source's TTL clock to a full TTL_MS from this exact moment — a source
+    // with only seconds left could otherwise still pass this check and then
+    // genuinely expire before status() reports "completed" (up to
+    // IN_PROGRESS_UNTIL_MS, 2.6s, later) and bakes this same path into the
+    // resultUrl regardless, same race as higgsfield.server's
+    // assertSourceStillAvailable closes for the live provider.
     const storedSourceId =
       input.outputType === 'video' && input.sourceAssetPath ? resultIdFromPath(input.sourceAssetPath) : undefined;
-    const mockSourceResultPath = storedSourceId && getStoredResult(storedSourceId) ? input.sourceAssetPath : undefined;
+    const mockSourceResultPath = storedSourceId && touchStoredResult(storedSourceId) ? input.sourceAssetPath : undefined;
     const jobId = encodeJobId({
       provider: 'mock',
       roomId: input.roomId,

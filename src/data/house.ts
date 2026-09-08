@@ -387,11 +387,16 @@ const rooms: RoomDef[] = [
     dimensions: { widthM: 1.5, depthM: 2.35 },
     dimensionSource: 'plan label ~2.35 x 1.50 (m) per evidence brief interpretation',
     confidence: 'medium-high',
-    floorPolygon: [v(7.3, 4.0), v(8.8, 4.0), v(8.8, 6.35), v(7.3, 6.35)],
+    // North edge 4.0 -> 4.3, matching hs_south's own move (see its comment
+    // in hall_south) — the doors moved with it already, but this floor
+    // polygon (and bathmain_e below) did not, leaving a 0.3m strip where
+    // this room's floor and hall_south's now-larger one coplanar-overlapped
+    // (regression).
+    floorPolygon: [v(7.3, 4.3), v(8.8, 4.3), v(8.8, 6.35), v(7.3, 6.35)],
     walls: [
-      wall('bathmain_e', v(8.8, 4.0), v(8.8, 6.35), false),
+      wall('bathmain_e', v(8.8, 4.3), v(8.8, 6.35), false),
       wall('bathmain_s', v(8.8, 6.35), v(7.3, 6.35), true),
-      wall('bathmain_w', v(7.3, 6.35), v(7.3, 4.0), true),
+      wall('bathmain_w', v(7.3, 6.35), v(7.3, 4.3), true),
     ],
     ceilingHeightM: CEILING_HEIGHT_M,
     floorMaterialId: 'stone-wet',
@@ -414,9 +419,10 @@ const rooms: RoomDef[] = [
     dimensions: { widthM: 1.1, depthM: 1.5 },
     dimensionSource: 'assumption — adjacency-based; exact dimensions not legible on the supplied plan crop',
     confidence: 'medium',
-    floorPolygon: [v(8.8, 4.0), v(9.9, 4.0), v(9.9, 5.5), v(8.8, 5.5)],
+    // North edge 4.0 -> 4.3, same reasoning as bathroom_main above.
+    floorPolygon: [v(8.8, 4.3), v(9.9, 4.3), v(9.9, 5.5), v(8.8, 5.5)],
     walls: [
-      wall('bathensuite_e', v(9.9, 4.0), v(9.9, 5.5), false),
+      wall('bathensuite_e', v(9.9, 4.3), v(9.9, 5.5), false),
       wall('bathensuite_s', v(9.9, 5.5), v(8.8, 5.5), true),
     ],
     ceilingHeightM: CEILING_HEIGHT_M,

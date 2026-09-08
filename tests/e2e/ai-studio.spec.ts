@@ -411,62 +411,100 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
   });
 
-  test('two tabs each tracking their own in-flight submission do not clobber or destroy each other\'s recovery record (regression)', async ({ page, context }) => {
-    // Both tabs write to the SAME origin-wide localStorage key. Before entries
-    // were keyed by their own idempotencyKey, either tab's write — or either
-    // tab's terminal-state clear — could silently overwrite or destroy the
-    // OTHER tab's still-active record, so a reload of that other tab would
-    // lose its only recovery identifier and silently permit a duplicate,
-    // possibly duplicate-billed submission.
-    //
-    // Tab 2 mounts (and reads localStorage once, at mount) BEFORE tab 1 ever
-    // writes anything — otherwise tab 2's OWN mount-time restore would
-    // immediately inherit tab 1's entry as its own unresolved job, which is
-    // separate, CORRECT behavior (any outstanding possibly-billed job blocks
-    // a fresh submission everywhere, not only in its own tab) rather than the
-    // clobbering bug under test here.
-    const page2 = await context.newPage();
-    await page2.route('**/api/nano-banana/generate', (route) => route.abort());
-    await page2.goto('/#ai-studio');
+  test('two independently-tracked recovery entries do not clobber or destroy each other in storage (regression)', async ({ page }) => {
+    // Entries share one origin-wide localStorage key. Before they were keyed
+    // by their own generation's identity (a job's jobId, or a submission's
+    // idempotencyKey), either one's write — or either one's terminal-state
+    // clear — could silently overwrite or destroy the OTHER's still-active
+    // record. (With the live cross-tab sync this session also added, a
+    // SECOND tab normally can't even reach this state via its own Generate
+    // click anymore — see the "learns LIVE" test above — so this seeds two
+    // entries directly to exercise the storage layer's own keying in
+    // isolation, the same way it could still arise, e.g., from a genuinely
+    // concurrent write on a slow/throttled tab the live sync hasn't reached
+    // yet.)
+    await page.goto('/#ai-studio');
 
-    let tab1Mode: 'drop' | 'fail' = 'drop';
-    await page.route('**/api/nano-banana/generate', (route) => {
-      if (tab1Mode === 'drop') return route.abort();
-      return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) });
-    });
+    const olderEntry = {
+      kind: 'job',
+      jobId: 'untouched-sibling-job-id',
+      roomId: 'living',
+      outputType: 'image',
+      createdAt: Date.now() - 60_000,
+    };
+    const newerEntry = {
+      kind: 'submission',
+      ambiguous: false,
+      idempotencyKey: 'active-entry-key',
+      endpoint: '/api/nano-banana/generate',
+      body: { roomId: 'living', styleVariant: 'warm-oak', simulate: 'success', idempotencyKey: 'active-entry-key' },
+      roomId: 'living',
+      outputType: 'image',
+      createdAt: Date.now(),
+    };
+    // A one-time page.evaluate (not addInitScript, which would re-fire and
+    // resurrect this seed on the later reload below) writing both entries
+    // in one merged blob, matching the app's own keyed-collection shape.
+    await page.evaluate(
+      ({ older, newer }) => {
+        const asJob = older as { kind: string; jobId: string };
+        const asSubmission = newer as { kind: string; idempotencyKey: string };
+        const olderId = `job:${asJob.jobId}`;
+        const newerId = `submission:${asSubmission.idempotencyKey}`;
+        localStorage.setItem('ai-studio:unresolved-generation', JSON.stringify({ [olderId]: older, [newerId]: newer }));
+      },
+      { older: olderEntry, newer: newerEntry },
+    );
+
+    await page.route('**/api/nano-banana/generate', (route) =>
+      route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) }),
+    );
+
+    // Reload so the mount effect reads the seeded storage — it restores the
+    // newer (submission) entry as this tab's own tracked one.
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+
+    const storedBeforeResolve = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
+    expect(Object.keys(JSON.parse(storedBeforeResolve ?? '{}'))).toHaveLength(2);
+
+    // Resolving the tracked entry to a definite, terminal outcome must clear
+    // ONLY its own key.
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.getByText('boom')).toBeVisible({ timeout: 10_000 });
+
+    const storedAfterResolve = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
+    expect(Object.keys(JSON.parse(storedAfterResolve ?? '{}'))).toEqual(['job:untouched-sibling-job-id']);
+
+    // And the untouched sibling is genuinely usable, not just inert JSON
+    // left behind — a reload restores its own recovery banner.
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible();
+  });
+
+  test('a tab already open learns LIVE that another tab has an outstanding generation, and blocks its own Generate (regression)', async ({
+    page,
+    context,
+  }) => {
+    // The mount-time recovery restore only ever runs once — a tab that was
+    // ALREADY open before a genuinely different tab starts its own
+    // generation would otherwise never learn one now exists, leaving its
+    // Generate button wrongly enabled and free to start a second,
+    // separately billed submission for the same default room the instant
+    // it's clicked.
+    const page2 = await context.newPage();
+    await page2.route('**/api/nano-banana/generate', () => new Promise(() => {}));
+    await page2.goto('/#ai-studio');
+    await expect(page2.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+
+    await page.route('**/api/nano-banana/generate', (route) => route.abort());
     await page.goto('/#ai-studio');
     await page.getByRole('button', { name: /Generate concept image/i }).click();
     await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
 
-    // Tab 2, independently, starts its own submission — its in-memory state
-    // was never re-synced with tab 1's write above (that only happens on
-    // mount/reload), so its Generate button is still enabled.
-    await page2.getByRole('button', { name: /Generate concept image/i }).click();
-    await expect(page2.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
-
-    // Both tabs' entries must coexist in storage — neither write clobbered
-    // the other's key.
-    const storedAfterBothWrites = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
-    const parsedAfterBothWrites = JSON.parse(storedAfterBothWrites ?? '{}') as Record<string, unknown>;
-    expect(Object.keys(parsedAfterBothWrites)).toHaveLength(2);
-
-    // Tab 1 now reaches a definite, terminal outcome (via Resume — Generate
-    // itself stays disabled while its own submission is still unresolved)
-    // and clears ITS entry.
-    tab1Mode = 'fail';
-    await page.getByRole('button', { name: 'Resume submission' }).click();
-    await expect(page.getByText('boom')).toBeVisible({ timeout: 10_000 });
-
-    // Tab 2's entry must have survived tab 1's clear — still exactly one
-    // entry left in storage (tab 2's), not zero.
-    const storedAfterTab1Clears = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
-    const parsedAfterTab1Clears = JSON.parse(storedAfterTab1Clears ?? '{}') as Record<string, unknown>;
-    expect(Object.keys(parsedAfterTab1Clears)).toHaveLength(1);
-
-    // And reloading tab 2 still genuinely offers its own recovery banner —
-    // the record wasn't merely present as an untouched blob, it's usable.
-    await page2.reload();
-    await expect(page2.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+    // Tab 2, still on its original mount (never reloaded), must pick this up
+    // live via the browser's `storage` event and disable its own Generate.
+    await expect(page2.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
   });
 
   test('abandoning a recoverable job clears its recovery record and unlocks Generate (regression)', async ({ page }) => {

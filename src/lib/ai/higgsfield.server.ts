@@ -26,10 +26,14 @@ export function isSubmitTimeout(error: unknown): boolean {
   return error instanceof Error && error.message === SUBMIT_TIMEOUT_MESSAGE;
 }
 
-// Job ids are unsigned, so an attacker could forge one carrying an
-// arbitrary higgsfieldStatusUrl. status() attaches the server's Higgsfield
-// credentials to that request, so the URL MUST be pinned to a Higgsfield
-// origin or those credentials would be exfiltrated to an attacker's host.
+// status() attaches the server's Higgsfield credentials to a request built
+// from the job id's own encoded fields, so those fields must never be
+// trusted to name an arbitrary destination — job ids are signed (see
+// jobId.ts) specifically so a caller cannot forge one carrying an
+// attacker-chosen higgsfieldStatusUrl in the first place, and this host
+// allowlist (plus isCanonicalStatusUrl below, which also pins the exact
+// path) is the defense-in-depth layer for if that signature check were
+// ever somehow bypassed.
 const TRUSTED_HF_HOSTS = ['higgsfield.ai', 'platform.higgsfield.ai', 'cloud.higgsfield.ai'];
 
 export function isTrustedHiggsfieldUrl(candidate: string): boolean {
@@ -42,6 +46,34 @@ export function isTrustedHiggsfieldUrl(candidate: string): boolean {
   if (parsed.protocol !== 'https:') return false;
   const host = parsed.hostname.toLowerCase();
   return TRUSTED_HF_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+}
+
+/** Builds the same status URL shape Higgsfield's own subscribe response uses (see submit() below), from a request id this app itself holds. */
+export function canonicalStatusUrl(requestId: string): string {
+  return `https://platform.higgsfield.ai/requests/${encodeURIComponent(requestId)}/status`;
+}
+
+// A trusted HOST alone is not enough to let an encoded higgsfieldStatusUrl
+// through: even restricted to genuine Higgsfield domains, an arbitrary PATH
+// on that host is still an arbitrary credentialed request this server would
+// make on a caller's behalf — Higgsfield's API surface almost certainly
+// exposes more than just this one status-check shape, and none of it is
+// something an unauthenticated caller should be able to trigger for free
+// against this deployment's own credentials. Defense in depth alongside
+// jobId.ts's signature check (job ids are signed, so this should already be
+// unreachable with attacker-chosen fields) — requiring the URL's own
+// request-id path segment to match the job id's ALSO-signed
+// higgsfieldRequestId means the two fields can't be mixed into a
+// still-technically-trusted-host-but-wrong-path request either.
+export function isCanonicalStatusUrl(candidate: string, requestId: string): boolean {
+  if (!requestId || !isTrustedHiggsfieldUrl(candidate)) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return false;
+  }
+  return parsed.pathname === `/requests/${encodeURIComponent(requestId)}/status` && parsed.search === '' && parsed.hash === '';
 }
 
 // input.originUrl comes from the incoming request's own origin (see
@@ -229,13 +261,16 @@ export const higgsfieldProvider: MediaGenerationProvider = {
   async status(jobId: string): Promise<GenerationJob> {
     const payload = decodeJobId(jobId);
     const credentials = getCredentials();
-    // Only follow the encoded status URL when it is verifiably a Higgsfield
-    // origin; otherwise reconstruct it from the (path-encoded) request id so
-    // the credentialed request can never be pointed at an untrusted host.
+    const requestId = payload.higgsfieldRequestId ?? '';
+    // Only follow the encoded status URL when it is verifiably the exact
+    // canonical status-check shape for THIS job's own request id; otherwise
+    // reconstruct that same canonical URL directly. The credentialed
+    // request can then never be pointed at an untrusted host, nor at an
+    // arbitrary path on a trusted one (see isCanonicalStatusUrl above).
     const url =
-      payload.higgsfieldStatusUrl && isTrustedHiggsfieldUrl(payload.higgsfieldStatusUrl)
+      payload.higgsfieldStatusUrl && isCanonicalStatusUrl(payload.higgsfieldStatusUrl, requestId)
         ? payload.higgsfieldStatusUrl
-        : `https://platform.higgsfield.ai/requests/${encodeURIComponent(payload.higgsfieldRequestId ?? '')}/status`;
+        : canonicalStatusUrl(requestId);
     const res = await retryOnce(() =>
       withTimeout((signal) => fetch(url, { headers: { Authorization: `Key ${credentials}` }, signal }), 10_000, 'Higgsfield status check timed out'),
     );

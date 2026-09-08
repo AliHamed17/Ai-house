@@ -596,4 +596,56 @@ test.describe('AI Design Studio (demo mode)', () => {
     const stored = await page.evaluate(() => localStorage.getItem('ai-studio:unresolved-generation'));
     expect(Object.keys(JSON.parse(stored ?? '{}'))).toEqual(['job:sibling-still-outstanding-job-id']);
   });
+
+  test('a genuinely different tab\'s recovery write is ignored while THIS tab has its own submission in flight, so it can never hijack the room mid-request (regression)', async ({
+    page,
+    context,
+  }) => {
+    // submitOnce only ever mirrors a fresh/resumed submission into
+    // recoverableSubmission/recoverableJobId once something has gone
+    // wrong — while it is genuinely still in flight (submitting === true),
+    // both stay null. Without treating that as "already owned" in the
+    // storage listener's guard, a different tab's own write during that
+    // exact window would adopt its (unrelated) room and recovery state
+    // right out from under this tab's own in-flight, possibly paid request.
+    await page.route('**/api/nano-banana/generate', () => new Promise(() => {})); // never resolves
+    await page.goto('/#ai-studio');
+    await page.locator('select').first().selectOption('kitchen');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    // The button's own label switches to "Working…" once submitting is
+    // true, before anything is recoverable yet — this is exactly the
+    // in-flight window the fix protects.
+    await expect(page.getByRole('button', { name: 'Working…' })).toBeDisabled();
+    await expect(page.locator('select').first()).toBeDisabled();
+    await expect(page.locator('select').first()).toHaveValue('kitchen');
+
+    // A genuinely different tab (sharing this origin's localStorage) writes
+    // its own, unrelated recovery entry directly — firing a real
+    // cross-document `storage` event on tab 1. (Going through page2's own
+    // UI instead — clicking Generate there — doesn't exercise this: page2's
+    // OWN mount-time adoptRecoveryEntry() would immediately adopt tab 1's
+    // still-outstanding entry and disable page2's Generate button before it
+    // could ever create a genuinely different entry of its own.)
+    const page2 = await context.newPage();
+    await page2.goto('/#ai-studio');
+    await page2.evaluate(() => {
+      const key = 'ai-studio:unresolved-generation';
+      const existing = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>;
+      existing['job:unrelated-other-tab-job-id'] = {
+        kind: 'job',
+        jobId: 'unrelated-other-tab-job-id',
+        roomId: 'living',
+        outputType: 'image',
+        createdAt: Date.now(),
+      };
+      localStorage.setItem(key, JSON.stringify(existing));
+    });
+
+    // Tab 1's own in-flight request must be completely unaffected — still
+    // showing "Working…", still locked to its OWN room ('kitchen'), never
+    // hijacked to the other tab's entry ('living') or its banner.
+    await expect(page.getByRole('button', { name: 'Working…' })).toBeDisabled();
+    await expect(page.locator('select').first()).toHaveValue('kitchen');
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toHaveCount(0);
+  });
 });

@@ -281,12 +281,22 @@ export function AIStudioPanel() {
   useEffect(() => {
     function handleStorageEvent(event: StorageEvent) {
       if (event.key !== null && event.key !== RECOVERY_STORAGE_KEY) return;
-      if (recoverableJobId !== null || recoverableSubmission !== null) return;
+      // submitOnce writes THIS tab's own pre-fetch entry to storage before it
+      // has any chance to settle, but only ever mirrors it into
+      // recoverableSubmission/recoverableJobId once something has gone
+      // wrong — while a fresh submission or a resume is genuinely still in
+      // flight (submitting === true), both stay null, so without this check
+      // a different tab's own write during that exact window would pass the
+      // guard below and adopt its (unrelated) room/output and recovery
+      // state right out from under this tab's own in-flight, possibly
+      // paid request — whose eventual result would then land against the
+      // wrong room.
+      if (submitting || recoverableJobId !== null || recoverableSubmission !== null) return;
       adoptRecoveryEntry();
     }
     window.addEventListener('storage', handleStorageEvent);
     return () => window.removeEventListener('storage', handleStorageEvent);
-  }, [recoverableJobId, recoverableSubmission]);
+  }, [submitting, recoverableJobId, recoverableSubmission]);
 
   // Sync which providers are live (billed) vs. demo, so the UI can require
   // confirmation before a paid run instead of only learning the mode after

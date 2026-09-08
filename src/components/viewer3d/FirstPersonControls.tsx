@@ -123,31 +123,42 @@ export function FirstPersonControls() {
     function onKeyUp(e: KeyboardEvent) {
       pressedKeys.current.delete(e.code);
     }
-    // A keyup while the window/tab isn't focused (switching apps or tabs, or
-    // minimizing, while a movement key is held) is commonly never delivered —
-    // without this, the camera would keep walking in that direction
-    // indefinitely once focus returns, until the key is pressed and released
-    // again.
-    function clearPressedKeys() {
+    // A keyup — or the pointerup releasing a mouse/touch look-drag — while
+    // the window/tab isn't focused (switching apps or tabs, minimizing, a
+    // permission dialog stealing focus, while a key is held or a drag is in
+    // progress) is commonly never delivered. Without clearing pressedKeys,
+    // the camera would keep walking indefinitely once focus returns until
+    // the key is pressed and released again. Without also clearing
+    // draggingPointerIdRef, onPointerDown's "first pointer wins" guard below
+    // would keep pointing at that stale, now-unreleasable pointerId forever —
+    // every later pointerdown would be silently ignored, since its pointerup
+    // can never match a ref no future pointerdown was ever allowed to set —
+    // permanently locking the visitor out of drag-to-look until the explorer
+    // remounts.
+    function clearHeldInputState() {
       pressedKeys.current.clear();
+      draggingPointerIdRef.current = null;
     }
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('blur', clearPressedKeys);
-    document.addEventListener('visibilitychange', clearPressedKeys);
+    window.addEventListener('blur', clearHeldInputState);
+    document.addEventListener('visibilitychange', clearHeldInputState);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('blur', clearPressedKeys);
-      document.removeEventListener('visibilitychange', clearPressedKeys);
+      window.removeEventListener('blur', clearHeldInputState);
+      document.removeEventListener('visibilitychange', clearHeldInputState);
     };
   }, []);
 
   // Defense in depth alongside the blur/visibility clear above: whatever the
-  // exact cause, a stale held-key entry must never survive leaving
-  // first-person mode and carry over into a later return to it.
+  // exact cause, a stale held-key entry or drag-pointer owner must never
+  // survive leaving first-person mode and carry over into a later return to it.
   useEffect(() => {
-    if (mode !== 'first-person') pressedKeys.current.clear();
+    if (mode !== 'first-person') {
+      pressedKeys.current.clear();
+      draggingPointerIdRef.current = null;
+    }
   }, [mode]);
 
   useEffect(() => {

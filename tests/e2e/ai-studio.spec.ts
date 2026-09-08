@@ -148,6 +148,46 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('select').first()).toBeEnabled();
   });
 
+  test('a submission recovery banner left open past its own staleness ceiling refuses to Resume (regression)', async ({ page }) => {
+    // recoverableSubmission is plain React state with no timestamp of its
+    // own, so a tab that leaves this banner open longer than the PERSISTED
+    // entry's own ceiling — well past the point the server's idempotency
+    // reservation could already be gone — used to still POST it on Resume,
+    // risking a second, separately billed submission. Age the persisted
+    // entry directly (no reload — a reload's own mount-time read would
+    // correctly prune it, which isn't what this is testing) so the banner
+    // stays showing while the click-time re-check is what must catch it.
+    let blockGenerate = true;
+    await page.route('**/api/nano-banana/generate', (route) => (blockGenerate ? route.abort() : route.continue()));
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    // Past even the longer (ambiguous, 55-minute) ceiling, so this is stale
+    // regardless of which ambiguous flag this particular entry carries.
+    await page.evaluate((prefix) => {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key?.startsWith(`${prefix}submission:`)) continue;
+        const entry = JSON.parse(localStorage.getItem(key)!);
+        entry.createdAt = Date.now() - 56 * 60_000;
+        localStorage.setItem(key, JSON.stringify(entry));
+      }
+    }, RECOVERY_STORAGE_PREFIX);
+
+    // Unblock the route — if the fix were absent, Resume would still
+    // succeed here, the exact silent-double-submission risk this closes.
+    blockGenerate = false;
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+
+    await expect(page.getByText(/expired/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+    await expect(page.locator('select').first()).toBeEnabled();
+    expect(await recoveryEntryIds(page)).toEqual([]);
+  });
+
   test('a Higgsfield 504 (ambiguous submit timeout) also keeps the submission recoverable, not just a dropped connection (regression)', async ({ page }) => {
     // The route returns a normal, well-formed 504 response (not a dropped
     // connection) specifically when a live Higgsfield submit times out in a

@@ -743,6 +743,21 @@ export function AIStudioPanel() {
   function handleResumeSubmission() {
     if (!recoverableSubmission) return;
     const { endpoint, body } = recoverableSubmission;
+    const idempotencyKey = body.idempotencyKey as string;
+    // recoverableSubmission is plain React state with no timestamp of its
+    // own — this banner can sit open far longer than the entry's own
+    // staleness ceiling (RECOVERY_MAX_AGE_MS), well past the point the
+    // server's idempotency reservation could already be gone (10/60 min —
+    // see idempotency.server.ts). Re-validate the PERSISTED entry's age
+    // right before resuming, rather than trusting whatever was true when
+    // this state was originally set. readAllRecoveryEntries already prunes
+    // (and removes from storage) anything past its ceiling as it scans, so
+    // a missing result here means either it never existed or just aged out.
+    if (!readAllRecoveryEntries()[submissionRecoveryId(idempotencyKey)]) {
+      setRecoverableSubmission(null);
+      setError('This recovery has expired. Please start a new generation — resuming now could risk starting a second, separately billed one.');
+      return;
+    }
     const token = ++pollTokenRef.current;
     setSubmitting(true);
     setError(null);
@@ -753,7 +768,7 @@ export function AIStudioPanel() {
         // The submission's own entry is now superseded by the job entry
         // startPolling writes below — clear it explicitly so it doesn't
         // linger in storage until it eventually ages out on its own.
-        clearRecoveryEntry(submissionRecoveryId(body.idempotencyKey as string));
+        clearRecoveryEntry(submissionRecoveryId(idempotencyKey));
         startPolling(jobId, token);
       }
     })();

@@ -8,28 +8,37 @@ export const dynamic = 'force-dynamic';
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  // Signing (see jobId.ts) already stops a FORGED id from reaching a
-  // provider, but says nothing about how many times a genuinely-issued one
-  // can be replayed — every request here spends a real, credentialed
-  // provider lookup, so a holder of any one valid id could otherwise exhaust
-  // the provider account's own quota with unlimited requests. Keyed by the
-  // job id itself (not the caller), so this bounds repeated checks of any
-  // ONE job without limiting how many DIFFERENT jobs get polled at once —
-  // legitimate simultaneous jobs (e.g. multiple tabs) never compete with
-  // each other for budget.
+  // Decode (and therefore verify the signature — see jobId.ts) BEFORE
+  // allocating any rate-limit state. checkRateLimit's own sweep walks its
+  // ENTIRE map on every call (see rateLimit.server.ts), so keying it by an
+  // unvalidated id would let an unauthenticated caller flood distinct
+  // GARBAGE ids to grow that map without bound, turning every subsequent
+  // request's sweep into ever-more work — a quadratic-cost DoS that needs
+  // no valid job id at all. Decoding first means only a genuinely-signed id
+  // (which nothing but this server could have produced) ever creates an
+  // entry.
+  let providerId;
+  try {
+    providerId = decodeJobId(id).provider;
+  } catch {
+    return NextResponse.json({ error: 'Unknown or invalid job id.' }, { status: 404 });
+  }
+
+  // Signing already stops a FORGED id from reaching a provider, but says
+  // nothing about how many times a genuinely-issued one can be replayed —
+  // every request here spends a real, credentialed provider lookup, so a
+  // holder of any one valid id could otherwise exhaust the provider
+  // account's own quota with unlimited requests. Keyed by the job id itself
+  // (not the caller), so this bounds repeated checks of any ONE job without
+  // limiting how many DIFFERENT jobs get polled at once — legitimate
+  // simultaneous jobs (e.g. multiple tabs) never compete with each other
+  // for budget.
   const rateLimit = checkRateLimit(`status:${id}`, STATUS_MAX_REQUESTS_PER_WINDOW);
   if (!rateLimit.allowed) {
     return NextResponse.json(
       { error: 'Too many status checks for this job. Please wait a moment and try again.' },
       { status: 429, headers: { 'Retry-After': String(Math.ceil(rateLimit.retryAfterMs / 1000)) } },
     );
-  }
-
-  let providerId;
-  try {
-    providerId = decodeJobId(id).provider;
-  } catch {
-    return NextResponse.json({ error: 'Unknown or invalid job id.' }, { status: 404 });
   }
 
   const provider = resolveProviderById(providerId);

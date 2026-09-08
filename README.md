@@ -73,6 +73,7 @@ fill in only what you have:
 | Variable | Purpose |
 | --- | --- |
 | `AI_ALLOW_LIVE` | Master switch — must be exactly `true` for any billed generation to run. With a key set but this unset, the app stays in demo mode, so a key used only for the offline generator or local dev never exposes a public billed endpoint. **A public deployment that enables this must add real authentication/quotas in front of the `/api/*/generate` routes** — the client-side cost confirmation is not a server-side control. |
+| `JOB_ID_SIGNING_SECRET` | **Required for any live (billed) generation.** A stable, deployment-wide secret used to sign every job id. Without it, each process start signs with its own random secret, so a status check landing on a different serverless instance (or after a restart) would reject an otherwise-genuine job id, permanently losing the only encoded request id for a paid result. Both live generation routes refuse to start until this is set; any long random string works (e.g. `openssl rand -hex 32`). |
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Enables real Nano Banana (Gemini) image generation (either is accepted). |
 | `NANO_BANANA_MODEL` | Overrides the model (default `gemini-3-pro-image-preview`, i.e. Nano Banana Pro). |
 | `HF_CREDENTIALS` | Higgsfield credentials as `KEY_ID:KEY_SECRET`. |

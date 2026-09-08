@@ -65,4 +65,24 @@ describe('GET /api/generation/status/[id] rate-limits repeated checks of the SAM
     const otherRes = await GET(makeRequest(otherJobId), { params: Promise.resolve({ id: otherJobId }) });
     expect(otherRes.status).toBe(200);
   });
+
+  it('never allocates rate-limit state for an invalid/unsigned job id, however many distinct ones are tried (regression)', async () => {
+    // checkRateLimit's own sweep walks its ENTIRE map on every call (see
+    // rateLimit.server.ts) — keying it by an id BEFORE verifying the
+    // signature would let an unauthenticated caller flood distinct garbage
+    // ids to grow that map without bound, turning every later request's
+    // sweep into ever more work with no valid job id required at all.
+    // Decoding first (see the route) means only a genuinely-signed id ever
+    // creates an entry here.
+    vi.resetModules();
+    const { GET } = await import('@/app/api/generation/status/[id]/route');
+    const { _trackedClientKeyCountForTests } = await import('@/lib/ai/rateLimit.server');
+
+    for (let i = 0; i < 50; i++) {
+      const id = `garbage-${i}`;
+      const res = await GET(makeRequest(id), { params: Promise.resolve({ id }) });
+      expect(res.status).toBe(404);
+    }
+    expect(_trackedClientKeyCountForTests()).toBe(0);
+  });
 });

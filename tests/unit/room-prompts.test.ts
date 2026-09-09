@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNanoBananaPrompt } from '@/data/roomPrompts';
+import { buildNanoBananaEditPrompt, buildNanoBananaPrompt } from '@/data/roomPrompts';
 
 describe('buildNanoBananaPrompt visitor instruction', () => {
   it('omits any visitor-instruction sentence when none is given', () => {
@@ -18,5 +18,23 @@ describe('buildNanoBananaPrompt visitor instruction', () => {
     // initial-generation brief for a bare "refine this" instruction).
     expect(prompt).toMatch(/furniture plan/i);
     expect(prompt).toMatch(/palette/i);
+  });
+});
+
+describe('buildNanoBananaEditPrompt protected-room clearances (regression)', () => {
+  it('instructs the model to keep MAMAD\'s door, window, and clearances unobstructed, not just unresized', () => {
+    // NEGATIVE_CONSTRAINTS alone only forbids changing an opening's
+    // geometry — an edit instruction like "add cabinetry under the window"
+    // doesn't resize or relocate anything, so it would slip past that
+    // constraint while still violating MAMAD's protected-clearance
+    // requirement if this sentence weren't added explicitly.
+    const prompt = buildNanoBananaEditPrompt('mamad', 'add a wardrobe under the window');
+    expect(prompt).toMatch(/protected emergency-shelter door and window/i);
+    expect(prompt).toMatch(/clearances.*unobstructed/i);
+  });
+
+  it('omits the protected-clearance sentence for a room with no protected openings', () => {
+    const prompt = buildNanoBananaEditPrompt('living', 'add a wardrobe under the window');
+    expect(prompt).not.toMatch(/protected emergency-shelter/i);
   });
 });

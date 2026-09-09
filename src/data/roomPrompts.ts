@@ -6,6 +6,7 @@
  */
 
 import type { RoomId } from '@/lib/types';
+import { houseModel } from './house';
 import { materialVariants } from './materials';
 
 interface RoomPromptSpec {
@@ -39,6 +40,19 @@ const HOUSE_PALETTE_SENTENCE =
 const NEGATIVE_CONSTRAINTS =
   'No people, no labels, no watermark-like text, no warped furniture, no impossible reflections, no added or removed doors or windows, no resized or relocated openings.';
 
+// NEGATIVE_CONSTRAINTS only forbids changing an opening's geometry — it says
+// nothing about blocking one, so an edit instruction like "add cabinetry
+// under the window" can slip past it entirely. A protected room's initial
+// generation already gets this from its own furniturePlan sentence (see
+// mamad's entry above), but a refinement's instruction is arbitrary visitor
+// text with no such guarantee, so it needs this stated explicitly too.
+const PROTECTED_CLEARANCE_SENTENCE =
+  'This room has a protected emergency-shelter door and window: keep both, and all required clearances around them, completely unobstructed — do not place furniture, storage, or any other object in front of or blocking either.';
+
+function isProtectedRoom(roomId: RoomId): boolean {
+  return houseModel.rooms.find((r) => r.id === roomId)?.isProtected ?? false;
+}
+
 export function buildNanoBananaPrompt(roomId: RoomId, styleVariantId: string, visitorInstruction?: string): string {
   const spec = roomPromptById.get(roomId);
   const variant = materialVariants.find((v) => v.id === styleVariantId) ?? materialVariants[0];
@@ -61,6 +75,7 @@ export function buildNanoBananaEditPrompt(roomId: RoomId, instruction: string): 
   return [
     `Refine this approved ${spec?.roomId ?? roomId} concept with one targeted change: ${instruction}.`,
     'Explicitly preserve all other architecture, composition, camera framing, lighting intent, and previously approved furniture.',
+    ...(isProtectedRoom(roomId) ? [PROTECTED_CLEARANCE_SENTENCE] : []),
     NEGATIVE_CONSTRAINTS,
   ].join(' ');
 }

@@ -682,8 +682,22 @@ export function AIStudioPanel() {
   // existing recoverableSubmission survive it, rather than being silently
   // discarded by a throttle that has nothing to do with the original request.
   // Shared between a fresh submission (handleGenerate) and resuming one
-  // (handleResumeSubmission).
-  async function submitOnce(endpoint: string, body: Record<string, unknown>, token: number, isResume = false): Promise<string | null> {
+  // (handleResumeSubmission). resumedCreatedAt is only ever passed by the
+  // latter — the ORIGINAL persisted entry's own createdAt, read once before
+  // this attempt even starts (see handleResumeSubmission's own staleness
+  // check). A resumed attempt's own response timing proves nothing reliable
+  // about the server-side idempotency reservation's true age: reserving
+  // (idempotency.server's reserveIdempotentSubmission) only stamps/refreshes
+  // createdAt on a key's FIRST-ever reservation (or when that original
+  // run's own promise later settles ambiguously) — a resume that finds an
+  // existing reservation just re-awaits whatever that original promise
+  // already settled to, however long ago. Restamping to THIS resume's own
+  // "now" on a network failure or a 504 below would silently extend the
+  // client's believed validity window past the server's true one, letting a
+  // late-enough resume slip past the server's real TTL and start a second,
+  // separately billed submission — see the two writeRecoveryEntry calls
+  // below that use it.
+  async function submitOnce(endpoint: string, body: Record<string, unknown>, token: number, isResume = false, resumedCreatedAt?: number): Promise<string | null> {
     // Written before fetch() is even called, not only once it settles — a
     // tab closing or crashing while THIS exact POST is still in flight
     // otherwise leaves no trace anywhere (not persisted, not even in
@@ -750,11 +764,24 @@ export function AIStudioPanel() {
           // writeRecoveryEntry below overwrites this same key directly, so
           // there is nothing to clear first.
           setRecoverableSubmission({ endpoint, body });
-          // ambiguous: true, with a FRESH timestamp — mirrors isSubmitTimeout
-          // server-side (the only way either generate route returns a 504),
-          // which is exactly when idempotency.server refreshes createdAt and
-          // upgrades to the longer AMBIGUOUS_TTL_MS for this same reservation.
-          writeRecoveryEntry({ kind: 'submission', ambiguous: true, idempotencyKey, endpoint, body, roomId, outputType, createdAt: Date.now() });
+          // ambiguous: true. A FIRST attempt uses a fresh timestamp here —
+          // mirrors isSubmitTimeout server-side (the only way either generate
+          // route returns a 504), which is exactly when idempotency.server
+          // refreshes createdAt and upgrades to the longer AMBIGUOUS_TTL_MS
+          // for THIS same newly-detected ambiguity. A RESUMED attempt's own
+          // 504 is not that same event, though (see submitOnce's own comment
+          // above) — it carries the ORIGINAL persisted timestamp forward
+          // instead of restamping to this resume's own "now".
+          writeRecoveryEntry({
+            kind: 'submission',
+            ambiguous: true,
+            idempotencyKey,
+            endpoint,
+            body,
+            roomId,
+            outputType,
+            createdAt: isResume ? (resumedCreatedAt ?? createdAt) : Date.now(),
+          });
         } else {
           // A genuinely definite, terminal outcome (whichever way it
           // resolved) — a stale entry from an earlier ambiguous attempt on
@@ -786,12 +813,25 @@ export function AIStudioPanel() {
       setError('Could not reach the generation service. If it was already submitted, Resume below reuses the exact same request instead of starting a new one.');
       setSubmitting(false);
       setRecoverableSubmission({ endpoint, body });
-      // ambiguous: false, keeping the ORIGINAL pre-fetch createdAt (not a
-      // fresh Date.now() here) — a network-level failure never upgrades a
-      // server-side reservation, so if the request reached the server and
-      // succeeded, that reservation's own clock started at (approximately)
-      // when the request arrived, not when this client-side catch fired.
-      writeRecoveryEntry({ kind: 'submission', ambiguous: false, idempotencyKey, endpoint, body, roomId, outputType, createdAt });
+      // ambiguous: false. A FIRST attempt keeps the ORIGINAL pre-fetch
+      // createdAt (not a fresh Date.now() here) — a network-level failure
+      // never upgrades a server-side reservation, so if the request reached
+      // the server and succeeded, that reservation's own clock started at
+      // (approximately) when the request arrived, not when this client-side
+      // catch fired. A RESUMED attempt carries the true original entry's
+      // timestamp forward instead of this resume's own createdAt (see
+      // submitOnce's own comment above) — this resume's own fetch throwing
+      // says nothing about when the underlying reservation was really made.
+      writeRecoveryEntry({
+        kind: 'submission',
+        ambiguous: false,
+        idempotencyKey,
+        endpoint,
+        body,
+        roomId,
+        outputType,
+        createdAt: isResume ? (resumedCreatedAt ?? createdAt) : createdAt,
+      });
       return null;
     }
   }
@@ -809,7 +849,8 @@ export function AIStudioPanel() {
     // this state was originally set. readAllRecoveryEntries already prunes
     // (and removes from storage) anything past its ceiling as it scans, so
     // a missing result here means either it never existed or just aged out.
-    if (!readAllRecoveryEntries()[submissionRecoveryId(idempotencyKey)]) {
+    const persisted = readAllRecoveryEntries()[submissionRecoveryId(idempotencyKey)];
+    if (!persisted) {
       setRecoverableSubmission(null);
       setError('This recovery has expired. Please start a new generation — resuming now could risk starting a second, separately billed one.');
       // The expired entry was already removed from storage by the scan
@@ -826,7 +867,11 @@ export function AIStudioPanel() {
     setError(null);
     setRecoverableSubmission(null);
     void (async () => {
-      const jobId = await submitOnce(endpoint, body, token, true);
+      // persisted.createdAt — not this resume attempt's own start time — is
+      // the only timestamp submitOnce can trust if this attempt also fails
+      // (see its own comment): it's the true, original age the 9-minute
+      // ordinary-TTL check just above validated.
+      const jobId = await submitOnce(endpoint, body, token, true, persisted.createdAt);
       if (jobId) {
         // The submission's own entry is now superseded by the job entry
         // startPolling writes below — clear it explicitly so it doesn't

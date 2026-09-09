@@ -31,6 +31,19 @@ async function recoveryEntryIds(page: Page): Promise<string[]> {
   }, RECOVERY_STORAGE_PREFIX);
 }
 
+// The raw createdAt persisted under one specific entry id (e.g.
+// 'submission:some-key'), or null if nothing is stored there.
+async function readRecoveryEntryCreatedAt(page: Page, id: string): Promise<number | null> {
+  return page.evaluate(
+    ({ id, prefix }) => {
+      const raw = localStorage.getItem(`${prefix}${id}`);
+      if (!raw) return null;
+      return (JSON.parse(raw) as { createdAt: number }).createdAt;
+    },
+    { id, prefix: RECOVERY_STORAGE_PREFIX },
+  );
+}
+
 test.describe('AI Design Studio (demo mode)', () => {
   test('generates a concept image and reaches the completed state', async ({ page }) => {
     await page.goto('/#ai-studio');
@@ -504,6 +517,44 @@ test.describe('AI Design Studio (demo mode)', () => {
 
     await page.goto('/#ai-studio');
     await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+  });
+
+  test('a resume attempt that also fails preserves the ORIGINAL entry\'s timestamp instead of restamping to now (regression)', async ({ page }) => {
+    // The server's idempotency reservation clock starts when the original
+    // request first arrives, not when a later resume happens to fail — so
+    // submitOnce must carry the true original createdAt through a failed
+    // resume rather than computing a fresh one. Getting this wrong would let
+    // a resume, offered because the persisted entry looked young enough,
+    // silently reset the client's own clock to "now" — making a still-later
+    // resume look freshly valid long after the server's real (much shorter)
+    // TTL has actually expired, risking a second, separately billed
+    // submission at that point.
+    const originalCreatedAt = Date.now() - 5 * 60_000;
+    const idempotencyKey = 'resume-preserves-original-timestamp-key';
+    const staleOriginalEntry = {
+      kind: 'submission',
+      ambiguous: false,
+      idempotencyKey,
+      endpoint: '/api/nano-banana/generate',
+      body: { roomId: 'living', idempotencyKey, simulate: 'success' },
+      roomId: 'living',
+      outputType: 'image',
+      createdAt: originalCreatedAt,
+    };
+    await writeRawRecoveryEntry(page, staleOriginalEntry);
+
+    // This resume attempt also fails at the network level (the same
+    // ambiguous outcome as the original) — the exact case where submitOnce
+    // re-writes the entry rather than leaving it untouched.
+    await page.route('**/api/nano-banana/generate', (route) => route.abort());
+    await page.goto('/#ai-studio');
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.getByText(/Could not reach the generation service/i)).toBeVisible({ timeout: 10_000 });
+
+    const persistedCreatedAt = await readRecoveryEntryCreatedAt(page, `submission:${idempotencyKey}`);
+    expect(persistedCreatedAt).toBe(originalCreatedAt);
   });
 
   test('a job-recovery entry uses its own, more generous ceiling than a submission entry (regression)', async ({ page }) => {

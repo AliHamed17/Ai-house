@@ -164,7 +164,20 @@ function isValidRecoveryEntry(value: unknown): value is RecoveryEntry {
     // immediately re-adopting the exact entry Abandon just tried to stop
     // tracking and permanently locking Generate.
     const body = v.body as Record<string, unknown>;
-    return body.idempotencyKey === v.idempotencyKey;
+    if (body.idempotencyKey !== v.idempotencyKey) return false;
+    // handleGenerate always posts body.roomId equal to this same entry's own
+    // top-level roomId, and always pairs outputType 'image'/'video' with
+    // exactly '/api/nano-banana/generate'/'/api/higgsfield/generate'
+    // respectively. A stale/corrupted entry whose nested body names a
+    // DIFFERENT room, or whose endpoint disagrees with its own outputType,
+    // would still pass the top-level checks above (adoption drives the UI
+    // from those) — but Resume then POSTs the mismatched body to that
+    // endpoint, so the response can be displayed and approved under the
+    // wrong room and reused as that room's own source for a further billed
+    // generation.
+    if (body.roomId !== v.roomId) return false;
+    const expectedEndpoint = v.outputType === 'image' ? '/api/nano-banana/generate' : '/api/higgsfield/generate';
+    return v.endpoint === expectedEndpoint;
   }
   return false;
 }

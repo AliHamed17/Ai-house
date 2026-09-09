@@ -32,6 +32,16 @@ export class OrphanedTimeoutError extends Error {
  * running in the background — important for paid calls, where an abandoned
  * in-flight request could still complete and bill while the caller retries.
  * `run` receives the signal; a request that cannot honor it may ignore it.
+ *
+ * On timeout, OrphanedTimeoutError's `orphaned` is exactly `run`'s OWN
+ * returned promise — not some later transformation of it. A caller that does
+ * further processing on run's result after withTimeout resolves (e.g.
+ * higgsfield.server.ts extracting a request id and re-encoding a job id) must
+ * do that processing INSIDE `run` itself, or a late reconciliation against
+ * `orphaned` observes the untransformed value instead of what the caller's
+ * own success path would have returned (regression: see idempotency.server's
+ * reconciliation handler, which trusts `orphaned` to already be the final
+ * value it caches).
  */
 export async function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>, ms: number, message = 'Request timed out'): Promise<T> {
   const controller = new AbortController();

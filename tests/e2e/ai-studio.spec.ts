@@ -389,6 +389,53 @@ test.describe('AI Design Studio (demo mode)', () => {
     expect(await recoveryEntryIds(page)).toHaveLength(0);
   });
 
+  test('a submission entry whose nested body.roomId, or endpoint, disagrees with its own top-level metadata is discarded (regression)', async ({
+    page,
+  }) => {
+    // Fresh evidence after the idempotencyKey-mismatch fix above is that the
+    // validator still only checked THAT one nested field. Adoption restores
+    // the room/output from the TOP-LEVEL fields (driving the UI), while
+    // Resume POSTs the UNCHECKED nested body to the UNCHECKED endpoint — so a
+    // stale/corrupted entry naming a different room in its body, or an
+    // endpoint that doesn't match its own outputType, could still surface as
+    // a stuck Resume that displays and lets the visitor approve a result
+    // under the wrong room, reusing it as that room's source for a further
+    // billed generation.
+    await page.addInitScript((prefix) => {
+      localStorage.setItem(
+        `${prefix}submission:room-mismatch-key`,
+        JSON.stringify({
+          kind: 'submission',
+          ambiguous: false,
+          idempotencyKey: 'room-mismatch-key',
+          endpoint: '/api/nano-banana/generate',
+          body: { roomId: 'kitchen', idempotencyKey: 'room-mismatch-key' },
+          roomId: 'living',
+          outputType: 'image',
+          createdAt: Date.now(),
+        }),
+      );
+      localStorage.setItem(
+        `${prefix}submission:endpoint-mismatch-key`,
+        JSON.stringify({
+          kind: 'submission',
+          ambiguous: false,
+          idempotencyKey: 'endpoint-mismatch-key',
+          endpoint: '/api/higgsfield/generate',
+          body: { roomId: 'living', idempotencyKey: 'endpoint-mismatch-key' },
+          roomId: 'living',
+          outputType: 'image',
+          createdAt: Date.now(),
+        }),
+      );
+    }, RECOVERY_STORAGE_PREFIX);
+
+    await page.goto('/#ai-studio');
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toHaveCount(0);
+    expect(await recoveryEntryIds(page)).toHaveLength(0);
+  });
+
   test('an expired approved source (410) is never treated as recoverable, and clears so the next attempt uses a fresh source (regression)', async ({ page }) => {
     // Unlike a lost connection or a Higgsfield timeout, a 410 is a definite,
     // pre-billing failure (see SOURCE_EXPIRED_MESSAGE) — nothing to resume,

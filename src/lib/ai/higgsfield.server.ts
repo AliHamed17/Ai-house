@@ -224,37 +224,48 @@ export const higgsfieldProvider: MediaGenerationProvider = {
     // The subscribe client does not accept an AbortSignal, so the timeout can
     // only reject here (it cannot cancel the in-flight submit) — hence submit()
     // is never auto-retried, so a timed-out request never becomes a second job.
-    const jobSet = (await withTimeout(
-      () =>
-        higgsfield.subscribe(HF_ENDPOINT, {
+    //
+    // The request-id extraction and encodeJobId() below run INSIDE this
+    // callback — not after withTimeout resolves — so that on a timeout,
+    // OrphanedTimeoutError's own `orphaned` promise (see resilience.server.ts)
+    // carries the SAME final job-id STRING this function would otherwise
+    // return, not the SDK's raw HiggsfieldSubscribeResult. reconciling
+    // idempotency.server.ts's ambiguous reservation against the raw SDK
+    // response (rather than this fully-wrapped result) would cache that
+    // object where a string is expected, permanently breaking the poll a
+    // later Resume makes against it.
+    const jobId = await withTimeout(
+      async () => {
+        const jobSet = (await higgsfield.subscribe(HF_ENDPOINT, {
           input: {
             model: HF_MODEL,
             prompt: input.prompt,
             input_images: [{ type: 'image_url', image_url: imageUrl }],
           },
           withPolling: false,
-        }),
+        })) as unknown as HiggsfieldSubscribeResult;
+
+        const job = jobSet.jobs?.[0];
+        const requestId = job?.request_id ?? job?.requestId ?? job?.id ?? jobSet.request_id;
+        const statusUrl = job?.status_url ?? job?.statusUrl ?? jobSet.status_url;
+        if (!requestId) {
+          throw new Error('Higgsfield did not return a request id for this job.');
+        }
+
+        return encodeJobId({
+          provider: 'higgsfield',
+          roomId: input.roomId,
+          outputType: 'video',
+          styleVariant: input.styleVariant,
+          prompt: input.prompt,
+          createdAt: Date.now(),
+          higgsfieldRequestId: requestId,
+          higgsfieldStatusUrl: statusUrl,
+        });
+      },
       30_000,
       SUBMIT_TIMEOUT_MESSAGE,
-    )) as unknown as HiggsfieldSubscribeResult;
-
-    const job = jobSet.jobs?.[0];
-    const requestId = job?.request_id ?? job?.requestId ?? job?.id ?? jobSet.request_id;
-    const statusUrl = job?.status_url ?? job?.statusUrl ?? jobSet.status_url;
-    if (!requestId) {
-      throw new Error('Higgsfield did not return a request id for this job.');
-    }
-
-    const jobId = encodeJobId({
-      provider: 'higgsfield',
-      roomId: input.roomId,
-      outputType: 'video',
-      styleVariant: input.styleVariant,
-      prompt: input.prompt,
-      createdAt: Date.now(),
-      higgsfieldRequestId: requestId,
-      higgsfieldStatusUrl: statusUrl,
-    });
+    );
     return { jobId };
   },
 

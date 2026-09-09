@@ -94,7 +94,19 @@ const RECOVERY_MAX_AGE_MS = {
 } as const;
 
 type RecoveryEntry =
-  | { kind: 'job'; jobId: string; roomId: RoomId; outputType: GenerationOutputType; createdAt: number }
+  | {
+      kind: 'job';
+      jobId: string;
+      roomId: RoomId;
+      outputType: GenerationOutputType;
+      createdAt: number;
+      // Set when this job entry is the direct continuation of a submission
+      // entry (the common case: submitOnce got a jobId back, or a resumed
+      // submission finally did) — see startPolling's own comment for why
+      // this matters: a locally-abandoned submission's tombstone is keyed
+      // by ITS id, which does not survive this identity change on its own.
+      originatingIdempotencyKey?: string;
+    }
   | {
       kind: 'submission';
       ambiguous: boolean;
@@ -124,17 +136,35 @@ function isValidRecoveryEntry(value: unknown): value is RecoveryEntry {
   if (typeof v.createdAt !== 'number' || !Number.isFinite(v.createdAt)) return false;
   if (typeof v.roomId !== 'string' || !VALID_RECOVERY_ROOM_IDS.has(v.roomId)) return false;
   if (v.outputType !== 'image' && v.outputType !== 'video') return false;
-  if (v.kind === 'job') return typeof v.jobId === 'string' && v.jobId.length > 0;
+  if (v.kind === 'job') {
+    if (typeof v.jobId !== 'string' || v.jobId.length === 0) return false;
+    return v.originatingIdempotencyKey === undefined || (typeof v.originatingIdempotencyKey === 'string' && v.originatingIdempotencyKey.length > 0);
+  }
   if (v.kind === 'submission') {
-    return (
-      typeof v.ambiguous === 'boolean' &&
-      typeof v.idempotencyKey === 'string' &&
-      v.idempotencyKey.length > 0 &&
-      typeof v.endpoint === 'string' &&
-      v.endpoint.length > 0 &&
-      typeof v.body === 'object' &&
-      v.body !== null
-    );
+    if (
+      typeof v.ambiguous !== 'boolean' ||
+      typeof v.idempotencyKey !== 'string' ||
+      v.idempotencyKey.length === 0 ||
+      typeof v.endpoint !== 'string' ||
+      v.endpoint.length === 0 ||
+      typeof v.body !== 'object' ||
+      v.body === null
+    ) {
+      return false;
+    }
+    // Resume/Abandon read the REQUEST body's own idempotencyKey (it's what
+    // actually gets POSTed and is what a resumed submitOnce's own
+    // writeRecoveryEntry call re-keys by) — see handleResumeSubmission,
+    // handleAbandonSubmission, and the storage-event handler's trackedId
+    // computation, all of which cast body.idempotencyKey to a string
+    // without checking it first. A body missing (or disagreeing with) it
+    // would make those compute the wrong storage id (submission:undefined,
+    // or one that doesn't match this entry's own key) — Resume then can't
+    // find the real entry, and Abandon's tombstone misses it entirely,
+    // immediately re-adopting the exact entry Abandon just tried to stop
+    // tracking and permanently locking Generate.
+    const body = v.body as Record<string, unknown>;
+    return body.idempotencyKey === v.idempotencyKey;
   }
   return false;
 }
@@ -401,6 +431,18 @@ export function AIStudioPanel() {
     let entry: RecoveryEntry | null = null;
     for (const [id, candidate] of Object.entries(readAllRecoveryEntries())) {
       if (locallyIgnoredIdsRef.current.has(id)) continue;
+      // A job entry that is the continuation of a locally-abandoned
+      // submission (see originatingIdempotencyKey) is the SAME generation
+      // under a new identity, not a genuinely different one that happens to
+      // be unignored — without this, abandoning an adopted submission while
+      // its owner is still mid-request only tombstones the submission id;
+      // once the owner gets a jobId and this tab's storage listener sees
+      // that new, never-ignored entry, it would otherwise immediately
+      // re-adopt it, silently undoing the visitor's own "Abandon and start
+      // over" choice the moment the owner's request finally settles.
+      if (candidate.kind === 'job' && candidate.originatingIdempotencyKey && locallyIgnoredIdsRef.current.has(submissionRecoveryId(candidate.originatingIdempotencyKey))) {
+        continue;
+      }
       if (!entry || candidate.createdAt > entry.createdAt) entry = candidate;
     }
     if (!entry) return false;
@@ -672,11 +714,16 @@ export function AIStudioPanel() {
   // Shared between a fresh submission (handleGenerate) and resuming an
   // unresolved one (handleResumeStatusCheck) so both get identical
   // retry/backoff behavior from one place.
-  function startPolling(jobId: string, token: number) {
+  // originatingIdempotencyKey: this job's own submission's idempotencyKey,
+  // when known — carried into the written entry (see RecoveryEntry's own
+  // comment) so a tab that locally abandoned that submission's tombstone
+  // still recognizes this job as the SAME generation, rather than treating
+  // it as an unrelated, non-ignored entry to adopt (regression).
+  function startPolling(jobId: string, token: number, originatingIdempotencyKey?: string) {
     // Written up front — not only once retries are exhausted — so a reload
     // during an otherwise-healthy poll still leaves a recovery breadcrumb;
     // right now that case loses the job with no trace at all.
-    writeRecoveryEntry({ kind: 'job', jobId, roomId, outputType, createdAt: Date.now() });
+    writeRecoveryEntry({ kind: 'job', jobId, roomId, outputType, createdAt: Date.now(), originatingIdempotencyKey });
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     const MAX_TRANSIENT_FAILURES = 5;
     let transientFailures = 0;
@@ -740,11 +787,18 @@ export function AIStudioPanel() {
     const token = ++pollTokenRef.current;
     setSubmitting(true);
     setError(null);
+    // Read before startPolling's own write below replaces this entry
+    // outright (with a fresh createdAt) — carrying its originatingIdempotencyKey
+    // (if any) forward is what keeps a locally-abandoned submission's
+    // tombstone matching this job across more than one resume, not just the
+    // first one (see RecoveryEntry's and startPolling's own comments).
+    const persisted = readAllRecoveryEntries()[jobRecoveryId(jobId)];
+    const originatingIdempotencyKey = persisted?.kind === 'job' ? persisted.originatingIdempotencyKey : undefined;
     // Cleared eagerly; startPolling re-sets it if this attempt also
     // exhausts its retries, so the banner never shows a stale/wrong state
     // while a fresh attempt is in flight.
     setRecoverableJobId(null);
-    startPolling(jobId, token);
+    startPolling(jobId, token, originatingIdempotencyKey);
   }
 
   // A job can become PERMANENTLY uncheckable (e.g. the provider credentials
@@ -1020,7 +1074,7 @@ export function AIStudioPanel() {
         // startPolling writes below — clear it explicitly so it doesn't
         // linger in storage until it eventually ages out on its own.
         clearRecoveryEntry(submissionRecoveryId(idempotencyKey));
-        startPolling(jobId, token);
+        startPolling(jobId, token, idempotencyKey);
       }
     })();
   }
@@ -1064,7 +1118,7 @@ export function AIStudioPanel() {
       // startPolling writes below — clear it explicitly so it doesn't linger
       // in storage until it eventually ages out on its own.
       clearRecoveryEntry(submissionRecoveryId(body.idempotencyKey));
-      startPolling(jobId, token);
+      startPolling(jobId, token, body.idempotencyKey);
     }
   }
 

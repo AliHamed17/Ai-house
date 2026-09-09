@@ -353,6 +353,42 @@ test.describe('AI Design Studio (demo mode)', () => {
     expect(await recoveryEntryIds(page)).toHaveLength(0);
   });
 
+  test("a submission entry whose nested body.idempotencyKey is missing or disagrees with the top-level key is discarded, not offered as a stuck Resume (regression)", async ({
+    page,
+  }) => {
+    // The malformed-entry validator above checks every top-level field, but
+    // Resume/Abandon actually key off body.idempotencyKey (the field that
+    // gets POSTed, and what a resumed submitOnce re-keys storage by) — see
+    // handleResumeSubmission, handleAbandonSubmission, and the storage-event
+    // handler's trackedId computation, all of which cast it to a string
+    // without checking it first. A body missing that field (or naming a
+    // different one) passed the earlier validation purely because it has
+    // SOME non-null object for `body` — Resume would then look up
+    // "submission:undefined" and never find the real entry, and Abandon's
+    // tombstone would miss it entirely and immediately re-adopt the exact
+    // entry the visitor just tried to dismiss, permanently locking Generate.
+    await page.addInitScript((prefix) => {
+      localStorage.setItem(
+        `${prefix}submission:top-level-key`,
+        JSON.stringify({
+          kind: 'submission',
+          ambiguous: false,
+          idempotencyKey: 'top-level-key',
+          endpoint: '/api/nano-banana/generate',
+          body: { roomId: 'living', idempotencyKey: 'a-different-key' },
+          roomId: 'living',
+          outputType: 'image',
+          createdAt: Date.now(),
+        }),
+      );
+    }, RECOVERY_STORAGE_PREFIX);
+
+    await page.goto('/#ai-studio');
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toHaveCount(0);
+    expect(await recoveryEntryIds(page)).toHaveLength(0);
+  });
+
   test('an expired approved source (410) is never treated as recoverable, and clears so the next attempt uses a fresh source (regression)', async ({ page }) => {
     // Unlike a lost connection or a Higgsfield timeout, a 410 is a definite,
     // pre-billing failure (see SOURCE_EXPIRED_MESSAGE) — nothing to resume,
@@ -1208,6 +1244,63 @@ test.describe('AI Design Studio (demo mode)', () => {
     blockGenerate = false;
     await page.getByRole('button', { name: 'Resume submission' }).click();
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("abandoning an ADOPTED submission survives the owner's later submission-to-job identity change — it never silently re-adopts under the new id (regression)", async ({
+    page,
+    context,
+  }) => {
+    // A submission entry's storage id (submission:<idempotencyKey>) and the
+    // job entry that eventually supersedes it (job:<jobId>) are two
+    // DIFFERENT ids for the exact same generation. abandonRecoveryEntry's
+    // tombstone only ever recorded the id it was given at the moment of the
+    // click — the submission's — so once the true owner's request finally
+    // succeeds and startPolling writes the new job:<jobId> entry, the
+    // adopter's storage listener sees a genuinely never-ignored identity and
+    // immediately re-adopts the same generation again, silently undoing the
+    // visitor's own "Abandon and start over" choice the moment the owner's
+    // request happens to settle.
+    //
+    // Status checks are ALSO blocked (from the start, never unblocked) so
+    // that once tab 1's submission succeeds, its new job:<jobId> entry
+    // stays put in storage instead of settling and clearing itself again
+    // within the same tick a demo job would otherwise take — without this,
+    // the window in which the buggy identity could even be observed is too
+    // narrow to reliably assert against.
+    let blockGenerate = true;
+    await page.route('**/api/nano-banana/generate', (route) => (blockGenerate ? route.abort() : route.continue()));
+    await page.route('**/api/generation/status/**', (route) => route.abort());
+
+    const page2 = await context.newPage();
+    await page.goto('/#ai-studio');
+    await page2.goto('/#ai-studio');
+
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page2.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+
+    // Tab 2 abandons the adopted submission while tab 1's own request is
+    // still unresolved.
+    await page2.getByRole('button', { name: 'Abandon and start over' }).click();
+    await expect(page2.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+
+    // Tab 1's request finally succeeds — this is exactly the submission ->
+    // job identity transition under test. Its OWN status checks are still
+    // blocked, so it settles into "Lost connection while checking..."
+    // (recoverableJobId) rather than Complete — but the new job:<jobId>
+    // entry itself is already written and stays in storage throughout.
+    blockGenerate = false;
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.getByText(/Lost connection while checking on a generation/i)).toBeVisible({ timeout: 15_000 });
+    expect(await recoveryEntryIds(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^job:/)]));
+
+    // Tab 2 must stay unlocked: no Resume banner reappearing for the new
+    // job identity, Generate still enabled, exactly as the visitor's own
+    // Abandon choice promised — checked only now that tab 1's job entry is
+    // confirmed to still genuinely exist for tab 2 to have (wrongly, pre-fix)
+    // reacted to.
+    await expect(page2.getByRole('button', { name: 'Resume checking status' })).toHaveCount(0);
+    await expect(page2.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
   });
 
   test('a 504 (ambiguous submit timeout) does not adopt a sibling while upgrading its own entry in place (regression)', async ({ page }) => {

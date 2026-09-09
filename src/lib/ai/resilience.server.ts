@@ -1,5 +1,30 @@
 import 'server-only';
 
+// Thrown when `withTimeout`'s deadline wins the race, in place of a plain
+// Error, so a caller like reserveIdempotentSubmission that already has to
+// treat this as an ambiguous (possibly-already-billed) outcome ALSO has a
+// handle on the raw underlying call — still running for a request that
+// cannot truly be cancelled (Higgsfield's subscribe() takes no AbortSignal)
+// or that only stops OUR wait, not the provider's own already-accepted
+// operation (the Gemini SDK's abortSignal). Without this, that raw promise's
+// eventual real outcome is orphaned: nothing is ever listening for it again,
+// so a client that later Resumes reconciles only to this same stale
+// rejection forever, even long after the provider actually finished (and
+// possibly billed) the request — the entire point of Resume, for exactly
+// this ambiguous case, silently defeated. instanceof Error still holds
+// (this extends it), so every existing `error instanceof Error &&
+// error.message === ...` check (isSubmitTimeout in both providers) keeps
+// matching it unchanged.
+export class OrphanedTimeoutError extends Error {
+  constructor(
+    message: string,
+    public readonly orphaned: Promise<unknown>,
+  ) {
+    super(message);
+    this.name = 'OrphanedTimeoutError';
+  }
+}
+
 /**
  * Runs `run` with a timeout. On timeout it both rejects (so the caller sees a
  * timeout error) AND aborts the passed AbortSignal, so a request that honors
@@ -11,6 +36,10 @@ import 'server-only';
 export async function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>, ms: number, message = 'Request timed out'): Promise<T> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // Captured once, outside the timeout executor, so both the race below AND
+  // a timed-out rejection's own OrphanedTimeoutError can reference the exact
+  // same promise — not a second, independent call to `run`.
+  const raw = run(controller.signal);
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       // Order matters: reject with OUR error before calling abort(). An
@@ -24,12 +53,12 @@ export async function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>, m
       // get misclassified as a definite, safe-to-retry failure. Settling
       // this promise first guarantees the race resolves with OUR error
       // regardless of how (or how fast) `run` reacts to the abort.
-      reject(new Error(message));
+      reject(new OrphanedTimeoutError(message, raw));
       controller.abort();
     }, ms);
   });
   try {
-    return await Promise.race([run(controller.signal), timeout]);
+    return await Promise.race([raw, timeout]);
   } finally {
     if (timer) clearTimeout(timer);
   }

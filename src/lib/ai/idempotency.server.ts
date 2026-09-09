@@ -1,4 +1,5 @@
 import 'server-only';
+import { OrphanedTimeoutError } from './resilience.server';
 
 /**
  * A submission's HTTP response can be lost after the server has already
@@ -170,7 +171,35 @@ export function reserveIdempotentSubmission(
   const promise = run();
   promise.catch((error: unknown) => {
     if (options?.isAmbiguousFailure?.(error)) {
-      store.set(key, { promise, createdAt: Date.now(), ttlMs: AMBIGUOUS_TTL_MS, fingerprint });
+      const entry: IdempotencyEntry = { promise, createdAt: Date.now(), ttlMs: AMBIGUOUS_TTL_MS, fingerprint };
+      store.set(key, entry);
+      // The underlying provider call this reservation is ambiguous about may
+      // still be running (Higgsfield's subscribe() takes no AbortSignal; the
+      // Gemini SDK's abortSignal only stops OUR wait, not a request Google's
+      // servers already accepted) — see OrphanedTimeoutError's own comment.
+      // Reconcile once it actually settles, rather than leaving every future
+      // Resume permanently stuck replaying this same stale rejection even
+      // long after the real outcome — success or genuine failure — is known.
+      if (error instanceof OrphanedTimeoutError) {
+        error.orphaned.then(
+          (jobId) => {
+            // Only overwrite if this reservation is still the exact one that
+            // got orphaned — if a Resume has since produced its own newer
+            // reservation for this key (e.g. this same ambiguous entry
+            // already expired and a fresh submission reused the key), this
+            // late resolution belongs to a past attempt and must never
+            // silently clobber it.
+            if (store.get(key) === entry) {
+              store.set(key, { ...entry, promise: Promise.resolve(jobId as string) });
+            }
+          },
+          () => {
+            // Failed for real too — nothing to reconcile; the ambiguous
+            // entry already correctly reflects "we don't know," and a
+            // Resume can keep retrying it until it ages out.
+          },
+        );
+      }
     } else {
       store.delete(key);
     }

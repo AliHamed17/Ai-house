@@ -6,6 +6,7 @@ import {
   isIdempotencyKeyMismatchError,
   reserveIdempotentSubmission,
 } from '@/lib/ai/idempotency.server';
+import { OrphanedTimeoutError } from '@/lib/ai/resilience.server';
 
 // Most tests below don't exercise fingerprint matching itself — they reuse
 // the same literal fingerprint across paired calls so that behavior isn't
@@ -58,6 +59,46 @@ describe('reserveIdempotentSubmission (reconciles a retried submission instead o
     await expect(reserveIdempotentSubmission('ambiguous-key', FP, run, { isAmbiguousFailure })).rejects.toThrow('ambiguous timeout');
     await Promise.resolve();
     await expect(reserveIdempotentSubmission('ambiguous-key', FP, run, { isAmbiguousFailure })).rejects.toThrow('ambiguous timeout');
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles an ambiguous OrphanedTimeoutError reservation once the underlying (uncancellable) call actually settles, instead of replaying the same stale rejection forever (regression)', async () => {
+    // withTimeout's own race can only reject with ITS OWN error once the
+    // deadline wins — the underlying provider call (Higgsfield's subscribe(),
+    // which takes no AbortSignal, or the Gemini SDK's, whose abortSignal only
+    // stops OUR wait, not a request the provider already accepted) keeps
+    // running regardless, orphaned unless something is still listening for
+    // it. Before this fix, a resumed POST reconciling to `existing.promise`
+    // got back that same rejected wrapper promise forever, even long after
+    // the provider genuinely finished (and possibly billed) the request —
+    // Resume could never actually recover it.
+    let resolveRaw!: (jobId: string) => void;
+    const raw = new Promise<string>((resolve) => {
+      resolveRaw = resolve;
+    });
+    const orphanedError = new OrphanedTimeoutError('submission timed out', raw);
+    const run = vi.fn().mockRejectedValueOnce(orphanedError);
+    const isAmbiguousFailure = (error: unknown) => error === orphanedError;
+
+    await expect(reserveIdempotentSubmission('orphaned-key', FP, run, { isAmbiguousFailure })).rejects.toThrow('submission timed out');
+    await Promise.resolve();
+
+    // A Resume immediately after the timeout still can't know the answer
+    // yet — the underlying call has not settled — so it reconciles to the
+    // same honest "still don't know" rejection.
+    await expect(reserveIdempotentSubmission('orphaned-key', FP, run, { isAmbiguousFailure })).rejects.toThrow('submission timed out');
+    expect(run).toHaveBeenCalledTimes(1);
+
+    // The provider's own uncancellable call finally finishes for real.
+    resolveRaw('real-job-id-from-late-provider-response');
+    await raw;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // A LATER Resume now reconciles to the REAL job id — not the stale
+    // timeout — without ever calling run() (the paid submission) again.
+    const later = await reserveIdempotentSubmission('orphaned-key', FP, run, { isAmbiguousFailure });
+    expect(later).toBe('real-job-id-from-late-provider-response');
     expect(run).toHaveBeenCalledTimes(1);
   });
 

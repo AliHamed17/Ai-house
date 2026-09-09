@@ -13,7 +13,7 @@ import {
   resultIdFromPath,
   SOURCE_EXPIRED_MESSAGE,
 } from './resultStore.server';
-import { withTimeout } from './resilience.server';
+import { OrphanedTimeoutError, withTimeout } from './resilience.server';
 
 /**
  * Nano Banana = Google's Gemini native image-generation family.
@@ -114,6 +114,10 @@ export const nanoBananaProvider: MediaGenerationProvider = {
       throw new Error(RESULT_STORE_AT_CAPACITY_MESSAGE);
     }
 
+    // Set only on the OrphanedTimeoutError path below — see that catch
+    // branch for why the slot must NOT be released in the ordinary `finally`
+    // in that one case.
+    let releaseDeferredToOrphan = false;
     try {
       const ai = getClient();
 
@@ -172,8 +176,22 @@ export const nanoBananaProvider: MediaGenerationProvider = {
         SUBMIT_TIMEOUT_MESSAGE,
       );
       return { jobId };
+    } catch (error) {
+      if (error instanceof OrphanedTimeoutError) {
+        // The reserved slot must stay held until the ORPHANED call itself
+        // settles — not released here, when only our own wait gave up. The
+        // callback above is still running and may still call
+        // putStoredResult later; releasing now would let a brand-new
+        // submission claim this same slot in the meantime, so a repeated
+        // timeout could push the result store past its MAX_ENTRIES bound —
+        // each one holding a large 2K base64 image — well before either
+        // orphaned call actually finishes.
+        releaseDeferredToOrphan = true;
+        error.orphaned.then(releaseResultSlot, releaseResultSlot);
+      }
+      throw error;
     } finally {
-      releaseResultSlot();
+      if (!releaseDeferredToOrphan) releaseResultSlot();
     }
   },
 

@@ -322,6 +322,51 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
   });
 
+  test('a job that never reaches a terminal state stops polling past a bounded ceiling instead of forever (regression)', async ({ page }) => {
+    // MAX_TRANSIENT_FAILURES only counts FAILED responses; a status check
+    // that keeps succeeding with a non-terminal status (a genuine backend
+    // bug, or an unrecognized provider status higgsfield.server's mapStatus
+    // defaults to 'queued') resets that counter every time and would
+    // otherwise poll forever, leaving Generate disabled with no Abandon
+    // option short of a reload.
+    const createdAt = new Date();
+    await page.route('**/api/generation/status/**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          jobId: 'stuck-forever-job-id',
+          provider: 'mock',
+          outputType: 'image',
+          roomId: 'living',
+          status: 'queued',
+          createdAt: createdAt.toISOString(),
+          updatedAt: new Date().toISOString(),
+          meta: { model: 'mock', styleVariant: 'warm-oak', prompt: 'p', approved: false },
+        }),
+      }),
+    );
+
+    await page.clock.install({ time: createdAt });
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByRole('button', { name: /Working…/i })).toBeVisible();
+
+    // Comfortably under the ceiling (POLL_STUCK_AFTER_MS, 10 min) — still
+    // polling, no recoverable banner yet.
+    await page.clock.fastForward(9 * 60_000);
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toHaveCount(0);
+
+    // Past the ceiling — the loop must give up and surface the SAME
+    // recoverable-job banner a transient-failure exhaustion already offers,
+    // rather than continuing to poll a job that will clearly never settle.
+    await page.clock.fastForward(2 * 60_000);
+    await expect(page.getByText(/Lost connection while checking on a generation/i)).toBeVisible();
+    await expect(page.getByText(/taking far longer than expected/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
+  });
+
   test('malformed persisted recovery entries are discarded instead of crashing the studio on load (regression)', async ({ page }) => {
     // JSON.parse only proves the stored text was syntactically valid JSON —
     // a same-origin localStorage entry can still be `null`, an object left

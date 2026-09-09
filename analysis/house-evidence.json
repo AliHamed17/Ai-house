@@ -149,7 +149,7 @@
       "nameEn": "Private corridor",
       "nameHe": null,
       "function": "circulation connecting the bedrooms and wet rooms",
-      "dimensions": { "widthM": 5.90, "depthM": 3.35 },
+      "dimensions": { "widthM": 5.90, "depthM": 6.85 },
       "dimensionSource": "assumption — corridor footprint inferred from adjacency, not individually dimensioned on the plan",
       "confidence": "low",
       "connectedRoomIds": ["entry_hall", "twin_bed", "bathroom_main", "bathroom_ensuite", "wc_guest", "parents_bed"],

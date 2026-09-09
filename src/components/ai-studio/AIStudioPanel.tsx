@@ -732,6 +732,18 @@ export function AIStudioPanel() {
   // comment) so a tab that locally abandoned that submission's tombstone
   // still recognizes this job as the SAME generation, rather than treating
   // it as an unrelated, non-ignored entry to adopt (regression).
+  // A job that never reaches a terminal state — a genuine backend bug, or an
+  // unrecognized provider status higgsfield.server's mapStatus defaults to
+  // 'queued' — would otherwise poll forever: MAX_TRANSIENT_FAILURES below
+  // only counts FAILED responses, and a perfectly OK but non-terminal one
+  // resets that counter every time, so it never catches this case. Without a
+  // ceiling the panel stays stuck in `submitting` (Generate disabled, no
+  // Abandon action offered) until the visitor manually reloads. 10 minutes
+  // comfortably outlasts every legitimate job this app issues — a mock job
+  // settles within ~3s, and a live Higgsfield clip within its own 30s submit
+  // window plus generation time — while still catching a genuinely wedged one.
+  const POLL_STUCK_AFTER_MS = 10 * 60_000;
+
   function startPolling(jobId: string, token: number, originatingIdempotencyKey?: string) {
     // Written up front — not only once retries are exhausted — so a reload
     // during an otherwise-healthy poll still leaves a recovery breadcrumb;
@@ -783,6 +795,17 @@ export function AIStudioPanel() {
           // too, rather than left to fall through to that unreliable
           // default. Never pass undefined from this call site.
           clearOwnRecoveryEntry(jobRecoveryId(jobId), statusData.status === 'completed' ? 'preserve' : 'proceed');
+          return;
+        }
+        // Still queued/in_progress — but for how long? A job that never
+        // reaches a terminal state must not poll forever (see
+        // POLL_STUCK_AFTER_MS's own comment); elapsed time is read from the
+        // job's own immutable createdAt, not a poll count, so it reflects
+        // real time stuck regardless of this loop's actual interval.
+        if (Date.now() - new Date(statusData.createdAt).getTime() > POLL_STUCK_AFTER_MS) {
+          setError('This generation is taking far longer than expected and may be stuck.');
+          setSubmitting(false);
+          setRecoverableJobId(jobId);
           return;
         }
         pollTimerRef.current = setTimeout(poll, 1000);

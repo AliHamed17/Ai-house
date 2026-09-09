@@ -46,8 +46,24 @@ describe('GET /api/generation/status/[id] rate-limits repeated checks of the SAM
   it('returns 429 once a single job id is polled past STATUS_MAX_REQUESTS_PER_WINDOW, and does not throttle a DIFFERENT job id', async () => {
     vi.resetModules();
     const { GET } = await import('@/app/api/generation/status/[id]/route');
+    const { encodeJobId } = await import('@/lib/ai/jobId');
     const { STATUS_MAX_REQUESTS_PER_WINDOW } = await import('@/lib/ai/rateLimit.server');
-    const jobId = await freshMockJobId('exhaust-this-one');
+    // Deliberately NOT freshMockJobId (already terminal) — a terminal status
+    // is cached after its first observation (see statusCache.server) and
+    // every later poll of the SAME id is then served from that cache
+    // without ever reaching the rate limiter, so it could never actually
+    // exhaust this ceiling. A job that stays 'queued' (createdAt ~now, well
+    // under mockProvider's QUEUED_UNTIL_MS) for the whole loop keeps this
+    // test genuinely exercising the rate limiter.
+    const jobId = encodeJobId({
+      provider: 'mock',
+      roomId: 'living',
+      outputType: 'image',
+      styleVariant: 'warm-oak',
+      prompt: 'p-exhaust-this-one',
+      createdAt: Date.now(),
+      simulate: 'success',
+    });
 
     for (let i = 0; i < STATUS_MAX_REQUESTS_PER_WINDOW; i++) {
       const res = await GET(makeRequest(jobId), { params: Promise.resolve({ id: jobId }) });

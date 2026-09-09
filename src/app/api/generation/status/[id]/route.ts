@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { decodeJobId } from '@/lib/ai/jobId';
 import { resolveProviderById } from '@/lib/ai/registry.server';
 import { checkRateLimit, STATUS_MAX_REQUESTS_PER_WINDOW } from '@/lib/ai/rateLimit.server';
+import { cacheTerminalStatus, getCachedTerminalStatus } from '@/lib/ai/statusCache.server';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,20 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'Unknown or invalid job id.' }, { status: 404 });
   }
 
+  // A cached TERMINAL status for this exact job id (see statusCache.server's
+  // own doc comment) is served straight away, before the rate limiter and
+  // without ever touching the provider — a completed/failed/moderated job
+  // never changes again, so replaying the same id can never observe
+  // anything new. This is what actually bounds a job's total lifetime of
+  // real provider lookups; the per-job rate limit below only bounds their
+  // RATE, and its window resets forever, so on its own it never stops a
+  // holder of one legitimately issued (but long-finished) job id from
+  // eventually exhausting the provider account's own API quota.
+  const cached = getCachedTerminalStatus(id);
+  if (cached) {
+    return NextResponse.json(cached);
+  }
+
   // Signing already stops a FORGED id from reaching a provider, but says
   // nothing about how many times a genuinely-issued one can be replayed —
   // every request here spends a real, credentialed provider lookup, so a
@@ -44,6 +59,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const provider = resolveProviderById(providerId);
   try {
     const job = await provider.status(id);
+    cacheTerminalStatus(id, job);
     return NextResponse.json(job);
   } catch (error) {
     console.error('[generation/status] lookup failed:', error);

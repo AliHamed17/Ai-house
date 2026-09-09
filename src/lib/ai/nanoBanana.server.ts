@@ -42,11 +42,20 @@ export function isNanoBananaConfigured(): boolean {
   return Boolean(nanoBananaApiKey());
 }
 
-// generateContent is given an AbortSignal (below) so our own client-side wait
-// stops on timeout, but that only closes OUR connection — it cannot recall
-// generation Google's servers already started (and will bill) once the
-// request reached them. A timeout here is therefore exactly as ambiguous as
-// Higgsfield's uncancellable subscribe() call (see isSubmitTimeout in
+// generateContent is deliberately NEVER given the timeout's own AbortSignal
+// (regression: an earlier round wired it through to free our own connection
+// faster on timeout, but aborting only closes OUR side — it cannot recall
+// generation Google's servers already started, and will still bill, once the
+// request reached them. Worse, an abort-reactive SDK call REJECTS its own
+// promise the moment abort() fires — and that promise is the exact one
+// OrphanedTimeoutError's `orphaned` field carries (see withTimeout's own
+// contract comment in resilience.server.ts), so aborting permanently
+// destroys any chance of later reconciling a timed-out-but-actually-
+// completed (and billed) generation, the opposite of what that mechanism
+// exists for). Leaving the call unaborted lets it keep running to its real,
+// eventual outcome after our own wait gives up — mirroring Higgsfield's
+// already-uncancellable subscribe() call. A timeout here is therefore
+// exactly as ambiguous as that Higgsfield case (see isSubmitTimeout in
 // higgsfield.server.ts): the route must not treat it as a definite failure
 // safe to retry, or a retry could start a second, separately billed
 // generation for the exact same request. Naming the message here (rather
@@ -117,13 +126,20 @@ export const nanoBananaProvider: MediaGenerationProvider = {
         parts.push({ inlineData: { mimeType: source.mimeType, data: source.base64 } });
       }
 
-      const response = await withTimeout(
-        (signal) =>
-          ai.models.generateContent({
+      // The image-extraction, store, and encodeJobId steps below run INSIDE
+      // this callback — not after withTimeout resolves — for the same reason
+      // higgsfield.server.ts's submit() does the same (see withTimeout's own
+      // contract comment in resilience.server.ts): on a timeout,
+      // OrphanedTimeoutError's `orphaned` is exactly this callback's own
+      // returned promise, so a late reconciliation must produce the SAME
+      // final job-id STRING this function would otherwise return — not the
+      // SDK's raw GenerateContentResponse.
+      const jobId = await withTimeout(
+        async () => {
+          const response = await ai.models.generateContent({
             model: NANO_BANANA_MODEL,
             contents: parts,
             config: {
-              abortSignal: signal,
               // Without an explicit IMAGE modality, Gemini can return a
               // text-only response — the paid call still completes and is
               // billed, but the inlineData check below then fails as if
@@ -132,28 +148,29 @@ export const nanoBananaProvider: MediaGenerationProvider = {
               responseModalities: [Modality.IMAGE],
               imageConfig: { aspectRatio: '4:3', imageSize: '2K' },
             },
-          }),
+          });
+
+          const candidateParts = response.candidates?.[0]?.content?.parts ?? [];
+          const imagePart = candidateParts.find((p): p is { inlineData: { mimeType?: string; data?: string } } => Boolean((p as { inlineData?: unknown }).inlineData));
+          if (!imagePart?.inlineData?.data) {
+            throw new Error('Nano Banana returned no image data for this prompt.');
+          }
+
+          const mimeType = imagePart.inlineData.mimeType || 'image/png';
+          const resultKey = putStoredResult(mimeType, imagePart.inlineData.data);
+          return encodeJobId({
+            provider: 'nano-banana',
+            roomId: input.roomId,
+            outputType: 'image',
+            styleVariant: input.styleVariant,
+            prompt: input.prompt,
+            createdAt: Date.now(),
+            nanoBananaResultKey: resultKey,
+          });
+        },
         45_000,
         SUBMIT_TIMEOUT_MESSAGE,
       );
-
-      const candidateParts = response.candidates?.[0]?.content?.parts ?? [];
-      const imagePart = candidateParts.find((p): p is { inlineData: { mimeType?: string; data?: string } } => Boolean((p as { inlineData?: unknown }).inlineData));
-      if (!imagePart?.inlineData?.data) {
-        throw new Error('Nano Banana returned no image data for this prompt.');
-      }
-
-      const mimeType = imagePart.inlineData.mimeType || 'image/png';
-      const resultKey = putStoredResult(mimeType, imagePart.inlineData.data);
-      const jobId = encodeJobId({
-        provider: 'nano-banana',
-        roomId: input.roomId,
-        outputType: 'image',
-        styleVariant: input.styleVariant,
-        prompt: input.prompt,
-        createdAt: Date.now(),
-        nanoBananaResultKey: resultKey,
-      });
       return { jobId };
     } finally {
       releaseResultSlot();

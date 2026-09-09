@@ -158,12 +158,35 @@ or camera code:
 
 ## Known prototype limitations
 
-- The in-memory rate limiter and the opaque job-id-encodes-everything status
-  flow are appropriate for a prototype but not for a multi-instance
-  production deployment — see the comments in `src/lib/ai/rateLimit.server.ts`
-  and `src/lib/ai/jobId.ts` for what a production version should use instead
-  (a shared rate-limit store; durable blob storage for generated media
-  instead of inline data URLs).
+- **Every server-side store in `src/lib/ai/` (`rateLimit.server.ts`,
+  `jobId.ts`, `resultStore.server.ts`, `idempotency.server.ts`) is
+  per-process, in-memory, and does not survive a cold start or coordinate
+  across instances** — a deliberate, documented tradeoff appropriate for a
+  single long-running process or local dev, but genuinely broken on a
+  multi-instance/serverless deployment (e.g. concurrent Vercel functions)
+  where a submit, a status poll, and a result download for the SAME job can
+  each land on a different instance:
+  - `jobId.ts` — with no `JOB_ID_SIGNING_SECRET` configured, each instance
+    signs with its own random per-process secret, so even a **demo** job's
+    status poll can 404 with "invalid job id" on a different instance. Live
+    generation already refuses to start without this secret configured
+    (see `hasStableJobIdSigningSecret`); a multi-instance deployment serving
+    demo mode should set it too, even though it isn't required to.
+  - `resultStore.server.ts` — a generated (and, in live mode, already
+    billed) image's bytes live only on the instance that created them; a
+    status/result request landing elsewhere sees a false "expired" 404, and
+    a follow-up refinement or Higgsfield clip can lose its source image.
+  - `idempotency.server.ts` — a retry after a lost response is only
+    recognized as a duplicate by the SAME instance that made the original
+    reservation; on a different instance it finds no reservation and can
+    start a second, separately billed generation despite reusing the exact
+    idempotency key.
+  - `rateLimit.server.ts` — limits are tracked per instance, so real
+    throughput across a fleet can exceed the configured ceiling.
+
+  A production deployment intending real (`AI_ALLOW_LIVE=true`) traffic on
+  more than one instance needs a shared, atomic store (e.g. Redis/a
+  database) behind these four modules — this repo does not include one.
 - Real Nano Banana / Higgsfield calls have not been exercised against live
   credentials in this environment (none were configured); the adapters
   follow the providers' documented request/response shapes but should be

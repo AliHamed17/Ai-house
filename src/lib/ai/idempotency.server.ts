@@ -12,7 +12,13 @@ import 'server-only';
  *
  * Like resultStore/rateLimit, this is per-instance, in-memory, and bounded —
  * adequate for reconciling a retry within the same short window a visitor
- * would plausibly retry in; it does not need to survive a cold start.
+ * would plausibly retry in on a single long-running process; it does not
+ * need to survive a cold start. On a multi-instance/serverless deployment,
+ * though, a retry landing on a DIFFERENT instance than the original attempt
+ * finds no reservation here and can start a second, separately billed
+ * generation despite reusing the exact idempotency key — see "Known
+ * prototype limitations" in README.md. Live traffic across more than one
+ * instance needs a shared, atomic store instead.
  */
 interface IdempotencyEntry {
   promise: Promise<string>;

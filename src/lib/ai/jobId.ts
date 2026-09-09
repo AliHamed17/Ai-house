@@ -57,16 +57,22 @@ export interface JobIdPayload {
 // instances.
 const SIGNING_SECRET = process.env.JOB_ID_SIGNING_SECRET || randomBytes(32).toString('hex');
 
-// The random per-process fallback above is fine for demo mode (a job's
-// validity window — submit then poll, within one running instance — already
-// matches its lifetime), but NOT for a live, billed job: a status request
-// landing on a different serverless instance, or arriving after a restart,
-// would reject that job's otherwise-legitimate id with a different fallback
-// secret in play, permanently losing the only encoded request id needed to
-// retrieve a paid result. Callers that gate live submissions must check this
-// first and refuse to proceed without a configured secret — mirroring the
-// AI_ALLOW_LIVE / PUBLIC_ASSET_ORIGIN pattern of failing closed on a missing
-// deployer config rather than risking money on an unstated assumption.
+// The random per-process fallback above is fine for demo mode on a single
+// long-running process or local dev (a job's validity window — submit then
+// poll — already matches that one process's lifetime), but NOT on a genuinely
+// multi-instance/serverless deployment: a status poll landing on a different
+// instance than the one that signed the id sees a DIFFERENT random secret in
+// play and rejects an otherwise-legitimate id outright, breaking even a
+// zero-config demo poll (see "Known prototype limitations" in README.md). Set
+// JOB_ID_SIGNING_SECRET for any such deployment, demo mode included, not only
+// once live generation is in use.
+//
+// For a LIVE, billed job specifically this is not just a broken poll but a
+// permanently lost paid result, so callers that gate live submissions must
+// check this first and refuse to proceed without a configured secret —
+// mirroring the AI_ALLOW_LIVE / PUBLIC_ASSET_ORIGIN pattern of failing closed
+// on a missing deployer config rather than risking money on an unstated
+// assumption.
 export function hasStableJobIdSigningSecret(): boolean {
   return Boolean(process.env.JOB_ID_SIGNING_SECRET);
 }

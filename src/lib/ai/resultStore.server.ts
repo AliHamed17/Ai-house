@@ -11,7 +11,12 @@ import { randomUUID } from 'node:crypto';
  *
  * Like the in-memory rate limiter, this is per-instance and does not survive a
  * cold start — adequate for this prototype (a poll follows submission within a
- * second on the same instance); production would use a shared object/blob store.
+ * second on the same instance) but NOT for a multi-instance/serverless
+ * deployment: a status/result request landing on a different instance than
+ * the one that generated (and, in live mode, already billed for) the result
+ * sees a false "expired" 404, and a follow-up refinement or Higgsfield clip
+ * can lose its source image. See "Known prototype limitations" in README.md;
+ * production would use a shared object/blob store instead.
  */
 interface StoredResult {
   mimeType: string;

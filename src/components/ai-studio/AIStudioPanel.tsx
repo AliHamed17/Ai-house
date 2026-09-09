@@ -365,21 +365,27 @@ export function AIStudioPanel() {
   //    null it is about to become.
   //  - undefined (every other caller): trust the state read normally.
   function adoptRecoveryEntry(override?: 'preserve' | 'proceed') {
-    // A terminal (completed/failed/moderated) job this tab hasn't approved
-    // or discarded yet is still awaiting the visitor's own decision — and by
-    // every call site here, this tab's OWN recovery key for it is already
-    // gone (settling always clears it first; see clearOwnRecoveryEntry and
-    // its callers). Adopting a sibling right now would both reassign
-    // roomId/outputType out from under that result (see the setJob(null)
-    // below — job is otherwise assumed to always belong to the CURRENT
-    // room) and, via that same reset, discard it outright — permanently,
-    // since there is no longer any recovery entry to fall back on. Defer
-    // entirely until the Approve or Reject action clears this guard (Reject
-    // sets job to null directly; Approve sets approved), rather than risk
-    // silently losing a possibly-billed result the visitor never even got
-    // to see.
-    const hasUnacknowledgedTerminalJob =
-      job !== null && !approved && (job.status === 'completed' || job.status === 'failed' || job.status === 'moderated');
+    // A completed job this tab hasn't approved or discarded yet is still
+    // awaiting the visitor's own decision — and by every call site here,
+    // this tab's OWN recovery key for it is already gone (settling always
+    // clears it first; see clearOwnRecoveryEntry and its callers). Adopting
+    // a sibling right now would both reassign roomId/outputType out from
+    // under that result (see the setJob(null) below — job is otherwise
+    // assumed to always belong to the CURRENT room) and, via that same
+    // reset, discard it outright — permanently, since there is no longer
+    // any recovery entry to fall back on. Defer entirely until the Approve
+    // or Reject action clears this guard (Reject sets job to null directly;
+    // Approve sets approved), rather than risk silently losing a
+    // possibly-billed result the visitor never even got to see.
+    //
+    // Deliberately NOT failed/moderated: those render neither Approve nor
+    // Reject (just an error message — see job.error below), so nothing
+    // could ever clear a defer keyed on them, permanently stranding a
+    // waiting sibling and leaving Generate wrongly enabled with no lock
+    // against it (regression) — exactly the multi-tab hole this mechanism
+    // exists to close. There is also no asset to lose for those statuses;
+    // preservation only matters for a completed result someone might Approve.
+    const hasUnacknowledgedTerminalJob = job !== null && !approved && job.status === 'completed';
     if (override !== 'proceed' && (override === 'preserve' || hasUnacknowledgedTerminalJob)) {
       return;
     }
@@ -694,15 +700,24 @@ export function AIStudioPanel() {
         if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
           setSubmitting(false);
           setRecoverableJobId(null);
-          // 'preserve': statusData (just set above) is this exact terminal
-          // result, always unapproved at the moment it first lands — but
-          // this poll loop closure is reused across every retry via
-          // setTimeout(poll, ...) rather than redefined on each render, so
-          // the `job`/`approved` bindings adoptRecoveryEntry would otherwise
-          // read here are frozen to whatever they were when startPolling
-          // was first called, not this fresh completion. See
-          // adoptRecoveryEntry's own comment.
-          clearOwnRecoveryEntry(jobRecoveryId(jobId), 'preserve');
+          // 'preserve' only for a genuine completed result — statusData
+          // (just set above) is that exact result, always unapproved at the
+          // moment it first lands, but this poll loop closure is reused
+          // across every retry via setTimeout(poll, ...) rather than
+          // redefined on each render, so the `job`/`approved` bindings
+          // adoptRecoveryEntry would otherwise read here are frozen to
+          // whatever they were when startPolling was first called — not
+          // this fresh completion, and NOT reliably null/non-terminal
+          // either: if an EARLIER job had already completed in this same
+          // tab before this polling session started (e.g. the visitor
+          // generated once, then generated again), that stale read could
+          // itself still show a completed, unapproved job, wrongly
+          // deferring a failed/moderated result the same way (regression,
+          // caught by this file's own failed/moderated adoption test) —
+          // so failed/moderated are forced to 'proceed' explicitly here
+          // too, rather than left to fall through to that unreliable
+          // default. Never pass undefined from this call site.
+          clearOwnRecoveryEntry(jobRecoveryId(jobId), statusData.status === 'completed' ? 'preserve' : 'proceed');
           return;
         }
         pollTimerRef.current = setTimeout(poll, 1000);
@@ -1309,6 +1324,25 @@ export function AIStudioPanel() {
                 <button
                   type="button"
                   onClick={() => {
+                    // Like Reject, Approve is a call site where this tab's own
+                    // unacknowledged result was what deferred adoption (see
+                    // adoptRecoveryEntry), and clicking Approve is the visitor's
+                    // explicit decision that settles it — a sibling waiting
+                    // behind it otherwise has no other trigger to ever get
+                    // adopted. Called BEFORE setApproved/setApprovedSource below
+                    // (rather than after, as Reject does) because it matters
+                    // here specifically: adoptRecoveryEntry's own resets
+                    // (setApproved(false), setApprovedSource(null)) then run
+                    // FIRST in the same batch, so the explicit calls below —
+                    // reading job/roomId from this same click's closure, still
+                    // the ORIGINAL room/job regardless of any room switch
+                    // adoption just queued — land last and are what actually
+                    // takes effect, rather than the visitor's just-made
+                    // approval being silently discarded by it (that was the
+                    // gap: adoption used to leave a just-made approval
+                    // unrecorded, with the sibling still never adopted either
+                    // since nothing here called this at all).
+                    adoptRecoveryEntry('proceed');
                     setApproved(true);
                     // Keep the approved image so a later refinement or cinematic
                     // clip is generated from it rather than the raw frame/placeholder —

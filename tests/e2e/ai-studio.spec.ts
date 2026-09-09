@@ -972,6 +972,87 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toHaveCount(0);
   });
 
+  test('a job settling as failed or moderated never defers a waiting sibling — only a completed result (which has Approve/Reject to clear it) does (regression)', async ({ page }) => {
+    // The deferral above only makes sense for a completed result: failed and
+    // moderated jobs render neither Approve nor Reject (just an error
+    // message), so a defer keyed on them could never be cleared by any
+    // visitor action — permanently stranding a waiting sibling behind an
+    // undismissable error, with Generate wrongly left enabled and no lock
+    // against the sibling's own unresolved (possibly billed) outcome.
+    //
+    // The sibling is written directly into this SAME page's storage — a
+    // plain, synchronous same-document write, unlike the Reject/Approve
+    // tests above — for two reasons: (1) it must land strictly AFTER mount
+    // (writing it up front via addInitScript gets adopted immediately at
+    // mount instead, locking Generate before this test ever gets to click
+    // it — an entirely different, already-covered scenario), and (2) unlike
+    // those tests, nothing here depends on the live cross-tab storage-event
+    // path, so a second full page load would only add timing risk around
+    // this test's two sequential Generate clicks (reveal the simulate
+    // control, then actually run it) without exercising anything extra.
+    // startPolling's completion branch reads storage directly at the moment
+    // a job settles, regardless of how or when the entry got there.
+    await page.goto('/#ai-studio');
+
+    // Reveal the demo-mode simulate control with a first, default-outcome
+    // generation, and let IT fully settle before touching the control —
+    // otherwise the sibling write below could race this first job's own
+    // completion instead of the second (failure) one's.
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.locator('select').filter({ hasText: 'Success' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    await page.locator('select').filter({ hasText: 'Success' }).selectOption('failure');
+
+    await page.evaluate((prefix) => {
+      localStorage.setItem(
+        `${prefix}job:sibling-different-room-job-id-2`,
+        JSON.stringify({ kind: 'job', jobId: 'sibling-different-room-job-id-2', roomId: 'kitchen', outputType: 'image', createdAt: Date.now() }),
+      );
+    }, RECOVERY_STORAGE_PREFIX);
+
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+
+    // No Approve/Reject exists for a failed job, so nothing was needed to
+    // clear a defer — the sibling is adopted immediately, in the SAME
+    // batch as the job settling. That means "Failed" itself is never the
+    // asserted state here (job goes back to null as part of that same
+    // adoption, superseding it before it ever paints) — what's actually
+    // under test is that adoption happens at all, promptly, rather than
+    // this failed job permanently and silently stranding it.
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('select').first()).toHaveValue('kitchen');
+  });
+
+  test("Approve adopts a deferred sibling too — not just Reject — while still recording the visitor's own approval (regression)", async ({
+    page,
+    context,
+  }) => {
+    // Approve only ever updated `approved`/`approvedSource`; nothing else
+    // re-checked for a waiting sibling afterward, so one deferred behind a
+    // completed (and now approved) result stayed hidden indefinitely —
+    // Generate stayed enabled with no lock against its still-unresolved,
+    // possibly billed outcome.
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+
+    const page2 = await context.newPage();
+    await page2.goto('/#ai-studio');
+    await page2.evaluate((prefix) => {
+      localStorage.setItem(
+        `${prefix}job:sibling-different-room-job-id-3`,
+        JSON.stringify({ kind: 'job', jobId: 'sibling-different-room-job-id-3', roomId: 'kitchen', outputType: 'image', createdAt: Date.now() }),
+      );
+    }, RECOVERY_STORAGE_PREFIX);
+
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Approve' }).click();
+
+    // Approving is itself the acknowledgment that clears the defer — the
+    // sibling is adopted right away, same as Reject does.
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('select').first()).toHaveValue('kitchen');
+  });
+
   test('a tab that adopted a sibling entry unlocks once the OWNING tab genuinely settles it, without needing to reload or manually resume/abandon (regression)', async ({
     page,
     context,

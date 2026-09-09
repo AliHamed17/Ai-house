@@ -13,8 +13,19 @@ export async function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>, m
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      controller.abort();
+      // Order matters: reject with OUR error before calling abort(). An
+      // abort-aware `run` (fetch, the Gemini SDK) can react to the signal by
+      // rejecting its own promise synchronously from inside abort()'s
+      // listener dispatch — with a generic AbortError, not this message. If
+      // that happened first, it would settle (and win) the Promise.race
+      // below, so callers checking error.message against this specific
+      // string (isSubmitTimeout) would never recognize it as their own
+      // timeout: an ambiguous, possibly-already-billed request would then
+      // get misclassified as a definite, safe-to-retry failure. Settling
+      // this promise first guarantees the race resolves with OUR error
+      // regardless of how (or how fast) `run` reacts to the abort.
       reject(new Error(message));
+      controller.abort();
     }, ms);
   });
   try {

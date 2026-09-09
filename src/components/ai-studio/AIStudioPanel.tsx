@@ -94,7 +94,7 @@ const RECOVERY_MAX_AGE_MS = {
 } as const;
 
 type RecoveryEntry =
-  | { kind: 'job'; jobId: string; roomId: RoomId; outputType: GenerationOutputType; createdAt: number; ownerTabId?: string }
+  | { kind: 'job'; jobId: string; roomId: RoomId; outputType: GenerationOutputType; createdAt: number }
   | {
       kind: 'submission';
       ambiguous: boolean;
@@ -104,26 +104,32 @@ type RecoveryEntry =
       roomId: RoomId;
       outputType: GenerationOutputType;
       createdAt: number;
-      ownerTabId?: string;
     };
 
 // sessionStorage, unlike localStorage, is never shared with any other
 // browser tab (not even a duplicate of this one) but DOES survive a reload
-// of THIS same tab — exactly the "did I actually write this entry" signal
-// abandonRecoveryEntry needs, to tell "safe to delete, I wrote it (even if
-// before a reload)" apart from "merely adopted from a genuinely different,
-// possibly still-active tab" (see abandonRecoveryEntry below).
-const TAB_SESSION_ID_KEY = 'ai-studio:tab-session-id';
-function getTabSessionId(): string | undefined {
+// of THIS same tab — exactly what lets abandonRecoveryEntry remember, for
+// the rest of THIS tab's own session, which entries this tab has locally
+// abandoned, so a reload right after Abandon does not immediately re-adopt
+// and re-display the exact entry the visitor just dismissed (see
+// abandonRecoveryEntry below).
+const LOCALLY_IGNORED_IDS_KEY = 'ai-studio:locally-ignored-ids';
+function readLocallyIgnoredIds(): Set<string> {
   try {
-    let id = sessionStorage.getItem(TAB_SESSION_ID_KEY);
-    if (!id) {
-      id = crypto.randomUUID();
-      sessionStorage.setItem(TAB_SESSION_ID_KEY, id);
-    }
-    return id;
+    const raw = sessionStorage.getItem(LOCALLY_IGNORED_IDS_KEY);
+    return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
   } catch {
-    return undefined;
+    return new Set();
+  }
+}
+function addLocallyIgnoredId(id: string): void {
+  try {
+    const ids = readLocallyIgnoredIds();
+    ids.add(id);
+    sessionStorage.setItem(LOCALLY_IGNORED_IDS_KEY, JSON.stringify([...ids]));
+  } catch {
+    // Best-effort — the in-memory ref this mirrors still works for the rest
+    // of this tab's current session either way.
   }
 }
 
@@ -218,28 +224,7 @@ function readAllRecoveryEntries(): Record<string, RecoveryEntry> {
 function writeRecoveryEntry(entry: RecoveryEntry): void {
   try {
     const key = recoveryStorageKey(recoveryEntryId(entry));
-    // Preserves the ORIGINAL writer's id when this call is re-writing an
-    // entry that already exists — resuming an ADOPTED entry (startPolling's
-    // own upfront write, or a resumed submission's failure branch) re-writes
-    // the exact same key, and unconditionally re-stamping it here would
-    // silently transfer ownership to whichever tab happens to be resuming.
-    // abandonRecoveryEntry would then consider that resuming tab the true
-    // owner and delete a shared entry a genuinely different tab still
-    // depends on (regression). Only a genuinely first-ever write for this
-    // exact key (nothing there yet, or a legacy entry predating this field)
-    // falls back to stamping THIS tab's own id.
-    let ownerTabId = getTabSessionId();
-    try {
-      const existingRaw = localStorage.getItem(key);
-      if (existingRaw) {
-        const existing = JSON.parse(existingRaw) as RecoveryEntry;
-        if (existing.ownerTabId) ownerTabId = existing.ownerTabId;
-      }
-    } catch {
-      // best-effort — falls back to this tab's own id
-    }
-    const stamped: RecoveryEntry = { ...entry, ownerTabId };
-    localStorage.setItem(key, JSON.stringify(stamped));
+    localStorage.setItem(key, JSON.stringify(entry));
   } catch {
     // Best-effort (private browsing, storage disabled, quota) — the
     // in-memory state this mirrors still works for as long as the tab
@@ -296,10 +281,12 @@ export function AIStudioPanel() {
   // response can never overwrite the current job's state.
   const pollTokenRef = useRef(0);
   // Entries this tab has locally abandoned WITHOUT deleting from shared
-  // storage (see abandonRecoveryEntry) — never persisted, so a reload of
-  // this same tab is free to re-adopt one, but adoptRecoveryEntry must skip
-  // them for the rest of THIS session or it would immediately re-adopt the
-  // exact entry Abandon just tried to stop tracking.
+  // storage (see abandonRecoveryEntry) — mirrors sessionStorage (see
+  // readLocallyIgnoredIds/addLocallyIgnoredId above), seeded from it in the
+  // mount effect below, so a reload of THIS same tab does not immediately
+  // re-adopt the exact entry Abandon just tried to stop tracking, while a
+  // genuinely different tab (with its own separate sessionStorage) is
+  // completely unaffected.
   const locallyIgnoredIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => () => {
@@ -358,56 +345,44 @@ export function AIStudioPanel() {
   // Clears this tab's own recovery record, then immediately re-checks for a
   // remaining one. A same-document localStorage write never fires this same
   // tab's `storage` listener (see handleStorageEvent below), so once this
-  // tab's own tracked job/submission settles or is abandoned, nothing else
-  // would notice a genuinely different tab's still-outstanding entry — the
-  // Generate button would incorrectly re-enable (hasUnresolvedJob false)
-  // while that other entry's possibly-billed outcome is still unresolved.
-  // Always call this instead of clearRecoveryEntry directly for an entry
-  // this tab currently owns. Safe unconditionally: adoptRecoveryEntry is a
-  // no-op when nothing remains.
+  // tab's own tracked job/submission settles, nothing else would notice a
+  // genuinely different tab's still-outstanding entry — the Generate button
+  // would incorrectly re-enable (hasUnresolvedJob false) while that other
+  // entry's possibly-billed outcome is still unresolved. Always call this
+  // instead of clearRecoveryEntry directly for a genuinely SETTLED entry
+  // (never for Abandon — see abandonRecoveryEntry below). Safe
+  // unconditionally: adoptRecoveryEntry is a no-op when nothing remains.
   function clearOwnRecoveryEntry(id: string): void {
     clearRecoveryEntry(id);
     adoptRecoveryEntry();
   }
 
   // Used by Abandon (never by a settle/resolve path, which always owns what
-  // it's clearing). Deletes the shared storage entry only when THIS tab is
-  // confident nothing else could depend on it: it genuinely wrote the entry
-  // itself (ownerTabId matches this tab's own stable-across-reloads
-  // sessionStorage id — see getTabSessionId/writeRecoveryEntry), or the
-  // entry predates that field entirely (no ownerTabId at all — legacy data,
-  // treated as ours). Otherwise — a genuinely different tab's own entry —
-  // the shared record is left completely untouched: deleting it would fire
-  // THAT tab's own `storage` listener and silently clear its unrelated
-  // tracking too (see handleStorageEvent), letting both tabs believe a
-  // possibly-still-billing job is resolved when neither has confirmed that
-  // (regression). Abandoning is then purely local, exactly what the banner
-  // already promises ("stops checking locally").
+  // it's clearing and calls clearOwnRecoveryEntry directly instead). Even
+  // when THIS tab is genuinely the one that originally wrote the entry, a
+  // completely different tab may since have adopted the very same record —
+  // adoptRecoveryEntry never announces itself anywhere, so there is no
+  // reliable way to rule that out — and still depend on it: deleting it out
+  // from under that tab would fire ITS `storage` listener and silently
+  // clear its unrelated tracking too, letting both tabs believe a
+  // possibly-still-billing job is resolved when neither has actually
+  // confirmed that (regression). Abandoning is therefore ALWAYS purely
+  // local, exactly what the banner already promises ("stops checking
+  // locally"): the shared record itself is left completely untouched, and
+  // only genuinely reaching a terminal outcome (clearOwnRecoveryEntry's own
+  // callers) ever removes it.
   function abandonRecoveryEntry(id: string): void {
-    let owned = true;
-    try {
-      const raw = localStorage.getItem(recoveryStorageKey(id));
-      if (raw) {
-        const entry = JSON.parse(raw) as RecoveryEntry;
-        owned = !entry.ownerTabId || entry.ownerTabId === getTabSessionId();
-      }
-    } catch {
-      // Can't verify either way — err toward NOT deleting a possibly shared entry.
-      owned = false;
-    }
-    if (owned) {
-      clearOwnRecoveryEntry(id);
-    } else {
-      locallyIgnoredIdsRef.current.add(id);
-      adoptRecoveryEntry();
-    }
+    locallyIgnoredIdsRef.current.add(id);
+    addLocallyIgnoredId(id);
+    adoptRecoveryEntry();
   }
 
   useEffect(() => {
-    // Restoring from an external system (localStorage) on mount, not
-    // deriving from other React state — see MobileControls.tsx for the same
-    // sanctioned pattern and rule exception.
+    // Restoring from an external system (localStorage/sessionStorage) on
+    // mount, not deriving from other React state — see MobileControls.tsx
+    // for the same sanctioned pattern and rule exception.
     /* eslint-disable react-hooks/set-state-in-effect */
+    locallyIgnoredIdsRef.current = readLocallyIgnoredIds();
     adoptRecoveryEntry();
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);

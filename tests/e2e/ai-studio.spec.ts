@@ -644,11 +644,16 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page2.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
   });
 
-  test('abandoning a recoverable job clears its recovery record and unlocks Generate (regression)', async ({ page }) => {
+  test('abandoning a recoverable job unlocks Generate locally without ever deleting the shared record (regression)', async ({ page }) => {
     // A permanently uncheckable job (e.g. provider credentials removed after
     // submission) would otherwise leave Generate disabled forever — Resume
     // just fails the same way every time, and the 24h ceiling is only
     // evaluated at mount. Abandon is the only escape hatch for that case.
+    // It must stay purely local, though: the underlying provider job may
+    // still be running (and already billed), and a completely different tab
+    // may have adopted this exact entry and still depend on it (see
+    // abandonRecoveryEntry in AIStudioPanel) — only a genuine terminal
+    // settlement is allowed to remove the shared storage record.
     await page.route('**/api/generation/status/**', (route) => route.abort());
     await page.goto('/#ai-studio');
     await page.getByRole('button', { name: /Generate concept image/i }).click();
@@ -658,12 +663,18 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
     await expect(page.locator('select').first()).toBeEnabled();
 
-    // Not just hidden in memory — actually gone from storage, or a reload
-    // would resurrect the same deadlock.
-    expect(await recoveryEntryIds(page)).toEqual([]);
+    // The shared record survives Abandon — it is not this tab's alone to delete.
+    expect(await recoveryEntryIds(page)).toHaveLength(1);
+
+    // Reloading this SAME tab must not resurrect the banner it just
+    // dismissed — the locally-ignored id persists via sessionStorage across
+    // the reload even though the storage entry itself is still there.
+    await page.reload();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toHaveCount(0);
   });
 
-  test('abandoning a recoverable submission clears its recovery record and unlocks Generate (regression)', async ({ page }) => {
+  test('abandoning a recoverable submission unlocks Generate locally without ever deleting the shared record (regression)', async ({ page }) => {
     await page.route('**/api/nano-banana/generate', (route) => route.abort());
     await page.goto('/#ai-studio');
     await page.getByRole('button', { name: /Generate concept image/i }).click();
@@ -673,7 +684,11 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
     await expect(page.locator('select').first()).toBeEnabled();
 
-    expect(await recoveryEntryIds(page)).toEqual([]);
+    expect(await recoveryEntryIds(page)).toHaveLength(1);
+
+    await page.reload();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toHaveCount(0);
   });
 
   test('abandoning a recoverable job while a genuinely different tab\'s entry is still outstanding surfaces THAT entry instead of unlocking Generate (regression)', async ({ page }) => {
@@ -726,7 +741,13 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible();
     await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
 
-    expect(await recoveryEntryIds(page)).toEqual(['job:sibling-still-outstanding-job-id']);
+    // Abandon is purely local: the abandoned entry stays in storage right
+    // alongside the sibling's (see abandonRecoveryEntry in AIStudioPanel) —
+    // only a genuine terminal settlement ever removes a shared record.
+    const ids = await recoveryEntryIds(page);
+    expect(ids).toHaveLength(2);
+    expect(ids).toContain('job:sibling-still-outstanding-job-id');
+    expect(ids).toContain('job:own-job-about-to-be-abandoned-id');
   });
 
   test('a genuinely different tab\'s recovery write is ignored while THIS tab has its own submission in flight, so it can never hijack the room mid-request (regression)', async ({
@@ -814,18 +835,19 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toHaveCount(0);
   });
 
-  test('a tab that adopted a sibling entry unlocks once the OWNING tab resolves it, without needing to reload or manually resume/abandon (regression)', async ({
+  test('a tab that adopted a sibling entry unlocks once the OWNING tab genuinely settles it, without needing to reload or manually resume/abandon (regression)', async ({
     page,
     context,
   }) => {
     // Tab 2 adopting tab 1's entry makes tab 2's OWN recoverable state
     // non-null, which — before tracking the adopted entry's own identity —
     // meant tab 2's storage listener would then ignore ALL further events,
-    // including tab 1 later removing that exact key by resolving it. Tab 2
-    // would stay stuck showing a Resume banner for a record that no longer
-    // exists anywhere, until manually resumed or abandoned.
+    // including tab 1 later removing that exact key by genuinely settling
+    // it. Tab 2 would stay stuck showing a Resume banner for a record that
+    // no longer exists anywhere, until manually resumed or abandoned.
+    let blockGenerate = true;
+    await page.route('**/api/nano-banana/generate', (route) => (blockGenerate ? route.abort() : route.continue()));
     const page2 = await context.newPage();
-    await page.route('**/api/nano-banana/generate', (route) => route.abort());
     await page.goto('/#ai-studio');
     await page2.goto('/#ai-studio');
 
@@ -835,13 +857,52 @@ test.describe('AI Design Studio (demo mode)', () => {
     // Tab 2, already open and idle, picks this up live and shows its own banner.
     await expect(page2.getByRole('button', { name: 'Resume submission' })).toBeVisible();
 
-    // Tab 1 (the true owner) abandons it — removing the key from storage.
-    await page.getByRole('button', { name: 'Abandon and start over' }).click();
-    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+    // Tab 1 (the true owner) reaches a genuine terminal outcome — the one
+    // thing allowed to remove the shared record (see clearOwnRecoveryEntry
+    // in AIStudioPanel). Abandoning alone must NOT do this — see the test
+    // right below.
+    blockGenerate = false;
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
 
     // Tab 2 must notice the removal live and unlock on its own.
     await expect(page2.getByRole('button', { name: 'Resume submission' })).toHaveCount(0, { timeout: 10_000 });
     await expect(page2.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+  });
+
+  test('abandoning the OWNING tab\'s job does NOT unlock a sibling tab that adopted it — only genuine settlement does (regression)', async ({
+    page,
+    context,
+  }) => {
+    // The bug this guards against: Abandon deleted the shared storage entry
+    // outright whenever this tab happened to be the one that originally
+    // wrote it, which fired a completely different, adopting tab's own
+    // storage listener and made it believe the job was resolved — even
+    // though the provider-side job may still be running (and already
+    // billed), letting that tab start a fresh, potentially duplicate-billed
+    // generation. Abandon must stay purely local for every tab, including
+    // the original owner; only a genuine terminal outcome may remove the
+    // shared record (see abandonRecoveryEntry in AIStudioPanel).
+    const page2 = await context.newPage();
+    await page.route('**/api/nano-banana/generate', (route) => route.abort());
+    await page.goto('/#ai-studio');
+    await page2.goto('/#ai-studio');
+
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    // Tab 2, already open and idle, adopts it live.
+    await expect(page2.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+
+    // Tab 1 (the true owner) merely abandons — no terminal outcome is known.
+    await page.getByRole('button', { name: 'Abandon and start over' }).click();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+
+    // Tab 2 must stay exactly as it was: still showing its own banner, still
+    // locked, with the shared record still there for it to depend on.
+    await expect(page2.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+    await expect(page2.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
+    expect(await recoveryEntryIds(page2)).toHaveLength(1);
   });
 
   test('abandoning an ADOPTED sibling entry never disturbs the OWNING tab\'s own tracking (regression)', async ({ page, context }) => {
@@ -874,54 +935,6 @@ test.describe('AI Design Studio (demo mode)', () => {
     // genuinely Resume and complete — proving its OWN tracking, not just
     // the storage key, survived.
     await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
-    await expect(page.locator('select').first()).toBeDisabled();
-    expect(await recoveryEntryIds(page)).toHaveLength(1);
-
-    blockGenerate = false;
-    await page.getByRole('button', { name: 'Resume submission' }).click();
-    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('resuming an ADOPTED entry preserves the original owner, so a later Abandon by the resuming tab still cannot disturb it (regression)', async ({
-    page,
-    context,
-  }) => {
-    // Tab 2 adopts tab 1's entry, then Resumes it — which re-writes the SAME
-    // storage key (submitOnce's own failure branch, same as startPolling's
-    // unconditional upfront write for a job). Before this fix, that
-    // unconditionally re-stamped ownerTabId to tab 2's own id, so a LATER
-    // Abandon by tab 2 would then consider tab 2 the true owner and delete
-    // the shared entry out from under tab 1 — the exact round-40 bug,
-    // reintroduced through the resume path instead of abandon directly.
-    let blockGenerate = true;
-    await page.route('**/api/nano-banana/generate', (route) => (blockGenerate ? route.abort() : route.continue()));
-
-    const page2 = await context.newPage();
-    await page2.route('**/api/nano-banana/generate', (route) => (blockGenerate ? route.abort() : route.continue()));
-
-    await page.goto('/#ai-studio');
-    await page2.goto('/#ai-studio');
-
-    await page.getByRole('button', { name: /Generate concept image/i }).click();
-    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
-
-    // Tab 2 adopts tab 1's entry live.
-    await expect(page2.getByRole('button', { name: 'Resume submission' })).toBeVisible();
-
-    // Tab 2 resumes — this attempt ALSO fails (blockGenerate is still
-    // true), so submitOnce's failure branch re-writes the same key.
-    await page2.getByRole('button', { name: 'Resume submission' }).click();
-    await expect(page2.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
-
-    // Tab 2 — still not the TRUE owner, despite having just resumed it —
-    // abandons.
-    await page2.getByRole('button', { name: 'Abandon and start over' }).click();
-    await expect(page2.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
-
-    // Tab 1 (the true owner) must be completely unaffected: still shows its
-    // own banner, its shared storage entry still exists, and it can still
-    // genuinely Resume and complete.
-    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible();
     await expect(page.locator('select').first()).toBeDisabled();
     expect(await recoveryEntryIds(page)).toHaveLength(1);
 

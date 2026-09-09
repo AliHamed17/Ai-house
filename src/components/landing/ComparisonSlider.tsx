@@ -18,9 +18,17 @@ export function ComparisonSlider({ label, beforeSrc, beforeAlt, afterSrc, afterA
   return (
     <div className="overflow-hidden rounded-3xl border border-limestone/60 bg-ivory shadow-sm">
       <div className="relative aspect-[4/3] w-full select-none">
-        <Image src={beforeSrc} alt={beforeAlt} fill sizes="(max-width: 1024px) 100vw, 50vw" className="object-cover" />
+        {/* afterSrc (Concept) is the always-visible base layer, and beforeSrc
+            (Unfinished) is the clipped overlay revealed from the left — the
+            REVERSE of a naive reading of "before is the base" — because the
+            "Unfinished" label below is pinned to the left corner and
+            "Concept" to the right (regression: the original pairing put
+            Concept on the left, under the "Unfinished" label, and vice
+            versa). The clip-path itself is unchanged, so the divider's own
+            drag direction still feels exactly as before. */}
+        <Image src={afterSrc} alt={afterAlt} fill sizes="(max-width: 1024px) 100vw, 50vw" className="object-cover" unoptimized={afterIsSvg} />
         <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - value}% 0 0)` }}>
-          <Image src={afterSrc} alt={afterAlt} fill sizes="(max-width: 1024px) 100vw, 50vw" className="object-cover" unoptimized={afterIsSvg} />
+          <Image src={beforeSrc} alt={beforeAlt} fill sizes="(max-width: 1024px) 100vw, 50vw" className="object-cover" />
         </div>
         <div className="pointer-events-none absolute inset-y-0 w-0.5 bg-ivory shadow" style={{ left: `${value}%` }} />
         <span className="pointer-events-none absolute left-3 top-3 rounded-full bg-charcoal/70 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-ivory">

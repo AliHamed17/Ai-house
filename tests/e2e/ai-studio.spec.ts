@@ -367,6 +367,66 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
   });
 
+  test('a burst of status-check 429s honors Retry-After and never exhausts the transient-failure budget (regression)', async ({ page }) => {
+    // The status route rate-limits by job id, not by tab (see its own
+    // comment) — several tabs polling the SAME long-running job share one
+    // budget, so a 429 here is an expected, benign consequence of that, not
+    // a sign anything is wrong. The old (buggy) behavior counted each 429
+    // as an ordinary transient failure retried at a fixed 1.5s, so eight
+    // 429s (more than MAX_TRANSIENT_FAILURES, 5) would exhaust the budget
+    // and surface the recoverable banner in well under the rate-limit
+    // window's own duration.
+    // Real timers throughout (a short Retry-After keeps this fast) — mixing
+    // a fake page clock with Playwright's route interception (a genuinely
+    // async IPC round-trip, not timer-driven) proved unreliable: the fake
+    // clock has no way to know when an intercepted fetch has actually
+    // settled, so advancing it can race arbitrarily far ahead of how many
+    // polls have really completed.
+    let attempt = 0;
+    const RETRY_AFTER_SECONDS = 1;
+    await page.route('**/api/generation/status/**', (route) => {
+      attempt += 1;
+      if (attempt <= 8) {
+        return route.fulfill({
+          status: 429,
+          contentType: 'application/json',
+          headers: { 'Retry-After': String(RETRY_AFTER_SECONDS) },
+          body: JSON.stringify({ error: 'Too many status checks for this job. Please wait a moment and try again.' }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          jobId: 'rate-limited-job-id',
+          provider: 'mock',
+          outputType: 'image',
+          roomId: 'living',
+          status: 'completed',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          resultUrl: '/generated/concepts/living.svg',
+          meta: { model: 'mock', styleVariant: 'warm-oak', prompt: 'p', approved: false },
+        }),
+      });
+    });
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+
+    // By ~6 real seconds, at 1 retry/second, at least 6 of the 8 configured
+    // 429s have already happened — more than MAX_TRANSIENT_FAILURES (5) —
+    // so the old, buggy fixed-1.5s-retry behavior would already have
+    // exhausted its budget and shown the recoverable banner by now.
+    await page.waitForTimeout(6_000);
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toHaveCount(0);
+    await expect(page.getByText(/Could not fetch generation status/i)).toHaveCount(0);
+
+    // The 9th response (mocked as success) eventually lands once the
+    // configured 429s run out.
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 15_000 });
+  });
+
   test('malformed persisted recovery entries are discarded instead of crashing the studio on load (regression)', async ({ page }) => {
     // JSON.parse only proves the stored text was syntactically valid JSON —
     // a same-origin localStorage entry can still be `null`, an object left

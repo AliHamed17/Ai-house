@@ -769,6 +769,22 @@ export function AIStudioPanel() {
         const statusData = (await statusRes.json().catch(() => ({}))) as GenerationJob & { error?: string };
         if (token !== pollTokenRef.current) return;
         if (!statusRes.ok) {
+          if (statusRes.status === 429) {
+            // Rate-limiting here is keyed by job id, not by tab (see the
+            // status route's own comment) — several tabs all resuming the
+            // SAME long-running job share one budget, so a 429 is an
+            // expected, benign consequence of that, not a sign anything is
+            // actually wrong. Treating it as an ordinary transient failure
+            // would exhaust MAX_TRANSIENT_FAILURES from a handful of
+            // closely-spaced 429s alone (a fixed 1.5s retry against a
+            // ~60s-wide rate-limit window), moving every tab into recovery
+            // well before that window has even cleared. Honor the server's
+            // own Retry-After instead, and spend none of that budget on it.
+            const retryAfterSeconds = Number(statusRes.headers.get('Retry-After'));
+            const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : 1500;
+            pollTimerRef.current = setTimeout(poll, retryAfterMs);
+            return;
+          }
           retryOrFail('Could not fetch generation status.', statusData.error);
           return;
         }

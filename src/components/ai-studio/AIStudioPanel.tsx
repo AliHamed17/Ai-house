@@ -217,10 +217,29 @@ function readAllRecoveryEntries(): Record<string, RecoveryEntry> {
 
 function writeRecoveryEntry(entry: RecoveryEntry): void {
   try {
-    // Stamped here (one choke point) rather than requiring every call site
-    // to remember it — see abandonRecoveryEntry for why this matters.
-    const stamped: RecoveryEntry = { ...entry, ownerTabId: getTabSessionId() };
-    localStorage.setItem(recoveryStorageKey(recoveryEntryId(entry)), JSON.stringify(stamped));
+    const key = recoveryStorageKey(recoveryEntryId(entry));
+    // Preserves the ORIGINAL writer's id when this call is re-writing an
+    // entry that already exists — resuming an ADOPTED entry (startPolling's
+    // own upfront write, or a resumed submission's failure branch) re-writes
+    // the exact same key, and unconditionally re-stamping it here would
+    // silently transfer ownership to whichever tab happens to be resuming.
+    // abandonRecoveryEntry would then consider that resuming tab the true
+    // owner and delete a shared entry a genuinely different tab still
+    // depends on (regression). Only a genuinely first-ever write for this
+    // exact key (nothing there yet, or a legacy entry predating this field)
+    // falls back to stamping THIS tab's own id.
+    let ownerTabId = getTabSessionId();
+    try {
+      const existingRaw = localStorage.getItem(key);
+      if (existingRaw) {
+        const existing = JSON.parse(existingRaw) as RecoveryEntry;
+        if (existing.ownerTabId) ownerTabId = existing.ownerTabId;
+      }
+    } catch {
+      // best-effort — falls back to this tab's own id
+    }
+    const stamped: RecoveryEntry = { ...entry, ownerTabId };
+    localStorage.setItem(key, JSON.stringify(stamped));
   } catch {
     // Best-effort (private browsing, storage disabled, quota) — the
     // in-memory state this mirrors still works for as long as the tab

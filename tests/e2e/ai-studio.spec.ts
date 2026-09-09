@@ -882,6 +882,54 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
   });
 
+  test('resuming an ADOPTED entry preserves the original owner, so a later Abandon by the resuming tab still cannot disturb it (regression)', async ({
+    page,
+    context,
+  }) => {
+    // Tab 2 adopts tab 1's entry, then Resumes it — which re-writes the SAME
+    // storage key (submitOnce's own failure branch, same as startPolling's
+    // unconditional upfront write for a job). Before this fix, that
+    // unconditionally re-stamped ownerTabId to tab 2's own id, so a LATER
+    // Abandon by tab 2 would then consider tab 2 the true owner and delete
+    // the shared entry out from under tab 1 — the exact round-40 bug,
+    // reintroduced through the resume path instead of abandon directly.
+    let blockGenerate = true;
+    await page.route('**/api/nano-banana/generate', (route) => (blockGenerate ? route.abort() : route.continue()));
+
+    const page2 = await context.newPage();
+    await page2.route('**/api/nano-banana/generate', (route) => (blockGenerate ? route.abort() : route.continue()));
+
+    await page.goto('/#ai-studio');
+    await page2.goto('/#ai-studio');
+
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    // Tab 2 adopts tab 1's entry live.
+    await expect(page2.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+
+    // Tab 2 resumes — this attempt ALSO fails (blockGenerate is still
+    // true), so submitOnce's failure branch re-writes the same key.
+    await page2.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page2.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
+
+    // Tab 2 — still not the TRUE owner, despite having just resumed it —
+    // abandons.
+    await page2.getByRole('button', { name: 'Abandon and start over' }).click();
+    await expect(page2.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+
+    // Tab 1 (the true owner) must be completely unaffected: still shows its
+    // own banner, its shared storage entry still exists, and it can still
+    // genuinely Resume and complete.
+    await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible();
+    await expect(page.locator('select').first()).toBeDisabled();
+    expect(await recoveryEntryIds(page)).toHaveLength(1);
+
+    blockGenerate = false;
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+  });
+
   test('a 504 (ambiguous submit timeout) does not adopt a sibling while upgrading its own entry in place (regression)', async ({ page }) => {
     // clearOwnRecoveryEntry's adoption is correct after a genuinely
     // definite, terminal outcome, but a 504 immediately re-writes this SAME

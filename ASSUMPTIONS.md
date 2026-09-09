@@ -53,19 +53,27 @@ this project was built from.
   structural (load-bearing vs. partition) distinction is encoded anywhere.
 - **Wet-room ventilation** (`wc_guest`, `bathroom_ensuite`) — modeled with no
   window (assumed mechanical extraction); unconfirmed.
+- **MAMAD ventilation** — a real Israeli protected room requires a dedicated
+  ventilation feature (e.g. a sealed valve/duct) distinct from its door and
+  window; no such opening is legible in the source evidence, `OpeningKind`
+  (`src/lib/types.ts`) has no ventilation variant, and neither the data model
+  nor `validateMamadProtected` represents or enforces one. Only the door,
+  window, and clearances are actually fixed/validated — user-facing copy
+  must not claim ventilation is modeled here.
 - **Structural column position** (`structuralFeatures` in
   `src/data/house.ts`) — placed to match its approximate position in the
   walkthrough (00:12–00:20), not measured.
 
 ## Non-negotiable constraint (not an assumption)
 
-The `mamad` room is an Israeli protected room. Its door, window,
-ventilation, and required clearances are fixed in the data model
-(`isProtected: true` on the room and on its one door/window in
-`src/data/house.ts`) and are validated by
+The `mamad` room is an Israeli protected room. Its door, window, and
+required clearances are fixed in the data model (`isProtected: true` on the
+room and on its one door/window in `src/data/house.ts`) and are validated by
 `tests/unit/house-validation.test.ts`. No material variant, lighting mode,
 or AI-generated concept in this project alters them — material variants only
 ever change floor/wall colors (`src/data/materials.ts`), never geometry.
+Ventilation is NOT part of this enforced set — see the "MAMAD ventilation"
+assumption above.
 
 ## Remaining limitation
 

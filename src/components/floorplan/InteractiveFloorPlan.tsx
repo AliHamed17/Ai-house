@@ -110,7 +110,9 @@ export function InteractiveFloorPlan({ onRoomActivate, activateLabel = 'Enter ro
             </dl>
             {activeRoom.isProtected && (
               <p className="mt-3 rounded-xl bg-olive/10 px-3 py-2 text-xs text-olive">
-                🛡 MAMAD protected room — door, window, ventilation, and clearances are fixed and cannot be altered.
+                🛡 MAMAD protected room — its door, window, and required clearances are fixed in this model and
+                cannot be altered. A real protected room also requires a dedicated ventilation feature, which this
+                evidence-derived model does not separately represent.
               </p>
             )}
             {onRoomActivate && (

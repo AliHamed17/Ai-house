@@ -66,6 +66,13 @@ export function buildNanoBananaPrompt(roomId: RoomId, styleVariantId: string, vi
     `Material direction for this variation: ${variant.label} — ${variant.description}`,
     'Make the result buildable, uncluttered, and correctly scaled. Keep plumbing fixtures only in their plan-supported wet zone.',
     ...(visitorInstruction ? [`Additionally, honor this visitor request: ${visitorInstruction}.`] : []),
+    // Reasserted AFTER the visitor instruction, not just embedded earlier in
+    // the furniture plan (see mamad's entry above) — a conflicting request
+    // ("place full-height storage in front of the window") would otherwise
+    // have the last word, and NEGATIVE_CONSTRAINTS below only forbids
+    // changing an opening's geometry, not obstructing it. Mirrors the same
+    // reassertion buildNanoBananaEditPrompt does for a refinement.
+    ...(isProtectedRoom(roomId) ? [PROTECTED_CLEARANCE_SENTENCE] : []),
     `Return a clean high-resolution architectural visualization. ${NEGATIVE_CONSTRAINTS}`,
   ].join(' ');
 }

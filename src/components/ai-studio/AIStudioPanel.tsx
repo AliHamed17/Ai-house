@@ -364,7 +364,11 @@ export function AIStudioPanel() {
   //    read below still sees the OLD (just-rejected) completed job, not the
   //    null it is about to become.
   //  - undefined (every other caller): trust the state read normally.
-  function adoptRecoveryEntry(override?: 'preserve' | 'proceed') {
+  // Returns whether an entry was actually adopted — Approve's onClick uses
+  // this to know whether ITS OWN setApproved(true) (see below) is still the
+  // right call, or whether adoption's setApproved(false) must be left to
+  // stand instead.
+  function adoptRecoveryEntry(override?: 'preserve' | 'proceed'): boolean {
     // A completed job this tab hasn't approved or discarded yet is still
     // awaiting the visitor's own decision — and by every call site here,
     // this tab's OWN recovery key for it is already gone (settling always
@@ -387,7 +391,7 @@ export function AIStudioPanel() {
     // preservation only matters for a completed result someone might Approve.
     const hasUnacknowledgedTerminalJob = job !== null && !approved && job.status === 'completed';
     if (override !== 'proceed' && (override === 'preserve' || hasUnacknowledgedTerminalJob)) {
-      return;
+      return false;
     }
     // Picks the most recently written still-valid entry — a reasonable
     // choice when more than one is present (see the multi-tab note above) —
@@ -399,7 +403,7 @@ export function AIStudioPanel() {
       if (locallyIgnoredIdsRef.current.has(id)) continue;
       if (!entry || candidate.createdAt > entry.createdAt) entry = candidate;
     }
-    if (!entry) return;
+    if (!entry) return false;
     setRoomId(entry.roomId);
     setOutputType(entry.outputType);
     // A settled job (or its approval) this tab was showing a moment ago
@@ -423,6 +427,7 @@ export function AIStudioPanel() {
     } else {
       setRecoverableSubmission({ endpoint: entry.endpoint, body: entry.body });
     }
+    return true;
   }
 
   // Clears this tab's own recovery record, then immediately re-checks for a
@@ -1329,21 +1334,33 @@ export function AIStudioPanel() {
                     // adoptRecoveryEntry), and clicking Approve is the visitor's
                     // explicit decision that settles it — a sibling waiting
                     // behind it otherwise has no other trigger to ever get
-                    // adopted. Called BEFORE setApproved/setApprovedSource below
-                    // (rather than after, as Reject does) because it matters
-                    // here specifically: adoptRecoveryEntry's own resets
-                    // (setApproved(false), setApprovedSource(null)) then run
-                    // FIRST in the same batch, so the explicit calls below —
-                    // reading job/roomId from this same click's closure, still
-                    // the ORIGINAL room/job regardless of any room switch
-                    // adoption just queued — land last and are what actually
-                    // takes effect, rather than the visitor's just-made
-                    // approval being silently discarded by it (that was the
-                    // gap: adoption used to leave a just-made approval
+                    // adopted. Called BEFORE setApprovedSource below (rather
+                    // than after, as Reject does) because it matters here
+                    // specifically: adoptRecoveryEntry's own setApprovedSource(null)
+                    // reset then runs FIRST in the same batch, so the explicit
+                    // call below — reading job/roomId from this same click's
+                    // closure, still the ORIGINAL room/job regardless of any
+                    // room switch adoption just queued — lands last and is
+                    // what actually takes effect, rather than the visitor's
+                    // just-made approval being silently discarded by it (that
+                    // was the gap: adoption used to leave a just-made approval
                     // unrecorded, with the sibling still never adopted either
                     // since nothing here called this at all).
-                    adoptRecoveryEntry('proceed');
-                    setApproved(true);
+                    const adoptedSibling = adoptRecoveryEntry('proceed');
+                    // Only set true when nothing was adopted: when a sibling
+                    // WAS adopted, `job` is about to become that sibling's
+                    // (null for now, then whatever it resumes to) — a fresh
+                    // job this approval says nothing about. Leaving
+                    // adoptRecoveryEntry's own setApproved(false) stand for
+                    // that case (rather than this click's own true winning
+                    // the batch either way, as an earlier version did) is
+                    // what stops an unrelated later job — from resuming the
+                    // very entry just adopted — from opening already marked
+                    // "✓ Approved" while approvedSource below still names
+                    // THIS image, silently feeding a stale source into any
+                    // refinement or video the visitor generates from it
+                    // (regression).
+                    if (!adoptedSibling) setApproved(true);
                     // Keep the approved image so a later refinement or cinematic
                     // clip is generated from it rather than the raw frame/placeholder —
                     // but only when it is a genuine generated image (job.provider !==

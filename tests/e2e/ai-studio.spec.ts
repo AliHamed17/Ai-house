@@ -1053,6 +1053,55 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('select').first()).toHaveValue('kitchen');
   });
 
+  test('resuming a sibling adopted via Approve never opens it pre-marked "✓ Approved" (regression)', async ({ page, context }) => {
+    // Approve's own adoptRecoveryEntry('proceed') call queues
+    // setApproved(false), but an earlier version let this click's own
+    // setApproved(true) win the batch unconditionally — correct when
+    // nothing was adopted, but wrong when something was: `job` is about to
+    // become the ADOPTED sibling's (initially null, then whatever it
+    // resumes to), a different result this approval says nothing about. A
+    // job resumed from that adoption would then render already "✓
+    // Approved" the instant it completed, while approvedSource still named
+    // the PRECEDING image — so a refinement or video generated right after
+    // would silently use the old image despite the UI claiming the new one
+    // was the approved source.
+    //
+    // The sibling needs a REAL, resumable job id (not a fabricated one), so
+    // a genuinely different tab submits one for the SAME room and is kept
+    // from ever settling it locally (status polling blocked) — its own
+    // recovery entry is written up front by startPolling, before polling
+    // even begins, and stays in storage the whole time as a result. It must
+    // be written only AFTER this tab's own first job is already showing
+    // Complete: writing it any earlier would make the MOUNT effect adopt it
+    // immediately (locking Generate before this tab ever gets its own first
+    // job going) — a different, already-covered scenario.
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+
+    const page2 = await context.newPage();
+    await page2.route('**/api/generation/status/**', (route) => route.abort());
+    await page2.goto('/#ai-studio');
+    await page2.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page2.getByText(/Lost connection while checking on a generation/i)).toBeVisible({ timeout: 15_000 });
+
+    await page.getByRole('button', { name: 'Approve' }).click();
+
+    // The still-outstanding sibling (same room: 'living', the default) is
+    // adopted — confirmed by the Resume banner appearing with the room
+    // selector unchanged, exactly the case this regression needs.
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('select').first()).toHaveValue('living');
+
+    // Resuming it on THIS tab is a genuinely fresh status check (page1 was
+    // never blocking its own requests) — the underlying job is already
+    // complete server-side, so it settles immediately.
+    await page.getByRole('button', { name: 'Resume checking status' }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '✓ Approved' })).toHaveCount(0);
+  });
+
   test('a tab that adopted a sibling entry unlocks once the OWNING tab genuinely settles it, without needing to reload or manually resume/abandon (regression)', async ({
     page,
     context,

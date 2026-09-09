@@ -295,6 +295,46 @@ describe('twin bedroom doorway (must clear the solid, protected MAMAD wall, not 
   });
 });
 
+describe('Guest WC doorway (must clear hs_south\'s corner, not just its own nominal width) (regression)', () => {
+  it('gives the hall_south/wc_guest doorway a fully open span on hs_link_w_wc, no residual solid stub', () => {
+    const hallSouth = getRoom('hall_south')!;
+    const wallSpec = hallSouth.walls.find((w) => w.id === 'hs_link_w_wc')!;
+    const built = buildWall(wallSpec, hallSouth, houseModel.openings);
+    // A residual stub here — however small on paper — gets its own
+    // player-radius-expanded southward reach, which can overlap hs_south's
+    // OWN player-radius-expanded reach from the perpendicular wall meeting
+    // it at the exact same corner (10.8, 4.3); only a fully open span (no
+    // stub at all) rules that out structurally, same as hs_twin above.
+    expect(built.collisionSolidSpans).toHaveLength(0);
+  });
+
+  it('lets a player actually walk from hall_south into wc_guest through the doorway (regression)', () => {
+    // Mirrors the twin_bed walk-simulation above: the per-wall void check
+    // only proves hs_link_w_wc's own opening is fully clipped — it does not
+    // prove the doorway is walkable, since hs_south's own corner (a
+    // DIFFERENT wall, meeting hs_link_w_wc at the same point) still has its
+    // own fixed player-radius-expanded reach into the same corridor. This
+    // runs the same per-step move-then-resolveCollision loop
+    // FirstPersonControls itself runs, so it actually proves a
+    // collision-free path exists end to end.
+    let pos = { x: 11.2, z: 4.6 }; // inside hall_south's corridor, just east of the doorway
+    const target = { x: 10.35, z: 4.75 }; // wc_guest's own cameraSpawn
+    const STEP = 0.05;
+    for (let i = 0; i < 400; i++) {
+      const dx = target.x - pos.x;
+      const dz = target.z - pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < STEP) {
+        pos = target;
+        break;
+      }
+      const candidate = { x: pos.x + (dx / dist) * STEP, z: pos.z + (dz / dist) * STEP };
+      pos = resolveCollision(candidate, PLAYER_RADIUS_M, builtWalls, houseModel.structuralFeatures);
+    }
+    expect(Math.hypot(pos.x - target.x, pos.z - target.z)).toBeLessThan(0.1);
+  });
+});
+
 describe('living room spawn (must never start the player embedded inside a structural column) (regression)', () => {
   it('keeps every room camera spawn outside every column\'s collision radius', () => {
     // Entering or teleporting to a room assigns cameraSpawn directly —

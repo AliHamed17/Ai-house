@@ -546,7 +546,20 @@ const openings: OpeningDef[] = [
   // its own wall needed moving), so only the door position needs updating.
   { id: 'door_hallsouth_bathmain', kind: 'door', position: v(8.05, 4.3), widthM: 0.9, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'hall_south', roomB: 'bathroom_main', confidence: 'medium' },
   { id: 'door_hallsouth_bathensuite', kind: 'door', position: v(9.35, 4.3), widthM: 0.9, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'hall_south', roomB: 'bathroom_ensuite', confidence: 'low' },
-  { id: 'door_hallsouth_wcguest', kind: 'door', position: v(10.8, 4.6), widthM: 0.8, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'hall_south', roomB: 'wc_guest', confidence: 'low' },
+  // widthM 0.8 -> 1.3: at 0.8, findOpeningsForWall's void (clipped to
+  // hs_link_w_wc's own 0.9 m span) left a short solid stub above the door,
+  // t=[0, 0.2] in that wall's local frame (world z=[5.0, 5.2]). Independently,
+  // hs_south — which meets hs_link_w_wc at the exact same corner, (10.8, 4.3)
+  // — has its own player-radius-expanded reach extend to z=4.3+WALL_THICKNESS_M/2+PLAYER_RADIUS_M=4.68.
+  // The stub's OWN radius-expanded southward reach was z=5.0-PLAYER_RADIUS_M=4.72,
+  // leaving only a 4 cm interval (4.68 to 4.72) for the player's center to
+  // cross x=10.8 at all — nominally connected, but in practice reachable
+  // only by teleporting via the Room Navigator (regression). 1.3 m (matching
+  // door_hallsouth_twin's identical technique of widening past its own
+  // short wall's full length) clips the void to hs_link_w_wc's entire span,
+  // leaving no residual solid stub — the same "whole wall is one opening"
+  // shape already proven walkable for hs_twin below.
+  { id: 'door_hallsouth_wcguest', kind: 'door', position: v(10.8, 4.6), widthM: 1.3, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'hall_south', roomB: 'wc_guest', confidence: 'low' },
   { id: 'door_hallsouth_parents', kind: 'door', position: v(11.9, 8.1), widthM: 1.0, sillM: 0, headM: DOOR_HEIGHT_M, roomA: 'hall_south', roomB: 'parents_bed', confidence: 'medium' },
   { id: 'opening_living_kitchen', kind: 'open_threshold', position: v(1.55, 4.0), widthM: 3.1, sillM: 0, headM: CEILING_HEIGHT_M, roomA: 'living', roomB: 'kitchen', confidence: 'high', note: 'Open social zone — no dividing wall.' },
   { id: 'opening_kitchen_dining', kind: 'open_threshold', position: v(3.1, 5.65), widthM: 3.3, sillM: 0, headM: CEILING_HEIGHT_M, roomA: 'kitchen', roomB: 'dining', confidence: 'medium' },

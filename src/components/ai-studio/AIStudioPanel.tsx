@@ -106,6 +106,39 @@ type RecoveryEntry =
       createdAt: number;
     };
 
+const VALID_RECOVERY_ROOM_IDS = new Set<string>(houseModel.rooms.map((r) => r.id));
+
+// JSON.parse only proves the stored text was syntactically valid JSON — a
+// same-origin localStorage entry can otherwise be `null`, an object left
+// over from a since-changed shape, or one simply missing a field, and none
+// of those throw on parse. Without checking the actual shape here, an
+// unconditional `as RecoveryEntry` cast lies to the type system: the very
+// next read (the age check's entry.createdAt) can throw on a genuinely
+// null/undefined value, uncaught, crashing the studio on mount until the
+// corrupt key is cleared by hand. Every required field and enum is checked
+// explicitly so a malformed entry is discarded the same way a JSON parse
+// failure already is, rather than ever being trusted.
+function isValidRecoveryEntry(value: unknown): value is RecoveryEntry {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.createdAt !== 'number' || !Number.isFinite(v.createdAt)) return false;
+  if (typeof v.roomId !== 'string' || !VALID_RECOVERY_ROOM_IDS.has(v.roomId)) return false;
+  if (v.outputType !== 'image' && v.outputType !== 'video') return false;
+  if (v.kind === 'job') return typeof v.jobId === 'string' && v.jobId.length > 0;
+  if (v.kind === 'submission') {
+    return (
+      typeof v.ambiguous === 'boolean' &&
+      typeof v.idempotencyKey === 'string' &&
+      v.idempotencyKey.length > 0 &&
+      typeof v.endpoint === 'string' &&
+      v.endpoint.length > 0 &&
+      typeof v.body === 'object' &&
+      v.body !== null
+    );
+  }
+  return false;
+}
+
 // sessionStorage, unlike localStorage, is never shared with any other
 // browser tab (not even a duplicate of this one) but DOES survive a reload
 // of THIS same tab — exactly what lets abandonRecoveryEntry remember, for
@@ -197,9 +230,9 @@ function readAllRecoveryEntries(): Record<string, RecoveryEntry> {
       continue;
     }
     if (!raw) continue;
-    let entry: RecoveryEntry;
+    let parsed: unknown;
     try {
-      entry = JSON.parse(raw) as RecoveryEntry;
+      parsed = JSON.parse(raw);
     } catch {
       try {
         localStorage.removeItem(key);
@@ -208,6 +241,15 @@ function readAllRecoveryEntries(): Record<string, RecoveryEntry> {
       }
       continue;
     }
+    if (!isValidRecoveryEntry(parsed)) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // best-effort
+      }
+      continue;
+    }
+    const entry = parsed;
     if (Date.now() - entry.createdAt > recoveryMaxAgeMs(entry)) {
       try {
         localStorage.removeItem(key);
@@ -305,7 +347,42 @@ export function AIStudioPanel() {
   // reconcile it. roomId/outputType are restored alongside it so the locked
   // selectors reflect the room the outstanding job actually belongs to, not
   // whatever this tab happened to have selected.
-  function adoptRecoveryEntry() {
+  // override lets a caller that already knows the answer skip the
+  // state-based guard just below, which reads the plain `job`/`approved`
+  // component state — necessarily whatever it was AS OF THIS RENDER, not
+  // necessarily as of right now:
+  //  - 'preserve': force-defer even if the read below would say proceed.
+  //    Needed by startPolling's completion branch, whose poll() closure is
+  //    created once and reused across every retry via setTimeout(poll, ...)
+  //    rather than redefined on each render — job/approved there are frozen
+  //    to whatever they were when startPolling was first called, not the
+  //    fresh terminal statusData a `setJob` call two lines above it just
+  //    (asynchronously) queued.
+  //  - 'proceed': force-adopt even if the read below would say defer.
+  //    Needed by Reject's onClick: it calls setJob(null) then this in the
+  //    SAME synchronous handler, so — for the identical reason — the `job`
+  //    read below still sees the OLD (just-rejected) completed job, not the
+  //    null it is about to become.
+  //  - undefined (every other caller): trust the state read normally.
+  function adoptRecoveryEntry(override?: 'preserve' | 'proceed') {
+    // A terminal (completed/failed/moderated) job this tab hasn't approved
+    // or discarded yet is still awaiting the visitor's own decision — and by
+    // every call site here, this tab's OWN recovery key for it is already
+    // gone (settling always clears it first; see clearOwnRecoveryEntry and
+    // its callers). Adopting a sibling right now would both reassign
+    // roomId/outputType out from under that result (see the setJob(null)
+    // below — job is otherwise assumed to always belong to the CURRENT
+    // room) and, via that same reset, discard it outright — permanently,
+    // since there is no longer any recovery entry to fall back on. Defer
+    // entirely until the Approve or Reject action clears this guard (Reject
+    // sets job to null directly; Approve sets approved), rather than risk
+    // silently losing a possibly-billed result the visitor never even got
+    // to see.
+    const hasUnacknowledgedTerminalJob =
+      job !== null && !approved && (job.status === 'completed' || job.status === 'failed' || job.status === 'moderated');
+    if (override !== 'proceed' && (override === 'preserve' || hasUnacknowledgedTerminalJob)) {
+      return;
+    }
     // Picks the most recently written still-valid entry — a reasonable
     // choice when more than one is present (see the multi-tab note above) —
     // excluding anything THIS tab has locally abandoned (see
@@ -352,9 +429,10 @@ export function AIStudioPanel() {
   // instead of clearRecoveryEntry directly for a genuinely SETTLED entry
   // (never for Abandon — see abandonRecoveryEntry below). Safe
   // unconditionally: adoptRecoveryEntry is a no-op when nothing remains.
-  function clearOwnRecoveryEntry(id: string): void {
+  // override is forwarded as-is to adoptRecoveryEntry — see its own comment.
+  function clearOwnRecoveryEntry(id: string, override?: 'preserve' | 'proceed'): void {
     clearRecoveryEntry(id);
-    adoptRecoveryEntry();
+    adoptRecoveryEntry(override);
   }
 
   // Used by Abandon (never by a settle/resolve path, which always owns what
@@ -385,6 +463,11 @@ export function AIStudioPanel() {
     locallyIgnoredIdsRef.current = readLocallyIgnoredIds();
     adoptRecoveryEntry();
     /* eslint-enable react-hooks/set-state-in-effect */
+    // job is always its null initial value on this very first render, so
+    // adoptRecoveryEntry's own job/approved read can never be stale here —
+    // safe to run mount-only despite depending on a function that (in
+    // general) closes over changing state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // The mount effect above only ever runs once, so a tab that was ALREADY
@@ -435,7 +518,21 @@ export function AIStudioPanel() {
     }
     window.addEventListener('storage', handleStorageEvent);
     return () => window.removeEventListener('storage', handleStorageEvent);
-  }, [submitting, recoverableJobId, recoverableSubmission]);
+    // job/approved: adoptRecoveryEntry reads both to decide whether an
+    // unacknowledged terminal result must be preserved. Without listing
+    // them, approving or discarding a result without also touching
+    // submitting/recoverableJobId/recoverableSubmission would leave this
+    // listener's closure on the stale pre-approval value, deferring a
+    // sibling's adoption for longer than necessary (never incorrectly
+    // clobbering — see adoptRecoveryEntry — but no reason to accept even
+    // that when re-attaching the listener costs nothing). adoptRecoveryEntry
+    // itself is deliberately not also listed: it is a plain function
+    // redefined every render (not useCallback-memoized, matching this
+    // file's other handlers), so adding it here would re-attach the
+    // listener on every render instead of only when the values above
+    // change — job/approved already cover everything it reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitting, recoverableJobId, recoverableSubmission, job, approved]);
 
   // Sync which providers are live (billed) vs. demo, so the UI can require
   // confirmation before a paid run instead of only learning the mode after
@@ -597,7 +694,15 @@ export function AIStudioPanel() {
         if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
           setSubmitting(false);
           setRecoverableJobId(null);
-          clearOwnRecoveryEntry(jobRecoveryId(jobId));
+          // 'preserve': statusData (just set above) is this exact terminal
+          // result, always unapproved at the moment it first lands — but
+          // this poll loop closure is reused across every retry via
+          // setTimeout(poll, ...) rather than redefined on each render, so
+          // the `job`/`approved` bindings adoptRecoveryEntry would otherwise
+          // read here are frozen to whatever they were when startPolling
+          // was first called, not this fresh completion. See
+          // adoptRecoveryEntry's own comment.
+          clearOwnRecoveryEntry(jobRecoveryId(jobId), 'preserve');
           return;
         }
         pollTimerRef.current = setTimeout(poll, 1000);
@@ -1230,6 +1335,16 @@ export function AIStudioPanel() {
                     if (approvedSource && approvedSource.path === job.resultUrl) {
                       setApprovedSource(null);
                     }
+                    // 'proceed': this tab's own unacknowledged result is what
+                    // was deferring adoption (see adoptRecoveryEntry), and
+                    // Reject is the visitor's own explicit decision that
+                    // settles it — but setJob(null) just above only takes
+                    // effect next render, so the plain state read inside
+                    // adoptRecoveryEntry would otherwise still see the job
+                    // just rejected and keep deferring. A sibling waiting
+                    // behind it may otherwise never get picked up (nothing
+                    // else re-triggers this check on its own).
+                    adoptRecoveryEntry('proceed');
                   }}
                   className="rounded-full border border-limestone/60 px-4 py-2 text-xs font-semibold text-charcoal hover:bg-limestone/30"
                 >

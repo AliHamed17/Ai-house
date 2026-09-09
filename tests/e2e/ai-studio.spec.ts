@@ -322,6 +322,37 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
   });
 
+  test('malformed persisted recovery entries are discarded instead of crashing the studio on load (regression)', async ({ page }) => {
+    // JSON.parse only proves the stored text was syntactically valid JSON —
+    // a same-origin localStorage entry can still be `null`, an object left
+    // over from a since-changed shape, or one simply missing a required
+    // field, and an unchecked `as RecoveryEntry` cast trusted all of those.
+    // Reading entry.createdAt right after (or adopting an unrecognized
+    // room/output value into render) then threw uncaught, breaking the
+    // whole studio on mount until the corrupt key was removed by hand.
+    await page.addInitScript((prefix) => {
+      localStorage.setItem(`${prefix}job:malformed-null`, 'null');
+      localStorage.setItem(
+        `${prefix}job:malformed-missing-created-at`,
+        JSON.stringify({ kind: 'job', jobId: 'x', roomId: 'living', outputType: 'image' }),
+      );
+      localStorage.setItem(
+        `${prefix}job:malformed-unknown-room`,
+        JSON.stringify({ kind: 'job', jobId: 'y', roomId: 'not-a-real-room', outputType: 'image', createdAt: Date.now() }),
+      );
+    }, RECOVERY_STORAGE_PREFIX);
+
+    await page.goto('/#ai-studio');
+    // The studio loads and is fully usable — no crash, no stuck loading
+    // state, and none of the malformed entries were adopted as a spurious
+    // recovery banner.
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toHaveCount(0);
+    // Each is discarded from storage on that same load, rather than being
+    // retried (and re-failing the same way) on every future one.
+    expect(await recoveryEntryIds(page)).toHaveLength(0);
+  });
+
   test('an expired approved source (410) is never treated as recoverable, and clears so the next attempt uses a fresh source (regression)', async ({ page }) => {
     // Unlike a lost connection or a Higgsfield timeout, a 410 is a definite,
     // pre-billing failure (see SOURCE_EXPIRED_MESSAGE) — nothing to resume,
@@ -892,15 +923,22 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.getByRole('button', { name: 'Resume checking status' })).toHaveCount(0);
   });
 
-  test('a settled job clears its displayed result before adopting a sibling for a different room, so Approve can never mismatch rooms (regression)', async ({
+  test('a settled job stays displayed and approvable when a sibling entry appears, deferring adoption until Reject — which then adopts it without ever mismatching rooms (regression)', async ({
     page,
     context,
   }) => {
-    // The Approve handler pairs job.resultUrl with the panel's CURRENT
-    // roomId state, not the completed job's own — so if adoptRecoveryEntry
-    // switches roomId to a sibling's room right as this job reaches a
-    // terminal state, a stale (but still displayed) completed job would let
-    // Approve record its image's URL under the wrong, newly adopted room.
+    // Earlier behavior: adoptRecoveryEntry ran unconditionally the instant
+    // this tab's own job settled, switching roomId to a sibling's room and
+    // clearing job/approved right along with it. That was originally meant
+    // to stop a stale completed job from being Approved under the wrong,
+    // newly adopted room (job.resultUrl always pairs with the CURRENT
+    // roomId) — but it fired even when the "stale" job was actually the
+    // one that had just that instant completed, discarding a possibly paid
+    // result the visitor never even got a chance to see, with its own
+    // recovery key already gone by then (regression). Adoption must instead
+    // wait for the visitor's own Approve/Reject before touching roomId/job
+    // at all — never partially, since a room switch without a matching
+    // job clear is exactly the original mismatch bug the other way round.
     await page.goto('/#ai-studio');
     await page.getByRole('button', { name: /Generate concept image/i }).click();
 
@@ -917,8 +955,17 @@ test.describe('AI Design Studio (demo mode)', () => {
       );
     }, RECOVERY_STORAGE_PREFIX);
 
-    // The sibling gets adopted instead of leaving the now-stale completed
-    // job (and an Approve button for it) displayed.
+    // The just-completed result stays fully visible and approvable — the
+    // sibling's existence must not silently disappear it.
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toHaveCount(0);
+    await expect(page.locator('select').first()).toHaveValue('living');
+
+    // Only the visitor's own Reject (job -> null) lets the deferred sibling
+    // finally get adopted — and, since job is already cleared by then, the
+    // room switch can never drag a stale result along with it.
+    await page.getByRole('button', { name: 'Reject' }).click();
     await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('select').first()).toHaveValue('kitchen');
     await expect(page.getByRole('button', { name: 'Approve' })).toHaveCount(0);

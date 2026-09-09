@@ -198,8 +198,15 @@ export function FirstPersonControls() {
         // never treat its unrelated coordinates as a look delta.
         return;
       }
-      yawRef.current -= dx * MOUSE_LOOK_SENSITIVITY;
-      pitchRef.current = THREE.MathUtils.clamp(pitchRef.current - dy * MOUSE_LOOK_SENSITIVITY, -PITCH_LIMIT_RAD, PITCH_LIMIT_RAD);
+      // Pointer Lock is only ever requested for a mouse pointer (see
+      // onPointerDown below), so e.pointerType reliably still reads 'mouse'
+      // in that branch too. A touch drag needs a much higher sensitivity
+      // than a mouse's fine, high-frequency movementX/Y deltas — at the
+      // mouse rate, a full-width swipe barely turns the camera at all,
+      // forcing repeated swipes just to look around on a phone.
+      const sensitivity = e.pointerType === 'touch' ? TOUCH_LOOK_SENSITIVITY : MOUSE_LOOK_SENSITIVITY;
+      yawRef.current -= dx * sensitivity;
+      pitchRef.current = THREE.MathUtils.clamp(pitchRef.current - dy * sensitivity, -PITCH_LIMIT_RAD, PITCH_LIMIT_RAD);
     }
     function onPointerUp(e: PointerEvent) {
       if (draggingPointerIdRef.current === e.pointerId) {
@@ -227,16 +234,6 @@ export function FirstPersonControls() {
   useFrame((state, rawDelta) => {
     if (useViewerStore.getState().mode !== 'first-person') return;
     const dt = Math.min(rawDelta, 0.05);
-
-    const mobileLook = useViewerStore.getState().consumeMobileLook();
-    if (mobileLook.dx !== 0 || mobileLook.dy !== 0) {
-      yawRef.current -= mobileLook.dx * TOUCH_LOOK_SENSITIVITY;
-      pitchRef.current = THREE.MathUtils.clamp(
-        pitchRef.current - mobileLook.dy * TOUCH_LOOK_SENSITIVITY,
-        -PITCH_LIMIT_RAD,
-        PITCH_LIMIT_RAD,
-      );
-    }
 
     camera.rotation.set(pitchRef.current, yawRef.current, 0, 'YXZ');
 

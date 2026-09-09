@@ -61,13 +61,9 @@ interface ViewerState {
 
   mobileMove: { x: number; z: number };
   setMobileMove: (v: { x: number; z: number }) => void;
-
-  mobileLookDelta: { dx: number; dy: number };
-  addMobileLook: (dx: number, dy: number) => void;
-  consumeMobileLook: () => { dx: number; dy: number };
 }
 
-export const useViewerStore = create<ViewerState>((set, get) => ({
+export const useViewerStore = create<ViewerState>((set) => ({
   isExplorerOpen: false,
   setExplorerOpen: (open) => set({ isExplorerOpen: open }),
 
@@ -111,13 +107,4 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
 
   mobileMove: { x: 0, z: 0 },
   setMobileMove: (v) => set({ mobileMove: v }),
-
-  mobileLookDelta: { dx: 0, dy: 0 },
-  addMobileLook: (dx, dy) =>
-    set((s) => ({ mobileLookDelta: { dx: s.mobileLookDelta.dx + dx, dy: s.mobileLookDelta.dy + dy } })),
-  consumeMobileLook: () => {
-    const delta = get().mobileLookDelta;
-    set({ mobileLookDelta: { dx: 0, dy: 0 } });
-    return delta;
-  },
 }));

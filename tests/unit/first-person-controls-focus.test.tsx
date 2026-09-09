@@ -50,7 +50,6 @@ describe('FirstPersonControls: losing focus while a movement key is held (regres
       teleportTarget: null,
       teleportToken: 0,
       mobileMove: { x: 0, z: 0 },
-      mobileLookDelta: { dx: 0, dy: 0 },
     });
   });
 
@@ -170,7 +169,6 @@ describe('FirstPersonControls: losing focus while a drag-to-look pointer is held
       teleportTarget: null,
       teleportToken: 0,
       mobileMove: { x: 0, z: 0 },
-      mobileLookDelta: { dx: 0, dy: 0 },
     });
   });
 
@@ -291,6 +289,63 @@ describe('FirstPersonControls: losing focus while a drag-to-look pointer is held
   });
 });
 
+describe('FirstPersonControls: touch drags use touch look sensitivity, not mouse\'s (regression)', () => {
+  beforeEach(() => {
+    const camera = new THREE.PerspectiveCamera();
+    const canvas = document.createElement('canvas');
+    threeRef.current = { camera, gl: { domElement: canvas } };
+    frameRef.current = null;
+    useViewerStore.setState({
+      mode: 'first-person',
+      playerPose: { x: 0, z: 0, yaw: 0 },
+      teleportTarget: null,
+      teleportToken: 0,
+      mobileMove: { x: 0, z: 0 },
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  // Mirrors the component's own MOUSE_LOOK_SENSITIVITY/TOUCH_LOOK_SENSITIVITY
+  // (FirstPersonControls.tsx) — kept local rather than imported, matching
+  // this file's existing convention for MOVE_SPEED_M_S above.
+  const MOUSE_LOOK_SENSITIVITY = 0.0026;
+  const TOUCH_LOOK_SENSITIVITY = 0.0062;
+
+  it('a touch drag on the canvas rotates the camera at the touch rate, not the far lower mouse rate (regression)', () => {
+    // Touch drag-to-look never gets Pointer Lock (only requested for a
+    // mouse pointer — see onPointerDown), so it always flows through the
+    // same draggingPointerIdRef branch a mouse drag off pointer-lock uses;
+    // without selecting sensitivity by e.pointerType, both used the much
+    // finer mouse rate, making mobile look-around need repeated full-screen
+    // swipes to turn at all.
+    render(<FirstPersonControls />);
+    const { camera, gl } = threeRef.current!;
+    const canvas = gl.domElement;
+
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, pointerType: 'touch', clientX: 0, clientY: 0 }));
+    window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 0 }));
+    tick(0.05);
+    const touchYaw = camera.rotation.y;
+    expect(Math.abs(touchYaw)).toBeCloseTo(100 * TOUCH_LOOK_SENSITIVITY, 6);
+
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
+
+    // The exact same 100px delta, but from a mouse pointer this time —
+    // isolated from the touch drag above by measuring only the additional
+    // yaw this second drag itself contributes.
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 2, pointerType: 'mouse', clientX: 0, clientY: 0 }));
+    window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 2, pointerType: 'mouse', clientX: 100, clientY: 0 }));
+    tick(0.1);
+    const mouseYawDelta = camera.rotation.y - touchYaw;
+    expect(Math.abs(mouseYawDelta)).toBeCloseTo(100 * MOUSE_LOOK_SENSITIVITY, 6);
+
+    expect(Math.abs(touchYaw)).toBeGreaterThan(Math.abs(mouseYawDelta) * 2);
+  });
+});
+
 describe('FirstPersonControls: joystick movement preserves its own magnitude (regression)', () => {
   beforeEach(() => {
     const camera = new THREE.PerspectiveCamera();
@@ -303,7 +358,6 @@ describe('FirstPersonControls: joystick movement preserves its own magnitude (re
       teleportTarget: null,
       teleportToken: 0,
       mobileMove: { x: 0, z: 0 },
-      mobileLookDelta: { dx: 0, dy: 0 },
     });
   });
 

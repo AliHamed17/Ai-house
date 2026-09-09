@@ -31,14 +31,13 @@ async function recoveryEntryIds(page: Page): Promise<string[]> {
   }, RECOVERY_STORAGE_PREFIX);
 }
 
-// The raw createdAt persisted under one specific entry id (e.g.
+// The raw entry persisted under one specific entry id (e.g.
 // 'submission:some-key'), or null if nothing is stored there.
-async function readRecoveryEntryCreatedAt(page: Page, id: string): Promise<number | null> {
+async function readRawRecoveryEntry(page: Page, id: string): Promise<Record<string, unknown> | null> {
   return page.evaluate(
     ({ id, prefix }) => {
       const raw = localStorage.getItem(`${prefix}${id}`);
-      if (!raw) return null;
-      return (JSON.parse(raw) as { createdAt: number }).createdAt;
+      return raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
     },
     { id, prefix: RECOVERY_STORAGE_PREFIX },
   );
@@ -553,8 +552,48 @@ test.describe('AI Design Studio (demo mode)', () => {
     await page.getByRole('button', { name: 'Resume submission' }).click();
     await expect(page.getByText(/Could not reach the generation service/i)).toBeVisible({ timeout: 10_000 });
 
-    const persistedCreatedAt = await readRecoveryEntryCreatedAt(page, `submission:${idempotencyKey}`);
-    expect(persistedCreatedAt).toBe(originalCreatedAt);
+    const persisted = await readRawRecoveryEntry(page, `submission:${idempotencyKey}`);
+    expect(persisted?.createdAt).toBe(originalCreatedAt);
+  });
+
+  test('a resume attempt that loses its response never downgrades an already-ambiguous entry (regression)', async ({ page }) => {
+    // An entry an earlier 504 already marked ambiguous:true carries the
+    // server's much longer AMBIGUOUS_TTL_MS ceiling. If a LATER resume
+    // attempt merely loses its response at the plain network level (never
+    // even reaching a 504), that says nothing that would justify
+    // downgrading the entry back to ambiguous:false — doing so would shrink
+    // its ceiling back to the much shorter ordinary one while the server
+    // may still be holding the longer reservation, silently unlocking
+    // Generate long before the server's real TTL and risking a second,
+    // separately billed submission.
+    const idempotencyKey = 'resume-preserves-ambiguity-key';
+    // Past the 9-minute ordinary ceiling but well within the 55-minute
+    // ambiguous one — exactly the gap that would expose a downgrade.
+    const originalCreatedAt = Date.now() - 20 * 60_000;
+    const staleAmbiguousEntry = {
+      kind: 'submission',
+      ambiguous: true,
+      idempotencyKey,
+      endpoint: '/api/nano-banana/generate',
+      body: { roomId: 'living', idempotencyKey, simulate: 'success' },
+      roomId: 'living',
+      outputType: 'image',
+      createdAt: originalCreatedAt,
+    };
+    await writeRawRecoveryEntry(page, staleAmbiguousEntry);
+
+    // This resume attempt fails at the plain network level (not a 504) —
+    // the exact case that previously downgraded ambiguous back to false.
+    await page.route('**/api/nano-banana/generate', (route) => route.abort());
+    await page.goto('/#ai-studio');
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Resume submission' }).click();
+    await expect(page.getByText(/Could not reach the generation service/i)).toBeVisible({ timeout: 10_000 });
+
+    const persisted = await readRawRecoveryEntry(page, `submission:${idempotencyKey}`);
+    expect(persisted?.ambiguous).toBe(true);
+    expect(persisted?.createdAt).toBe(originalCreatedAt);
   });
 
   test('a job-recovery entry uses its own, more generous ceiling than a submission entry (regression)', async ({ page }) => {

@@ -682,22 +682,32 @@ export function AIStudioPanel() {
   // existing recoverableSubmission survive it, rather than being silently
   // discarded by a throttle that has nothing to do with the original request.
   // Shared between a fresh submission (handleGenerate) and resuming one
-  // (handleResumeSubmission). resumedCreatedAt is only ever passed by the
-  // latter — the ORIGINAL persisted entry's own createdAt, read once before
-  // this attempt even starts (see handleResumeSubmission's own staleness
-  // check). A resumed attempt's own response timing proves nothing reliable
-  // about the server-side idempotency reservation's true age: reserving
-  // (idempotency.server's reserveIdempotentSubmission) only stamps/refreshes
-  // createdAt on a key's FIRST-ever reservation (or when that original
-  // run's own promise later settles ambiguously) — a resume that finds an
-  // existing reservation just re-awaits whatever that original promise
-  // already settled to, however long ago. Restamping to THIS resume's own
-  // "now" on a network failure or a 504 below would silently extend the
-  // client's believed validity window past the server's true one, letting a
-  // late-enough resume slip past the server's real TTL and start a second,
-  // separately billed submission — see the two writeRecoveryEntry calls
-  // below that use it.
-  async function submitOnce(endpoint: string, body: Record<string, unknown>, token: number, isResume = false, resumedCreatedAt?: number): Promise<string | null> {
+  // (handleResumeSubmission). resumedCreatedAt/resumedAmbiguous are only
+  // ever passed by the latter — the ORIGINAL persisted entry's own
+  // createdAt/ambiguous, read once before this attempt even starts (see
+  // handleResumeSubmission's own staleness check). A resumed attempt's own
+  // outcome proves nothing reliable about the server-side idempotency
+  // reservation's true age or ambiguity: reserving (idempotency.server's
+  // reserveIdempotentSubmission) only stamps/refreshes createdAt — and only
+  // an ambiguous provider failure ever upgrades ttlMs to AMBIGUOUS_TTL_MS —
+  // on a key's FIRST-ever reservation (or when that original run's own
+  // promise later settles ambiguously); a resume that finds an existing
+  // reservation just re-awaits whatever that original promise already
+  // settled to, however long ago. Restamping createdAt to THIS resume's own
+  // "now", or downgrading an already-ambiguous entry back to false, on a
+  // network failure or a 504 below would silently shrink or misjudge the
+  // client's believed validity window relative to the server's true one,
+  // letting a late-enough resume slip past the server's real TTL and start
+  // a second, separately billed submission — see the writeRecoveryEntry
+  // calls below that use them.
+  async function submitOnce(
+    endpoint: string,
+    body: Record<string, unknown>,
+    token: number,
+    isResume = false,
+    resumedCreatedAt?: number,
+    resumedAmbiguous?: boolean,
+  ): Promise<string | null> {
     // Written before fetch() is even called, not only once it settles — a
     // tab closing or crashing while THIS exact POST is still in flight
     // otherwise leaves no trace anywhere (not persisted, not even in
@@ -813,18 +823,22 @@ export function AIStudioPanel() {
       setError('Could not reach the generation service. If it was already submitted, Resume below reuses the exact same request instead of starting a new one.');
       setSubmitting(false);
       setRecoverableSubmission({ endpoint, body });
-      // ambiguous: false. A FIRST attempt keeps the ORIGINAL pre-fetch
+      // A FIRST attempt is ambiguous: false, keeping the ORIGINAL pre-fetch
       // createdAt (not a fresh Date.now() here) — a network-level failure
       // never upgrades a server-side reservation, so if the request reached
       // the server and succeeded, that reservation's own clock started at
       // (approximately) when the request arrived, not when this client-side
       // catch fired. A RESUMED attempt carries the true original entry's
-      // timestamp forward instead of this resume's own createdAt (see
-      // submitOnce's own comment above) — this resume's own fetch throwing
-      // says nothing about when the underlying reservation was really made.
+      // timestamp AND ambiguity forward instead (see submitOnce's own
+      // comment above): this resume's own fetch throwing says nothing about
+      // when the underlying reservation was really made, and — critically —
+      // says nothing that would justify DOWNGRADING an entry an earlier 504
+      // already marked ambiguous back to false, which would wrongly shrink
+      // its ceiling from AMBIGUOUS_TTL_MS to the much shorter ordinary one
+      // while the server may still be holding that longer reservation.
       writeRecoveryEntry({
         kind: 'submission',
-        ambiguous: false,
+        ambiguous: isResume ? (resumedAmbiguous ?? false) : false,
         idempotencyKey,
         endpoint,
         body,
@@ -866,12 +880,16 @@ export function AIStudioPanel() {
     setSubmitting(true);
     setError(null);
     setRecoverableSubmission(null);
+    // persisted is always the 'submission' variant here — this function
+    // only ever reads/writes keys produced by submissionRecoveryId.
+    const persistedAmbiguous = persisted.kind === 'submission' ? persisted.ambiguous : false;
     void (async () => {
-      // persisted.createdAt — not this resume attempt's own start time — is
-      // the only timestamp submitOnce can trust if this attempt also fails
-      // (see its own comment): it's the true, original age the 9-minute
-      // ordinary-TTL check just above validated.
-      const jobId = await submitOnce(endpoint, body, token, true, persisted.createdAt);
+      // persisted.createdAt/persistedAmbiguous — not this resume attempt's
+      // own start time or a fresh guess — are the only values submitOnce
+      // can trust if this attempt also fails (see its own comment): they're
+      // the true, original age and ambiguity the checks just above (and any
+      // earlier 504) already established.
+      const jobId = await submitOnce(endpoint, body, token, true, persisted.createdAt, persistedAmbiguous);
       if (jobId) {
         // The submission's own entry is now superseded by the job entry
         // startPolling writes below — clear it explicitly so it doesn't

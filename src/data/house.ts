@@ -114,7 +114,10 @@ const rooms: RoomDef[] = [
     floorPolygon: [v(4.9, 0), v(7.3, 0), v(7.3, 3.0), v(4.9, 3.0)],
     walls: [
       wall('entry_n', v(4.9, 0), v(7.3, 0), true),
-      wall('entry_e', v(7.3, 0), v(7.3, 3.0), false),
+      // The east edge (x=7.3, z 0-3.0) is already authored once, in reverse,
+      // as mamad's own mamad_w — that shared boundary (and its door cut) is
+      // owned there, not duplicated here (regression: two coincident wall
+      // boxes flickering on the depth test).
       // Boundary with hall_south, carrying the opening_entry_hallsouth
       // threshold below (mamad's own mamad_s wall covers the rest of that
       // z=3.0 line for x 7.3-10.8).
@@ -294,16 +297,21 @@ const rooms: RoomDef[] = [
     walls: [
       wall('twin_n', v(10.8, 0), v(15.19, 0), true),
       wall('twin_e', v(15.19, 0), v(15.19, 3.5), true),
-      // Pulled back from x=10.8 to x=11.6: unlike twin_w, this wall carries
-      // no opening of its own, so its un-shortened endpoint sat exactly on
-      // the doorway's own crossing line — its player-radius-expanded corner
+      // Pulled back from x=10.8 to x=11.6: this wall carries no opening of
+      // its own, so its un-shortened endpoint sat exactly on the doorway's
+      // own crossing line (x=10.8) — its player-radius-expanded corner
       // (reaching to x=10.8+~0.28) overlapped mamad_e's own expanded corner
       // there, leaving no collision-free path through, regardless of how
-      // wide the void cut into twin_w/hs_twin was (regression). 11.6 keeps
-      // this wall's own reach (11.6-radius) past x=11.18 — mamad_e's own
-      // expanded corner on the OTHER axis — so the two never overlap at all.
+      // wide the void cut into hs_twin was (regression). 11.6 keeps this
+      // wall's own reach (11.6-radius) past x=11.18 — mamad_e's own expanded
+      // corner on the OTHER axis — so the two never overlap at all.
       wall('twin_s', v(15.19, 3.5), v(11.6, 3.5), false),
-      wall('twin_w', v(10.8, 3.5), v(10.8, 0), false),
+      // No wall of its own at x=10.8: that whole span (z 0-3.5) is already
+      // covered by two neighbors' own walls — mamad_e (protected, z 0-3.0)
+      // and hall_south's hs_twin (the actual doorway, z 3.0-3.7) — so a
+      // twin_w here would have been a fully redundant, coincident duplicate
+      // for its entire length, not just partially overlapping one neighbor
+      // (regression).
     ],
     ceilingHeightM: CEILING_HEIGHT_M,
     floorMaterialId: 'oak-bedroom',
@@ -496,7 +504,11 @@ const rooms: RoomDef[] = [
       wall('parents_n', v(11.9, 6.35), v(15.73, 6.35), true),
       wall('parents_e', v(15.73, 6.35), v(15.73, 9.85), true),
       wall('parents_s', v(15.73, 9.85), v(11.9, 9.85), true),
-      wall('parents_w', v(11.9, 9.85), v(11.9, 6.35), false),
+      // The west edge (x=11.9, z 6.35-9.85) is already authored once, in
+      // reverse, as hall_south's own hs_link_e_parents — that shared
+      // boundary (and the door_hallsouth_parents cut) is owned there,
+      // matching the pattern already used for every other shared wall
+      // between hall_south and a neighboring room in this file.
     ],
     ceilingHeightM: CEILING_HEIGHT_M,
     floorMaterialId: 'oak-bedroom',

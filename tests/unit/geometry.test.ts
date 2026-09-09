@@ -140,6 +140,19 @@ describe('collision resolution', () => {
     expect(built.collisionSolidSpans).toHaveLength(3); // solid before, between, and after the two doorway gaps
   });
 
+  it('cuts the hall_south/parents_bed door into hs_link_e_parents now that the duplicate parents_w is gone (regression)', () => {
+    // parents_bed used to also author this exact boundary (in reverse) as
+    // its own parents_w — removed as a coincident duplicate of hall_south's
+    // hs_link_e_parents. This proves the door is still correctly attached
+    // to the one wall that remains, not silently left uncut anywhere.
+    const hallSouth = getRoom('hall_south')!;
+    const wallSpec = hallSouth.walls.find((w) => w.id === 'hs_link_e_parents')!;
+    const built = buildWall(wallSpec, hallSouth, houseModel.openings);
+    expect(built.voids).toHaveLength(1);
+    expect(built.voids[0].openingId).toBe('door_hallsouth_parents');
+    expect(built.doorSpans).toHaveLength(1);
+  });
+
   it('does not leave bathroom_main/bathroom_ensuite floors overlapping hall_south\'s after hs_south moved (regression)', () => {
     // hs_south (and the two bathroom doors) moved from z=4.0 to z=4.3, but
     // these two rooms' own floor polygons were left starting at the old
@@ -294,6 +307,40 @@ describe('living room spawn (must never start the player embedded inside a struc
         expect(dist).toBeGreaterThanOrEqual(column.radiusM + PLAYER_RADIUS_M);
       }
     }
+  });
+});
+
+describe('no two rooms author the same shared boundary twice (regression)', () => {
+  it('has no duplicate (possibly reversed) wall segments anywhere in the house', () => {
+    // Each shared boundary must be authored by exactly ONE room (see the
+    // ownership convention in house.ts's own module comment) — every
+    // authored wall gets rendered and collided against, so an accidental
+    // second copy of the same segment produces coincident meshes, duplicate
+    // shadows/draw calls, and depth-fighting artifacts. A house-wide check
+    // catches this for every room, not just the specific instances that
+    // have already been found and fixed by inspection.
+    function pointKey(p: { x: number; z: number }): string {
+      return `${p.x.toFixed(3)},${p.z.toFixed(3)}`;
+    }
+    function segmentKey(wallSpec: { start: { x: number; z: number }; end: { x: number; z: number } }): string {
+      const a = pointKey(wallSpec.start);
+      const b = pointKey(wallSpec.end);
+      return a < b ? `${a}|${b}` : `${b}|${a}`;
+    }
+    const ownerBySegment = new Map<string, string>();
+    const duplicates: string[] = [];
+    for (const room of houseModel.rooms) {
+      for (const wallSpec of room.walls) {
+        const key = segmentKey(wallSpec);
+        const owner = ownerBySegment.get(key);
+        if (owner) {
+          duplicates.push(`${wallSpec.id} (in ${room.id}) duplicates ${owner}`);
+        } else {
+          ownerBySegment.set(key, `${wallSpec.id} (in ${room.id})`);
+        }
+      }
+    }
+    expect(duplicates).toEqual([]);
   });
 });
 

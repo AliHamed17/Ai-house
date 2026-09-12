@@ -1241,6 +1241,44 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toHaveCount(0);
   });
 
+  test('starting a new generation over a completed-but-unacknowledged result adopts a sibling that arrived in the meantime, instead of racing a fresh submission against it (regression)', async ({
+    page,
+    context,
+  }) => {
+    // adoptRecoveryEntry's own defer guard (hasUnacknowledgedTerminalJob)
+    // correctly holds off adopting a sibling while this tab's own completed
+    // result is still unacknowledged — but nothing previously re-checked for
+    // that deferred sibling once the visitor moved on some OTHER way than an
+    // explicit Approve/Reject (starting a fresh generation here;
+    // handleRoomChange shares this exact same clearUnacknowledgedCompletedJob
+    // check for the room-switch case). Left unchecked, the sibling would stay
+    // invisible in storage while a brand new, possibly billed generation
+    // started right on top of it.
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+
+    const page2 = await context.newPage();
+    await page2.goto('/#ai-studio');
+    await page2.evaluate((prefix) => {
+      localStorage.setItem(
+        `${prefix}job:sibling-new-generation-job-id`,
+        JSON.stringify({ kind: 'job', jobId: 'sibling-new-generation-job-id', roomId: 'kitchen', outputType: 'image', createdAt: Date.now() }),
+      );
+    }, RECOVERY_STORAGE_PREFIX);
+
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
+
+    // Instead of Approve/Reject, the visitor just starts another generation.
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+
+    // The deferred sibling is adopted in its place — never a fresh
+    // submission racing against it.
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('select').first()).toHaveValue('kitchen');
+    await expect(page.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+  });
+
   test('a job settling as failed or moderated never defers a waiting sibling — only a completed result (which has Approve/Reject to clear it) does (regression)', async ({ page }) => {
     // The deferral above only makes sense for a completed result: failed and
     // moderated jobs render neither Approve nor Reject (just an error

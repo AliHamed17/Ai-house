@@ -516,9 +516,13 @@ export function AIStudioPanel() {
   // (never for Abandon — see abandonRecoveryEntry below). Safe
   // unconditionally: adoptRecoveryEntry is a no-op when nothing remains.
   // override is forwarded as-is to adoptRecoveryEntry — see its own comment.
-  function clearOwnRecoveryEntry(id: string, override?: 'preserve' | 'proceed'): void {
+  // Returns whether a sibling was actually adopted, forwarded from
+  // adoptRecoveryEntry, so a caller that was about to take some OTHER
+  // action of its own (a fresh submission, a room switch) can tell it
+  // needs to stand down instead, deferring to the just-adopted recovery.
+  function clearOwnRecoveryEntry(id: string, override?: 'preserve' | 'proceed'): boolean {
     clearRecoveryEntry(id);
-    adoptRecoveryEntry(override);
+    return adoptRecoveryEntry(override);
   }
 
   // Used by Abandon (never by a settle/resolve path, which always owns what
@@ -706,10 +710,25 @@ export function AIStudioPanel() {
   // failed/moderated job needs no such handling — it already clears its own
   // entry the moment it settles (same completion branch) — and neither does
   // an already-approved one (Approve clears its own entry unconditionally).
-  function clearUnacknowledgedCompletedJob(): void {
+  //
+  // Uses clearOwnRecoveryEntry (clear + adopt), not a plain clearRecoveryEntry,
+  // and forwards its own "was a sibling adopted?" result to the caller:
+  // while THIS unacknowledged job was displayed, adoptRecoveryEntry's own
+  // defer guard (hasUnacknowledgedTerminalJob) would have silently deferred
+  // any genuinely different sibling that arrived via another tab's write in
+  // the meantime — nothing else ever re-checks for it once this job is
+  // discarded (regression, caught by this file's own deferred-sibling
+  // adoption tests). 'proceed' forces past that same guard, which would
+  // otherwise still read the stale (not-yet-cleared) job/approved state in
+  // THIS synchronous call. A caller that was about to take some action of
+  // its own (a fresh submission, a room switch) must stand down when this
+  // returns true — the visitor needs to see and resolve the just-adopted
+  // recovery first, not have it silently overwritten or raced against.
+  function clearUnacknowledgedCompletedJob(): boolean {
     if (job !== null && !approved && job.status === 'completed') {
-      clearRecoveryEntry(jobRecoveryId(job.jobId));
+      return clearOwnRecoveryEntry(jobRecoveryId(job.jobId), 'proceed');
     }
+    return false;
   }
 
   function handleRoomChange(nextRoomId: RoomId) {
@@ -723,8 +742,11 @@ export function AIStudioPanel() {
     // fresh generation would be (see clearUnacknowledgedCompletedJob's own
     // comment) — otherwise its entry would linger in storage, invisible to
     // this tab, while Generate stays free to start another (possibly
-    // billed) run for the NEW room.
-    clearUnacknowledgedCompletedJob();
+    // billed) run for the NEW room. If that same call also turned up a
+    // genuinely different, still-unresolved sibling, its own recovery
+    // banner (and whatever room/output it belongs to) must stand instead —
+    // not get silently overwritten by this room switch a moment later.
+    if (clearUnacknowledgedCompletedJob()) return;
     setRoomId(nextRoomId);
     if (!VIDEO_CAPABLE_ROOMS.has(nextRoomId) && outputType === 'video') setOutputType('image');
     setConfirmingLiveRun(false);
@@ -1197,13 +1219,17 @@ export function AIStudioPanel() {
   }
 
   async function handleGenerate(liveRunConfirmed: boolean) {
+    // See clearUnacknowledgedCompletedJob's own comment: a deliberate new
+    // generation abandons any completed-but-unacknowledged prior result the
+    // same way switching rooms does. Checked BEFORE touching submitting/
+    // job/etc below: if that same call also turned up a genuinely
+    // different, still-unresolved sibling, its own recovery banner must
+    // stand instead — never start a brand new (possibly billed) generation
+    // racing against an already-unresolved one.
+    if (clearUnacknowledgedCompletedJob()) return;
     const token = ++pollTokenRef.current;
     setSubmitting(true);
     setError(null);
-    // See clearUnacknowledgedCompletedJob's own comment: a deliberate new
-    // generation abandons any completed-but-unacknowledged prior result the
-    // same way switching rooms does.
-    clearUnacknowledgedCompletedJob();
     setJob(null);
     setApproved(false);
     // A deliberate new submission is the other case where abandoning a

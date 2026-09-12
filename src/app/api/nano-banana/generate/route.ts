@@ -7,6 +7,7 @@ import { buildNanoBananaEditPrompt, buildNanoBananaPrompt } from '@/data/roomPro
 import { isSourceExpiredError, resultIdFromPath } from '@/lib/ai/resultStore.server';
 import { isSubmitTimeout } from '@/lib/ai/nanoBanana.server';
 import { isIdempotencyKeyMismatchError, reserveIdempotentSubmission } from '@/lib/ai/idempotency.server';
+import { safeErrorSummary } from '@/lib/ai/errorLogging.server';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
     );
     return NextResponse.json({ jobId, demoMode, provider: demoMode ? 'mock' : 'nano-banana' });
   } catch (error) {
-    console.error('[nano-banana/generate] submission failed:', error);
+    console.error('[nano-banana/generate] submission failed:', safeErrorSummary(error));
     if (isIdempotencyKeyMismatchError(error)) {
       return NextResponse.json({ error: (error as Error).message }, { status: 409 });
     }

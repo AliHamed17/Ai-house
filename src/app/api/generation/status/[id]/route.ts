@@ -3,6 +3,7 @@ import { decodeJobId } from '@/lib/ai/jobId';
 import { resolveProviderById } from '@/lib/ai/registry.server';
 import { checkRateLimit, STATUS_MAX_REQUESTS_PER_WINDOW } from '@/lib/ai/rateLimit.server';
 import { cacheTerminalStatus, getCachedTerminalStatus } from '@/lib/ai/statusCache.server';
+import { safeErrorSummary } from '@/lib/ai/errorLogging.server';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,7 +63,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     cacheTerminalStatus(id, job);
     return NextResponse.json(job);
   } catch (error) {
-    console.error('[generation/status] lookup failed:', error);
+    console.error('[generation/status] lookup failed:', safeErrorSummary(error));
     return NextResponse.json({ error: 'Could not fetch generation status.' }, { status: 502 });
   }
 }

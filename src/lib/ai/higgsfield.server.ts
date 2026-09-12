@@ -289,7 +289,18 @@ export const higgsfieldProvider: MediaGenerationProvider = {
       throw new Error(`Higgsfield status check failed with HTTP ${res.status}`);
     }
     const data = (await res.json()) as { status?: string; video?: { url?: string } };
-    const status = mapStatus(data.status);
+    let status = mapStatus(data.status);
+    // Higgsfield can report 'completed' before video.url is actually
+    // populated (a race on its own side) — treating that as genuinely done
+    // would render neither the video nor its Approve/Reject controls, AND
+    // get cached as a permanent terminal verdict with no result (see
+    // statusCache.server.ts's own doc comment on why a completed verdict is
+    // otherwise trusted forever), losing the paid clip for good once the
+    // URL later does appear. Keep polling instead until a real result URL
+    // is actually there.
+    if (status === 'completed' && !data.video?.url) {
+      status = 'in_progress';
+    }
 
     const job: GenerationJob = {
       jobId,

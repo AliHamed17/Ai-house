@@ -7,6 +7,7 @@ import { isSourceExpiredError, resultIdFromPath } from '@/lib/ai/resultStore.ser
 import { isSubmitTimeout } from '@/lib/ai/higgsfield.server';
 import { isIdempotencyKeyMismatchError, reserveIdempotentSubmission } from '@/lib/ai/idempotency.server';
 import { buildHiggsfieldPrompt } from '@/data/roomPrompts';
+import { safeErrorSummary } from '@/lib/ai/errorLogging.server';
 
 export const dynamic = 'force-dynamic';
 
@@ -98,7 +99,7 @@ export async function POST(request: NextRequest) {
     );
     return NextResponse.json({ jobId, demoMode, provider: demoMode ? 'mock' : 'higgsfield' });
   } catch (error) {
-    console.error('[higgsfield/generate] submission failed:', error);
+    console.error('[higgsfield/generate] submission failed:', safeErrorSummary(error));
     if (isIdempotencyKeyMismatchError(error)) {
       return NextResponse.json({ error: (error as Error).message }, { status: 409 });
     }

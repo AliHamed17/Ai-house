@@ -293,6 +293,26 @@ function readAllRecoveryEntries(): Record<string, RecoveryEntry> {
       continue;
     }
     const entry = parsed;
+    const id = key.slice(RECOVERY_STORAGE_PREFIX.length);
+    // Every write path (writeRecoveryEntry) derives the storage key from the
+    // entry's OWN identity, so under normal operation this always matches —
+    // but a stale key left behind by an older/incompatible client version,
+    // or any other unforeseen corruption, could still leave a payload stored
+    // under a DIFFERENT key than its own recoveryEntryId would produce. Every
+    // other reader here (Resume, Abandon, the storage-event listener)
+    // computes ITS OWN key from the payload, never from wherever the entry
+    // happened to be found — so a mismatched key would never be found by
+    // Resume, never correctly tombstoned by Abandon (which would then
+    // immediately re-adopt this same wrongly-keyed entry instead), leaving
+    // Generate locked until storage is cleared by hand.
+    if (recoveryEntryId(entry) !== id) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // best-effort
+      }
+      continue;
+    }
     if (Date.now() - entry.createdAt > recoveryMaxAgeMs(entry)) {
       try {
         localStorage.removeItem(key);
@@ -301,7 +321,7 @@ function readAllRecoveryEntries(): Record<string, RecoveryEntry> {
       }
       continue;
     }
-    all[key.slice(RECOVERY_STORAGE_PREFIX.length)] = entry;
+    all[id] = entry;
   }
   return all;
 }

@@ -1,4 +1,5 @@
 import 'server-only';
+import { resultIdFromPath } from './resultStore.server';
 import type { GenerationJob, GenerationStatus } from '@/lib/types';
 
 /**
@@ -14,44 +15,51 @@ import type { GenerationJob, GenerationStatus } from '@/lib/types';
  * the job finished and has nothing new left to report, exhausting the
  * provider account's own API quota (Higgsfield's status() spends a real
  * credentialed request every call) on a job that will never again change.
+ * This is the cache's WHOLE point, so a cached entry must stay valid for as
+ * long as the job itself is meaningfully "done" — including long after
+ * CACHE_TTL_MS below, for any job with nothing ephemeral to go stale.
  *
  * A job's own terminal VERDICT can only ever advance once — none of the
  * providers' own status() implementations ever un-complete, un-fail, or
  * un-moderate a job once it gets there (mock's is a deterministic function
  * of its signed, immutable payload; Higgsfield's and Nano Banana's both only
  * ever move forward). But a 'completed' verdict's resultUrl can still stop
- * WORKING out from under a cached entry: Nano Banana's (and a mock video
- * job's, when sourced from one) resultUrl points into resultStore.server's
- * own short-lived in-memory store, and a FRESH call to that provider's own
- * status() correctly notices the expired bytes and reports 'failed' instead
+ * WORKING out from under a cached entry — specifically when that resultUrl
+ * points into resultStore.server's own short-lived in-memory store (Nano
+ * Banana's always does; a mock video job's does only when sourced from a
+ * genuinely stored result): a FRESH call to that provider's own status()
+ * correctly notices the expired bytes and reports 'failed' instead
  * (regression: an earlier version of this cache assumed every terminal
  * verdict was flatly immutable forever, missing that this one specific
  * dependency isn't — a permanently-cached 'completed' would keep serving a
- * permanently-404ing resultUrl). CACHE_TTL_MS below bounds how long a cached
- * entry is trusted before falling back to a fresh lookup, matching
- * resultStore's own TTL_MS — measured from the job's own createdAt (baked
- * into its id at submit time, and always present on the GenerationJob every
- * provider's status() returns — see jobId.ts and each provider's own
- * status()), not from whenever this cache first happened to observe it
- * (regression: an earlier version measured from that first-observed time
- * instead, so a job whose first terminal poll was itself delayed — e.g. a
- * submission recovered and resumed well after it had actually already
- * completed server-side — could still be served as freshly 'completed' for
- * up to another full TTL_MS after the underlying result bytes, timed from
- * that SAME submission, had already expired). Higgsfield's own hosted
- * resultUrl has no such dependency, but this deliberately revalidates it too
- * rather than trying to special-case which providers' completions are truly
- * permanent — one real (but rare) extra provider call is a far smaller cost
- * than getting that special-casing wrong.
+ * permanently-404ing resultUrl). needsRevalidation below identifies exactly
+ * that dependency via resultIdFromPath — the one objective, checkable signal
+ * for "this resultUrl is ours and expires with resultStore's own TTL_MS" —
+ * rather than guessing from the provider name: Higgsfield's own hosted
+ * resultUrl (and a mock job's static placeholder-concept path) has no such
+ * dependency and must NOT be forced through CACHE_TTL_MS regardless of the
+ * job's own age (regression: an earlier version applied CACHE_TTL_MS to
+ * EVERY job unconditionally, measured from the job's own createdAt — so any
+ * terminal job older than ten minutes, Higgsfield's included, was evicted on
+ * its very next poll and fell straight back to a real provider call,
+ * defeating this cache's entire quota-protection purpose for exactly the
+ * old, long-since-finished jobs a replay attack would actually target).
+ * CACHE_TTL_MS matches resultStore's own TTL_MS, measured from the job's own
+ * createdAt (baked into its id at submit time, and always present on the
+ * GenerationJob every provider's status() returns — see jobId.ts and each
+ * provider's own status()), not from whenever this cache first happened to
+ * observe the job as terminal — a job whose first terminal poll was itself
+ * delayed (e.g. a submission recovered and resumed well after it had
+ * actually already completed server-side) must not be served as freshly
+ * 'completed' for another full TTL_MS past when the underlying result bytes,
+ * timed from that SAME submission, had already expired.
  */
 export function isTerminalStatus(status: GenerationStatus): boolean {
   return status === 'completed' || status === 'failed' || status === 'moderated';
 }
 
-// Matches resultStore.server's own TTL_MS — see this module's own doc
-// comment for why a cached 'completed' entry can't be trusted any longer
-// than the underlying result bytes it points to are guaranteed to exist. If
-// that changes, this must change with it.
+// See needsRevalidation below for why only some completed jobs are ever
+// subject to this at all.
 const CACHE_TTL_MS = 10 * 60_000;
 const MAX_ENTRIES = 500;
 // Map preserves insertion order, so the first key is always the
@@ -64,10 +72,21 @@ const MAX_ENTRIES = 500;
 // place, not a new failure mode.
 const cache = new Map<string, GenerationJob>();
 
+// True only for a completed job whose resultUrl is a
+// `/api/generation/result/<id>` path into resultStore.server's own
+// short-lived store — the one case whose bytes can actually expire out from
+// under an otherwise-immutable terminal verdict. Anything else (Higgsfield's
+// own hosted URL, a mock job's static placeholder-concept path, or any
+// failed/moderated job with no resultUrl at all) can be trusted for as long
+// as this cache keeps it around, with no TTL of its own.
+function needsRevalidation(job: GenerationJob): boolean {
+  return job.status === 'completed' && Boolean(job.resultUrl && resultIdFromPath(job.resultUrl));
+}
+
 export function getCachedTerminalStatus(jobId: string): GenerationJob | undefined {
   const job = cache.get(jobId);
   if (!job) return undefined;
-  if (Date.now() - new Date(job.createdAt).getTime() > CACHE_TTL_MS) {
+  if (needsRevalidation(job) && Date.now() - new Date(job.createdAt).getTime() > CACHE_TTL_MS) {
     cache.delete(jobId);
     return undefined;
   }

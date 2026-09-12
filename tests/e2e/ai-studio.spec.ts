@@ -586,6 +586,42 @@ test.describe('AI Design Studio (demo mode)', () => {
     expect(await recoveryEntryIds(page)).toHaveLength(0);
   });
 
+  test('an entry stored under a key that disagrees with its own payload identity is discarded, not silently re-adopted forever (regression)', async ({ page }) => {
+    // Every write path (writeRecoveryEntry) derives the storage key from the
+    // entry's OWN identity, so this never happens through normal use of the
+    // current app — but a stale key left by an older/incompatible client
+    // version, or any other unforeseen corruption, could still leave a
+    // payload stored under a DIFFERENT key than its own jobId/idempotencyKey
+    // would produce. Every earlier validation fix above checks the payload's
+    // OWN internal consistency, but none of them cross-check it against the
+    // key it was actually found under: Resume and Abandon each compute their
+    // OWN expected key from the payload, never from wherever the entry
+    // happened to be found, so a mismatched key would never be found by
+    // Resume and never correctly tombstoned by Abandon (which would then
+    // immediately re-adopt this exact same wrongly-keyed entry instead),
+    // leaving Generate locked until storage is cleared by hand.
+    await page.addInitScript((prefix) => {
+      localStorage.setItem(
+        `${prefix}submission:old-key`,
+        JSON.stringify({
+          kind: 'submission',
+          ambiguous: false,
+          idempotencyKey: 'new-key',
+          endpoint: '/api/nano-banana/generate',
+          body: { roomId: 'living', idempotencyKey: 'new-key' },
+          roomId: 'living',
+          outputType: 'image',
+          createdAt: Date.now(),
+        }),
+      );
+    }, RECOVERY_STORAGE_PREFIX);
+
+    await page.goto('/#ai-studio');
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Resume submission' })).toHaveCount(0);
+    expect(await recoveryEntryIds(page)).toHaveLength(0);
+  });
+
   test('an expired approved source (410) is never treated as recoverable, and clears so the next attempt uses a fresh source (regression)', async ({ page }) => {
     // Unlike a lost connection or a Higgsfield timeout, a 410 is a definite,
     // pre-billing failure (see SOURCE_EXPIRED_MESSAGE) — nothing to resume,

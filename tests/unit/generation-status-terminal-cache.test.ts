@@ -178,4 +178,46 @@ describe('GET /api/generation/status/[id] caches a TERMINAL status, never re-spe
       vi.useRealTimers();
     }
   });
+
+  it('serves an already-old completed job with a NON-ephemeral resultUrl from cache forever, never falling through to the rate limiter once past CACHE_TTL_MS (regression)', async () => {
+    // The createdAt-anchored TTL fix above is only meant to bound a
+    // resultStore-backed resultUrl (Nano Banana's, or a mock video job's
+    // when sourced from one) — this job's own resultUrl is the STATIC
+    // placeholder-concept path (no approved source, mockSourceResultPath
+    // unset), exactly the same non-ephemeral shape Higgsfield's own hosted
+    // resultUrl has. Applying that same TTL unconditionally to every job
+    // (an earlier version of this fix did) would evict this cache entry the
+    // moment it turns ten minutes old regardless of what its resultUrl
+    // actually depends on, falling through to the rate limiter on every
+    // later replay and defeating this cache's entire quota-protection
+    // purpose for precisely the old, long-since-finished jobs a replay
+    // attack would target.
+    vi.resetModules();
+    const { GET } = await import('@/app/api/generation/status/[id]/route');
+    const { encodeJobId } = await import('@/lib/ai/jobId');
+    const { STATUS_MAX_REQUESTS_PER_WINDOW } = await import('@/lib/ai/rateLimit.server');
+
+    const jobId = encodeJobId({
+      provider: 'mock',
+      roomId: 'living',
+      outputType: 'image',
+      styleVariant: 'warm-oak',
+      prompt: 'p-non-ephemeral-old',
+      // Already well past CACHE_TTL_MS (10 min) at the very first poll.
+      createdAt: Date.now() - 20 * 60_000,
+      simulate: 'success',
+    });
+
+    // Comfortably more than the rate-limit ceiling — if the cache were
+    // incorrectly evicting this entry for being "too old", this would
+    // eventually 429 just like the sibling test at the top of this file.
+    const replayCount = STATUS_MAX_REQUESTS_PER_WINDOW * 3;
+    for (let i = 0; i < replayCount; i++) {
+      const res = await GET(makeRequest(jobId), { params: Promise.resolve({ id: jobId }) });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe('completed');
+      expect(body.resultUrl).toMatch(/^\/generated\/concepts\//);
+    }
+  });
 });

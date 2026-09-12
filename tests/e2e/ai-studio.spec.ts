@@ -322,6 +322,33 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
   });
 
+  test('a completed-but-unacknowledged result survives a page reload, and only clears once Approved (regression)', async ({ page }) => {
+    // In-memory `job` state alone never survives a reload — the persisted
+    // recovery entry is the only thing that can bring a completed (possibly
+    // billed) result back. Deleting it the instant the job completes, before
+    // the visitor ever gets to Approve or Reject, permanently lost it on any
+    // reload/crash in that window.
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    expect(await recoveryEntryIds(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^job:/)]));
+
+    await page.reload();
+    // The completed job wasn't acknowledged before reloading — the mount
+    // effect adopts its surviving entry as a recoverable job, same as any
+    // other unresolved one, rather than it being silently gone.
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
+
+    await page.getByRole('button', { name: 'Resume checking status' }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    expect(await recoveryEntryIds(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^job:/)]));
+
+    // Only NOW, once genuinely acknowledged, does the entry actually clear.
+    await page.getByRole('button', { name: 'Approve' }).click();
+    expect(await recoveryEntryIds(page)).toHaveLength(0);
+  });
+
   test('a job that never reaches a terminal state stops polling past a bounded ceiling instead of forever (regression)', async ({ page }) => {
     // MAX_TRANSIENT_FAILURES only counts FAILED responses; a status check
     // that keeps succeeding with a non-terminal status (a genuine backend
@@ -1241,7 +1268,10 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.locator('select').first()).toHaveValue('kitchen');
   });
 
-  test('resuming a sibling adopted via Approve never opens it pre-marked "✓ Approved" (regression)', async ({ page, context }) => {
+  test('resuming a sibling adopted via Approve never opens it pre-marked "✓ Approved" (regression)', async ({ page }) => {
+    // Generous headroom over the default 60s: the rate-limit retry loop
+    // below can occasionally need to wait out most of a 60s window.
+    test.setTimeout(120_000);
     // Approve's own adoptRecoveryEntry('proceed') call queues
     // setApproved(false), but an earlier version let this click's own
     // setApproved(true) win the batch unconditionally — correct when
@@ -1254,36 +1284,67 @@ test.describe('AI Design Studio (demo mode)', () => {
     // would silently use the old image despite the UI claiming the new one
     // was the approved source.
     //
-    // The sibling needs a REAL, resumable job id (not a fabricated one), so
-    // a genuinely different tab submits one for the SAME room and is kept
-    // from ever settling it locally (status polling blocked) — its own
-    // recovery entry is written up front by startPolling, before polling
-    // even begins, and stays in storage the whole time as a result. It must
-    // be written only AFTER this tab's own first job is already showing
-    // Complete: writing it any earlier would make the MOUNT effect adopt it
-    // immediately (locking Generate before this tab ever gets its own first
-    // job going) — a different, already-covered scenario.
+    // The sibling needs a REAL, resumable job id (not a fabricated one),
+    // since it gets RESUMED below and must actually settle. A second tab
+    // submitting one of its own (the original approach here) no longer
+    // works now that a completed job's own entry is kept in storage until
+    // Approve/Reject (see startPolling's completion branch): a second tab
+    // mounting the app while THIS tab's own first job sits completed and
+    // unacknowledged would immediately adopt THAT entry instead, locking
+    // its own Generate button before it ever got a chance to submit
+    // anything — a different, already-covered scenario. A direct API call
+    // sidesteps that entirely: it gets a real job id without ever mounting
+    // a second copy of the app.
     await page.goto('/#ai-studio');
     await page.getByRole('button', { name: /Generate concept image/i }).click();
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
 
-    const page2 = await context.newPage();
-    await page2.route('**/api/generation/status/**', (route) => route.abort());
-    await page2.goto('/#ai-studio');
-    await page2.getByRole('button', { name: /Generate concept image/i }).click();
-    await expect(page2.getByText(/Lost connection while checking on a generation/i)).toBeVisible({ timeout: 15_000 });
+    // /api/nano-banana/generate shares one deployment-wide rate-limit
+    // bucket across every caller (see rateLimit.server's
+    // clientKeyFromRequest — no trusted proxy is configured in this test
+    // environment, so every request collapses to the same 'anonymous'
+    // key), which this suite's own many earlier real submissions can
+    // leave briefly exhausted by the time this extra request lands.
+    // Honoring the server's own Retry-After — exactly the pattern this
+    // file's poll loop already uses for the same reason — is what keeps
+    // this reliable regardless of how much of that shared budget the rest
+    // of the suite has already spent, rather than depending on the whole
+    // suite's timing to happen to leave headroom.
+    let siblingJobId: string | undefined;
+    let lastResponse: Awaited<ReturnType<typeof page.request.post>> | undefined;
+    for (let attempt = 0; attempt < 4 && !siblingJobId; attempt++) {
+      lastResponse = await page.request.post('/api/nano-banana/generate', { data: { roomId: 'kitchen', simulate: 'success' } });
+      if (lastResponse.status() === 429) {
+        const retryAfterSeconds = Number(lastResponse.headers()['retry-after']);
+        await page.waitForTimeout((Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds : 5) * 1000);
+        continue;
+      }
+      ({ jobId: siblingJobId } = (await lastResponse.json()) as { jobId: string });
+    }
+    if (!siblingJobId) {
+      throw new Error(`Could not obtain a real sibling job id: ${lastResponse?.status()} ${await lastResponse?.text()}`);
+    }
+    await page.evaluate(
+      ({ prefix, jobId }) => {
+        localStorage.setItem(
+          `${prefix}job:${jobId}`,
+          JSON.stringify({ kind: 'job', jobId, roomId: 'kitchen', outputType: 'image', createdAt: Date.now() }),
+        );
+      },
+      { prefix: RECOVERY_STORAGE_PREFIX, jobId: siblingJobId },
+    );
 
     await page.getByRole('button', { name: 'Approve' }).click();
 
-    // The still-outstanding sibling (same room: 'living', the default) is
+    // The still-outstanding sibling (a different room: 'kitchen') is
     // adopted — confirmed by the Resume banner appearing with the room
-    // selector unchanged, exactly the case this regression needs.
+    // selector switched, exactly the case this regression needs.
     await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('select').first()).toHaveValue('living');
+    await expect(page.locator('select').first()).toHaveValue('kitchen');
 
-    // Resuming it on THIS tab is a genuinely fresh status check (page1 was
-    // never blocking its own requests) — the underlying job is already
-    // complete server-side, so it settles immediately.
+    // Resuming it is a genuinely fresh status check against the real job id
+    // obtained above — well past the mock provider's own brief completion
+    // delay by now, so it settles immediately.
     await page.getByRole('button', { name: 'Resume checking status' }).click();
     await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
@@ -1306,6 +1367,19 @@ test.describe('AI Design Studio (demo mode)', () => {
     await page.goto('/#ai-studio');
     await page2.goto('/#ai-studio');
 
+    // Force the eventual outcome to 'failure' rather than leaving the
+    // default 'success': a completed job's own entry is deliberately
+    // retained until Approve/Reject (see startPolling's completion
+    // branch), so tab 1's job never clearing its own entry on completion
+    // would correctly keep tab 2 locked on it forever too — a real, but
+    // DIFFERENT and already-covered behavior (see "a completed-but-
+    // unacknowledged result survives a page reload"). 'failure' keeps this
+    // test isolated to the one thing it actually guards — the storage
+    // listener's own tracked-identity bookkeeping — since a failed job
+    // still clears its own entry the instant it settles, same as always.
+    await expect(page.locator('select').filter({ hasText: 'Success' })).toBeVisible({ timeout: 10_000 });
+    await page.locator('select').filter({ hasText: 'Success' }).selectOption('failure');
+
     await page.getByRole('button', { name: /Generate concept image/i }).click();
     await expect(page.getByText(/The outcome of this generation is unclear/i)).toBeVisible({ timeout: 10_000 });
 
@@ -1318,7 +1392,7 @@ test.describe('AI Design Studio (demo mode)', () => {
     // right below.
     blockGenerate = false;
     await page.getByRole('button', { name: 'Resume submission' }).click();
-    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('span').filter({ hasText: 'Failed' })).toBeVisible({ timeout: 10_000 });
 
     // Tab 2 must notice the removal live and unlock on its own.
     await expect(page2.getByRole('button', { name: 'Resume submission' })).toHaveCount(0, { timeout: 10_000 });

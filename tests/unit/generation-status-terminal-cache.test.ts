@@ -82,4 +82,48 @@ describe('GET /api/generation/status/[id] caches a TERMINAL status, never re-spe
       vi.useRealTimers();
     }
   });
+
+  it("revalidates a cached 'completed' Nano Banana status once its cache TTL passes, so an expired result-store entry is correctly reported as failed instead of serving a stale, permanently-404ing resultUrl (regression)", async () => {
+    // Nano Banana's 'completed' resultUrl points into resultStore.server's
+    // own short-lived store (TTL_MS, 10 min) — a job that was genuinely
+    // completed can still stop being fetchable once those bytes expire, even
+    // though the terminal VERDICT itself never changes. A cache with no TTL
+    // of its own would keep serving that first 'completed' snapshot forever,
+    // permanently 404ing the very resultUrl it advertises.
+    vi.resetModules();
+    const { GET } = await import('@/app/api/generation/status/[id]/route');
+    const { encodeJobId } = await import('@/lib/ai/jobId');
+    const { putStoredResult } = await import('@/lib/ai/resultStore.server');
+
+    vi.useFakeTimers();
+    try {
+      const resultKey = putStoredResult('image/png', 'aGVsbG8=');
+      const jobId = encodeJobId({
+        provider: 'nano-banana',
+        roomId: 'living',
+        outputType: 'image',
+        styleVariant: 'warm-oak',
+        prompt: 'p-cache-ttl',
+        createdAt: Date.now(),
+        nanoBananaResultKey: resultKey,
+      });
+
+      const first = await GET(makeRequest(jobId), { params: Promise.resolve({ id: jobId }) });
+      const firstBody = await first.json();
+      expect(firstBody.status).toBe('completed');
+      expect(firstBody.resultUrl).toBeDefined();
+
+      // Past both resultStore's own TTL_MS and the status cache's matching
+      // CACHE_TTL_MS (they're deliberately kept equal — see
+      // statusCache.server's own doc comment).
+      vi.advanceTimersByTime(11 * 60_000);
+
+      const second = await GET(makeRequest(jobId), { params: Promise.resolve({ id: jobId }) });
+      const secondBody = await second.json();
+      expect(secondBody.status).toBe('failed');
+      expect(secondBody.error).toMatch(/expired/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

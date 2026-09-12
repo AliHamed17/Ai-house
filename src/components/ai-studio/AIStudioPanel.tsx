@@ -793,24 +793,38 @@ export function AIStudioPanel() {
         if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
           setSubmitting(false);
           setRecoverableJobId(null);
-          // 'preserve' only for a genuine completed result — statusData
-          // (just set above) is that exact result, always unapproved at the
-          // moment it first lands, but this poll loop closure is reused
-          // across every retry via setTimeout(poll, ...) rather than
-          // redefined on each render, so the `job`/`approved` bindings
-          // adoptRecoveryEntry would otherwise read here are frozen to
-          // whatever they were when startPolling was first called — not
-          // this fresh completion, and NOT reliably null/non-terminal
-          // either: if an EARLIER job had already completed in this same
-          // tab before this polling session started (e.g. the visitor
-          // generated once, then generated again), that stale read could
-          // itself still show a completed, unapproved job, wrongly
-          // deferring a failed/moderated result the same way (regression,
-          // caught by this file's own failed/moderated adoption test) —
-          // so failed/moderated are forced to 'proceed' explicitly here
-          // too, rather than left to fall through to that unreliable
-          // default. Never pass undefined from this call site.
-          clearOwnRecoveryEntry(jobRecoveryId(jobId), statusData.status === 'completed' ? 'preserve' : 'proceed');
+          if (statusData.status === 'completed') {
+            // Deliberately NOT clearRecoveryEntry here (regression): this
+            // result is still awaiting the visitor's own Approve/Reject —
+            // in-memory `job` state alone doesn't survive a reload or crash,
+            // so deleting its only persisted breadcrumb the moment it
+            // completes would make a possibly-billed result unrecoverable
+            // through the UI for the entire window between completion and
+            // that decision. Approve and Reject each clear it themselves
+            // once genuinely acknowledged (see their own onClick handlers).
+            // 'preserve' still defers sibling adoption exactly as before —
+            // statusData (just set above) is that exact fresh completion,
+            // always unapproved at the moment it first lands, but this poll
+            // loop closure is reused across every retry via
+            // setTimeout(poll, ...) rather than redefined on each render, so
+            // the `job`/`approved` bindings adoptRecoveryEntry would
+            // otherwise read here are frozen to whatever they were when
+            // startPolling was first called, not this fresh completion.
+            adoptRecoveryEntry('preserve');
+          } else {
+            // failed/moderated render neither Approve nor Reject — no asset
+            // to lose and nothing to acknowledge, so clear immediately as
+            // before. 'proceed' (rather than falling through to the same
+            // frozen-binding hazard described above) is forced explicitly:
+            // if an EARLIER job had already completed in this same tab
+            // before this polling session started (e.g. the visitor
+            // generated once, then generated again), that stale binding
+            // could itself still show a completed, unapproved job, wrongly
+            // deferring this failed/moderated result the same way
+            // (regression, caught by this file's own failed/moderated
+            // adoption test).
+            clearOwnRecoveryEntry(jobRecoveryId(jobId), 'proceed');
+          }
           return;
         }
         // Still queued/in_progress — but for how long? A job that never
@@ -1135,16 +1149,32 @@ export function AIStudioPanel() {
     const token = ++pollTokenRef.current;
     setSubmitting(true);
     setError(null);
+    // A completed-but-unacknowledged job from earlier in this same tab is
+    // deliberately kept in storage until Approve/Reject (see startPolling's
+    // completion branch), so a reload or crash before that decision can
+    // still recover it. Starting a fresh generation instead — without ever
+    // approving or rejecting it — is just as much the visitor's own
+    // deliberate choice to abandon it, so its own persisted entry must be
+    // cleared here too: left behind, it would still be sitting in storage
+    // the next time this NEW job settles as failed/moderated, and
+    // adoptRecoveryEntry would then mistake it for a genuinely outstanding
+    // sibling rather than this tab's own already-superseded result
+    // (regression, caught by this file's own simulate-failure/
+    // simulate-moderated tests). A failed/moderated job needs no such
+    // handling here — it already clears its own entry the moment it
+    // settles (same completion branch), so there is nothing of its own
+    // left by the time a new generation can start.
+    if (job !== null && !approved && job.status === 'completed') {
+      clearRecoveryEntry(jobRecoveryId(job.jobId));
+    }
     setJob(null);
     setApproved(false);
-    // A deliberate new submission is the one case where abandoning a prior
-    // unresolved job is the visitor's own informed choice, not silent loss.
-    // (handleGenerateClick already returns early while hasUnresolvedJob is
-    // true, so recoverableJobId/recoverableSubmission are already guaranteed
-    // null here — there is nothing of THIS tab's own left to clear from
-    // storage, and blindly clearing "whatever's there" could only ever hit a
-    // DIFFERENT tab's still-active entry now that entries are keyed per
-    // generation rather than sharing one slot.)
+    // A deliberate new submission is the other case where abandoning a
+    // prior unresolved job is the visitor's own informed choice, not silent
+    // loss. (handleGenerateClick already returns early while
+    // hasUnresolvedJob is true, so recoverableJobId/recoverableSubmission
+    // are already guaranteed null here — this is a safety net, not a
+    // no-op that could ever discard a real pending recovery.)
     setRecoverableJobId(null);
     setRecoverableSubmission(null);
 
@@ -1440,18 +1470,27 @@ export function AIStudioPanel() {
                     // adoptRecoveryEntry), and clicking Approve is the visitor's
                     // explicit decision that settles it — a sibling waiting
                     // behind it otherwise has no other trigger to ever get
-                    // adopted. Called BEFORE setApprovedSource below (rather
-                    // than after, as Reject does) because it matters here
-                    // specifically: adoptRecoveryEntry's own setApprovedSource(null)
-                    // reset then runs FIRST in the same batch, so the explicit
-                    // call below — reading job/roomId from this same click's
-                    // closure, still the ORIGINAL room/job regardless of any
-                    // room switch adoption just queued — lands last and is
-                    // what actually takes effect, rather than the visitor's
-                    // just-made approval being silently discarded by it (that
-                    // was the gap: adoption used to leave a just-made approval
-                    // unrecorded, with the sibling still never adopted either
-                    // since nothing here called this at all).
+                    // adopted. clearRecoveryEntry here (not before, at
+                    // completion time) is what actually removes this job's
+                    // persisted breadcrumb now that the visitor has genuinely
+                    // acknowledged it (regression: completion alone used to
+                    // delete it immediately, so a reload or crash between
+                    // completing and this click lost an unapproved,
+                    // possibly-billed result for good — see startPolling's own
+                    // comment). adoptRecoveryEntry is called BEFORE
+                    // setApprovedSource below (rather than after, as Reject
+                    // does) because it matters here specifically: its own
+                    // setApprovedSource(null) reset then runs FIRST in the same
+                    // batch, so the explicit call below — reading job/roomId
+                    // from this same click's closure, still the ORIGINAL
+                    // room/job regardless of any room switch adoption just
+                    // queued — lands last and is what actually takes effect,
+                    // rather than the visitor's just-made approval being
+                    // silently discarded by it (that was the gap: adoption used
+                    // to leave a just-made approval unrecorded, with the
+                    // sibling still never adopted either since nothing here
+                    // called this at all).
+                    clearRecoveryEntry(jobRecoveryId(job.jobId));
                     const adoptedSibling = adoptRecoveryEntry('proceed');
                     // Only set true when nothing was adopted: when a sibling
                     // WAS adopted, `job` is about to become that sibling's
@@ -1492,16 +1531,22 @@ export function AIStudioPanel() {
                     if (approvedSource && approvedSource.path === job.resultUrl) {
                       setApprovedSource(null);
                     }
-                    // 'proceed': this tab's own unacknowledged result is what
-                    // was deferring adoption (see adoptRecoveryEntry), and
-                    // Reject is the visitor's own explicit decision that
-                    // settles it — but setJob(null) just above only takes
-                    // effect next render, so the plain state read inside
+                    // This tab's own unacknowledged result is what was
+                    // deferring adoption (see adoptRecoveryEntry), and Reject
+                    // is the visitor's own explicit decision that settles it —
+                    // clearOwnRecoveryEntry both removes this job's persisted
+                    // breadcrumb now that it's genuinely acknowledged
+                    // (regression: completion alone used to delete it
+                    // immediately, losing an unapproved, possibly-billed
+                    // result for good on a reload before this click — see
+                    // startPolling's own comment) and looks for a sibling with
+                    // 'proceed', since setJob(null) just above only takes
+                    // effect next render — the plain state read inside
                     // adoptRecoveryEntry would otherwise still see the job
-                    // just rejected and keep deferring. A sibling waiting
+                    // just rejected and keep deferring, and a sibling waiting
                     // behind it may otherwise never get picked up (nothing
                     // else re-triggers this check on its own).
-                    adoptRecoveryEntry('proceed');
+                    clearOwnRecoveryEntry(jobRecoveryId(job.jobId), 'proceed');
                   }}
                   className="rounded-full border border-limestone/60 px-4 py-2 text-xs font-semibold text-charcoal hover:bg-limestone/30"
                 >

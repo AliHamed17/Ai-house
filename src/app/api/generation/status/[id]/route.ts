@@ -7,6 +7,23 @@ import { safeErrorSummary } from '@/lib/ai/errorLogging.server';
 
 export const dynamic = 'force-dynamic';
 
+// Bounds how long any job id, however validly signed, can keep spending
+// real credentialed provider lookups — independent of statusCache's own
+// eviction. That cache is bounded to MAX_ENTRIES purely for memory, not for
+// quota protection: once more than MAX_ENTRIES distinct terminal jobs have
+// ever been observed by this process, its FIFO eviction can force even an
+// old, otherwise-permanently-cacheable (non-ephemeral) job to fall through
+// to a fresh provider call on its very next poll (regression: a holder who
+// accumulates and cycles through enough valid ids can keep doing this
+// indefinitely, thrashing the cache so every request misses it, bypassing
+// the cache's own intended lifetime bound). Refusing to ever call the
+// provider again once a job is this old closes that off regardless of the
+// cache's own internal state. Matches AIStudioPanel's own
+// RECOVERY_MAX_AGE_MS.job (24h) — the client itself gives up trying to
+// recover a job this old, so no legitimate caller still needs a fresh look
+// at it.
+const JOB_LIFETIME_MS = 24 * 60 * 60_000;
+
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
@@ -19,9 +36,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   // no valid job id at all. Decoding first means only a genuinely-signed id
   // (which nothing but this server could have produced) ever creates an
   // entry.
-  let providerId;
+  let payload;
   try {
-    providerId = decodeJobId(id).provider;
+    payload = decodeJobId(id);
   } catch {
     return NextResponse.json({ error: 'Unknown or invalid job id.' }, { status: 404 });
   }
@@ -30,14 +47,17 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   // own doc comment) is served straight away, before the rate limiter and
   // without ever touching the provider — a completed/failed/moderated job
   // never changes again, so replaying the same id can never observe
-  // anything new. This is what actually bounds a job's total lifetime of
-  // real provider lookups; the per-job rate limit below only bounds their
-  // RATE, and its window resets forever, so on its own it never stops a
-  // holder of one legitimately issued (but long-finished) job id from
-  // eventually exhausting the provider account's own API quota.
+  // anything new. Serving a cache HIT never costs a real provider call
+  // regardless of the job's own age, so this is never gated by
+  // JOB_LIFETIME_MS below — only the fallback path that would actually
+  // spend one is.
   const cached = getCachedTerminalStatus(id);
   if (cached) {
     return NextResponse.json(cached);
+  }
+
+  if (Date.now() - payload.createdAt > JOB_LIFETIME_MS) {
+    return NextResponse.json({ error: 'This job is too old to check on any further.' }, { status: 410 });
   }
 
   // Signing already stops a FORGED id from reaching a provider, but says
@@ -57,7 +77,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     );
   }
 
-  const provider = resolveProviderById(providerId);
+  const provider = resolveProviderById(payload.provider);
   try {
     const job = await provider.status(id);
     cacheTerminalStatus(id, job);

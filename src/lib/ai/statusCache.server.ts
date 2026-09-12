@@ -29,11 +29,19 @@ import type { GenerationJob, GenerationStatus } from '@/lib/types';
  * dependency isn't — a permanently-cached 'completed' would keep serving a
  * permanently-404ing resultUrl). CACHE_TTL_MS below bounds how long a cached
  * entry is trusted before falling back to a fresh lookup, matching
- * resultStore's own TTL_MS so a real expiry is never missed by more than
- * that window. Higgsfield's own hosted resultUrl has no such dependency, but
- * this deliberately revalidates it too rather than trying to special-case
- * which providers' completions are truly permanent — one real (but rare, at
- * most one per TTL window per job) extra provider call is a far smaller cost
+ * resultStore's own TTL_MS — measured from the job's own createdAt (baked
+ * into its id at submit time, and always present on the GenerationJob every
+ * provider's status() returns — see jobId.ts and each provider's own
+ * status()), not from whenever this cache first happened to observe it
+ * (regression: an earlier version measured from that first-observed time
+ * instead, so a job whose first terminal poll was itself delayed — e.g. a
+ * submission recovered and resumed well after it had actually already
+ * completed server-side — could still be served as freshly 'completed' for
+ * up to another full TTL_MS after the underlying result bytes, timed from
+ * that SAME submission, had already expired). Higgsfield's own hosted
+ * resultUrl has no such dependency, but this deliberately revalidates it too
+ * rather than trying to special-case which providers' completions are truly
+ * permanent — one real (but rare) extra provider call is a far smaller cost
  * than getting that special-casing wrong.
  */
 export function isTerminalStatus(status: GenerationStatus): boolean {
@@ -46,10 +54,6 @@ export function isTerminalStatus(status: GenerationStatus): boolean {
 // that changes, this must change with it.
 const CACHE_TTL_MS = 10 * 60_000;
 const MAX_ENTRIES = 500;
-interface CachedEntry {
-  job: GenerationJob;
-  cachedAt: number;
-}
 // Map preserves insertion order, so the first key is always the
 // longest-cached entry — evicting it on overflow is a simple, correct FIFO
 // bound. Unlike idempotency.server's reservation store, there is no
@@ -58,16 +62,16 @@ interface CachedEntry {
 // through to a fresh, real provider lookup — exactly the pre-existing,
 // already-safe behavior for any job that was never cached in the first
 // place, not a new failure mode.
-const cache = new Map<string, CachedEntry>();
+const cache = new Map<string, GenerationJob>();
 
 export function getCachedTerminalStatus(jobId: string): GenerationJob | undefined {
-  const entry = cache.get(jobId);
-  if (!entry) return undefined;
-  if (Date.now() - entry.cachedAt > CACHE_TTL_MS) {
+  const job = cache.get(jobId);
+  if (!job) return undefined;
+  if (Date.now() - new Date(job.createdAt).getTime() > CACHE_TTL_MS) {
     cache.delete(jobId);
     return undefined;
   }
-  return entry.job;
+  return job;
 }
 
 export function cacheTerminalStatus(jobId: string, job: GenerationJob): void {
@@ -76,7 +80,7 @@ export function cacheTerminalStatus(jobId: string, job: GenerationJob): void {
     const oldestKey = cache.keys().next().value;
     if (oldestKey !== undefined) cache.delete(oldestKey);
   }
-  cache.set(jobId, { job, cachedAt: Date.now() });
+  cache.set(jobId, job);
 }
 
 /** Test-only: resets the module-level cache so capacity/eviction tests start from a clean slate. */

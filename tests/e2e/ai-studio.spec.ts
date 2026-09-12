@@ -349,6 +349,24 @@ test.describe('AI Design Studio (demo mode)', () => {
     expect(await recoveryEntryIds(page)).toHaveLength(0);
   });
 
+  test('switching rooms away from a completed-but-unacknowledged result clears its own entry too, not just a fresh Generate (regression)', async ({ page }) => {
+    // handleGenerate learned to clear a completed-but-unacknowledged job's
+    // own entry when a fresh generation deliberately supersedes it (see its
+    // own comment), but switching rooms clears the exact same `job` state
+    // through a different door (handleRoomChange) without going through
+    // that check — leaving the entry to linger in storage, invisible to
+    // this tab, while Generate for the NEW room stays free to run (and,
+    // once it later settles as failed/moderated, to wrongly mistake that
+    // lingering entry for a genuinely outstanding sibling).
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.locator('span').filter({ hasText: 'Complete' })).toBeVisible({ timeout: 10_000 });
+    expect(await recoveryEntryIds(page)).toHaveLength(1);
+
+    await page.locator('select').first().selectOption('kitchen');
+    expect(await recoveryEntryIds(page)).toHaveLength(0);
+  });
+
   test('a job that never reaches a terminal state stops polling past a bounded ceiling instead of forever (regression)', async ({ page }) => {
     // MAX_TRANSIENT_FAILURES only counts FAILED responses; a status check
     // that keeps succeeding with a non-terminal status (a genuine backend

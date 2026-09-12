@@ -669,11 +669,42 @@ export function AIStudioPanel() {
   // against the wrong room.
   const hasUnresolvedJob = recoverableJobId !== null || recoverableSubmission !== null;
 
+  // A completed-but-unacknowledged job is deliberately kept in storage until
+  // Approve/Reject (see startPolling's completion branch), so a reload or
+  // crash before that decision can still recover it. Every OTHER way this
+  // tab can stop displaying it — a deliberate new generation (handleGenerate)
+  // or switching away from its room (handleRoomChange) — is just as much the
+  // visitor's own choice to abandon it without ever acknowledging it, so its
+  // own persisted entry must be cleared right here too: left behind, it
+  // would still be sitting in storage the next time some OTHER job settles
+  // as failed/moderated, and adoptRecoveryEntry would then mistake it for a
+  // genuinely outstanding sibling rather than this tab's own
+  // already-superseded result (regression, caught by this file's own
+  // simulate-failure/simulate-moderated tests — first fixed only in
+  // handleGenerate, then found to still be reachable via handleRoomChange,
+  // which clears the same `job` state through a different door). A
+  // failed/moderated job needs no such handling — it already clears its own
+  // entry the moment it settles (same completion branch) — and neither does
+  // an already-approved one (Approve clears its own entry unconditionally).
+  function clearUnacknowledgedCompletedJob(): void {
+    if (job !== null && !approved && job.status === 'completed') {
+      clearRecoveryEntry(jobRecoveryId(job.jobId));
+    }
+  }
+
   function handleRoomChange(nextRoomId: RoomId) {
     // The selector is disabled in this state too; this guard is defense in
     // depth so an unresolved job's eventual result can never be displayed,
     // approved, or billed against a room switched to after it was submitted.
     if (hasUnresolvedJob) return;
+    // Read before setRoomId/setJob below: a completed-but-unacknowledged
+    // result belongs to the room being left, and switching away from it
+    // without acknowledging it is abandoning it just as much as starting a
+    // fresh generation would be (see clearUnacknowledgedCompletedJob's own
+    // comment) — otherwise its entry would linger in storage, invisible to
+    // this tab, while Generate stays free to start another (possibly
+    // billed) run for the NEW room.
+    clearUnacknowledgedCompletedJob();
     setRoomId(nextRoomId);
     if (!VIDEO_CAPABLE_ROOMS.has(nextRoomId) && outputType === 'video') setOutputType('image');
     setConfirmingLiveRun(false);
@@ -1149,24 +1180,10 @@ export function AIStudioPanel() {
     const token = ++pollTokenRef.current;
     setSubmitting(true);
     setError(null);
-    // A completed-but-unacknowledged job from earlier in this same tab is
-    // deliberately kept in storage until Approve/Reject (see startPolling's
-    // completion branch), so a reload or crash before that decision can
-    // still recover it. Starting a fresh generation instead — without ever
-    // approving or rejecting it — is just as much the visitor's own
-    // deliberate choice to abandon it, so its own persisted entry must be
-    // cleared here too: left behind, it would still be sitting in storage
-    // the next time this NEW job settles as failed/moderated, and
-    // adoptRecoveryEntry would then mistake it for a genuinely outstanding
-    // sibling rather than this tab's own already-superseded result
-    // (regression, caught by this file's own simulate-failure/
-    // simulate-moderated tests). A failed/moderated job needs no such
-    // handling here — it already clears its own entry the moment it
-    // settles (same completion branch), so there is nothing of its own
-    // left by the time a new generation can start.
-    if (job !== null && !approved && job.status === 'completed') {
-      clearRecoveryEntry(jobRecoveryId(job.jobId));
-    }
+    // See clearUnacknowledgedCompletedJob's own comment: a deliberate new
+    // generation abandons any completed-but-unacknowledged prior result the
+    // same way switching rooms does.
+    clearUnacknowledgedCompletedJob();
     setJob(null);
     setApproved(false);
     // A deliberate new submission is the other case where abandoning a

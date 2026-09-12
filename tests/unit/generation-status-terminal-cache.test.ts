@@ -126,4 +126,56 @@ describe('GET /api/generation/status/[id] caches a TERMINAL status, never re-spe
       vi.useRealTimers();
     }
   });
+
+  it("expires a cached 'completed' status from the job's own createdAt, not from whenever its first poll happened to land (regression)", async () => {
+    // A submission recovered and resumed well after it had actually already
+    // completed server-side (see AIStudioPanel's own submission-recovery
+    // flow) means this route's FIRST ever look at a job's status can itself
+    // already be minutes after the job — and the result-store bytes it
+    // depends on — were actually created. Anchoring the cache's own TTL to
+    // that first-observed moment instead of the job's real createdAt would
+    // keep serving 'completed' for up to another full CACHE_TTL_MS AFTER the
+    // underlying resultStore entry, timed from the SAME real creation, has
+    // already expired — exactly the stale-404ing-resultUrl bug the sibling
+    // test above guards against, just reached through a delayed first poll
+    // instead of a delayed second one.
+    vi.resetModules();
+    const { GET } = await import('@/app/api/generation/status/[id]/route');
+    const { encodeJobId } = await import('@/lib/ai/jobId');
+    const { putStoredResult } = await import('@/lib/ai/resultStore.server');
+
+    vi.useFakeTimers();
+    try {
+      const resultKey = putStoredResult('image/png', 'aGVsbG8=');
+      const jobId = encodeJobId({
+        provider: 'nano-banana',
+        roomId: 'living',
+        outputType: 'image',
+        styleVariant: 'warm-oak',
+        prompt: 'p-cache-ttl-delayed-first-poll',
+        createdAt: Date.now(),
+        nanoBananaResultKey: resultKey,
+      });
+
+      // The FIRST poll is itself delayed by 9 minutes — well within
+      // resultStore's own 10-minute TTL (measured from the same createdAt
+      // above), so this still genuinely observes 'completed'.
+      vi.advanceTimersByTime(9 * 60_000);
+      const first = await GET(makeRequest(jobId), { params: Promise.resolve({ id: jobId }) });
+      const firstBody = await first.json();
+      expect(firstBody.status).toBe('completed');
+
+      // Only 2 more minutes pass — comfortably under CACHE_TTL_MS measured
+      // from this first observation, but 11 minutes past the job's real
+      // createdAt, past both resultStore's TTL_MS and the status cache's own
+      // matching CACHE_TTL_MS measured correctly from THAT origin.
+      vi.advanceTimersByTime(2 * 60_000);
+      const second = await GET(makeRequest(jobId), { params: Promise.resolve({ id: jobId }) });
+      const secondBody = await second.json();
+      expect(secondBody.status).toBe('failed');
+      expect(secondBody.error).toMatch(/expired/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

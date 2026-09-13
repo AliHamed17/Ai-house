@@ -817,11 +817,28 @@ export function AIStudioPanel() {
   // window plus generation time — while still catching a genuinely wedged one.
   const POLL_STUCK_AFTER_MS = 10 * 60_000;
 
-  function startPolling(jobId: string, token: number, originatingIdempotencyKey?: string) {
+  // preservedCreatedAt: when resuming an EXISTING recovery entry, its original
+  // timestamp is carried forward rather than reset. Renewing it would let a
+  // job that is already past its server-side lifetime be re-persisted for a
+  // fresh 24 hours on every resume — the status route returns 410, the client
+  // raises another recovery banner, and the cycle repeats indefinitely.
+  function startPolling(
+    jobId: string,
+    token: number,
+    originatingIdempotencyKey?: string,
+    preservedCreatedAt?: number,
+  ) {
     // Written up front — not only once retries are exhausted — so a reload
     // during an otherwise-healthy poll still leaves a recovery breadcrumb;
     // right now that case loses the job with no trace at all.
-    writeRecoveryEntry({ kind: 'job', jobId, roomId, outputType, createdAt: Date.now(), originatingIdempotencyKey });
+    writeRecoveryEntry({
+      kind: 'job',
+      jobId,
+      roomId,
+      outputType,
+      createdAt: preservedCreatedAt ?? Date.now(),
+      originatingIdempotencyKey,
+    });
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     const MAX_TRANSIENT_FAILURES = 5;
     let transientFailures = 0;
@@ -950,12 +967,23 @@ export function AIStudioPanel() {
     // tombstone matching this job across more than one resume, not just the
     // first one (see RecoveryEntry's and startPolling's own comments).
     const persisted = readAllRecoveryEntries()[jobRecoveryId(jobId)];
-    const originatingIdempotencyKey = persisted?.kind === 'job' ? persisted.originatingIdempotencyKey : undefined;
+    // readAllRecoveryEntries prunes anything past the recovery ceiling, so a
+    // missing entry here means this job has aged out. Resuming anyway would
+    // re-persist an unusable job (the status route 410s a job past its own
+    // server lifetime) for another full window, and each resume would renew
+    // it again — a banner that can never be cleared by using it.
+    if (!persisted) {
+      setSubmitting(false);
+      setRecoverableJobId(null);
+      setError('That generation is too old to check any more, so it has been cleared.');
+      return;
+    }
+    const originatingIdempotencyKey = persisted.kind === 'job' ? persisted.originatingIdempotencyKey : undefined;
     // Cleared eagerly; startPolling re-sets it if this attempt also
     // exhausts its retries, so the banner never shows a stale/wrong state
     // while a fresh attempt is in flight.
     setRecoverableJobId(null);
-    startPolling(jobId, token, originatingIdempotencyKey);
+    startPolling(jobId, token, originatingIdempotencyKey, persisted.createdAt);
   }
 
   // A job can become PERMANENTLY uncheckable (e.g. the provider credentials

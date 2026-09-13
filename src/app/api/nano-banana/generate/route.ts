@@ -4,7 +4,12 @@ import { hasStableJobIdSigningSecret, JOB_ID_SIGNING_SECRET_REQUIRED_MESSAGE } f
 import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.server';
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
 import { buildNanoBananaEditPrompt, buildNanoBananaPrompt } from '@/data/roomPrompts';
-import { isSourceExpiredError, resultIdFromPath } from '@/lib/ai/resultStore.server';
+import {
+  assertStoredResultRoom,
+  isSourceExpiredError,
+  isSourceRoomMismatchError,
+  resultIdFromPath,
+} from '@/lib/ai/resultStore.server';
 import { isSubmitTimeout } from '@/lib/ai/nanoBanana.server';
 import { isIdempotencyKeyMismatchError, reserveIdempotentSubmission } from '@/lib/ai/idempotency.server';
 import { safeErrorSummary } from '@/lib/ai/errorLogging.server';
@@ -48,7 +53,26 @@ export async function POST(request: NextRequest) {
   // path), not the client's word, so a stray edit instruction on a first-ever
   // generation still gets the full furnishing/material brief instead of a
   // paid "edit" of an empty room with no furnishing instructions at all.
-  const hasApprovedSource = Boolean(validated.data.sourceAssetPath && resultIdFromPath(validated.data.sourceAssetPath));
+  const approvedSourceId = validated.data.sourceAssetPath
+    ? resultIdFromPath(validated.data.sourceAssetPath)
+    : undefined;
+
+  // Same binding the Higgsfield route enforces: a stored id proves the source
+  // is one of ours, but says nothing about WHICH room it was generated for.
+  // Without this a refinement could load another room's bytes, preserve that
+  // room's architecture, and then store and sign the result under the
+  // REQUESTED room — manufacturing a falsely room-tagged source that later
+  // billed jobs would treat as authoritative.
+  try {
+    assertStoredResultRoom(approvedSourceId, validated.data.roomId);
+  } catch (error) {
+    if (isSourceRoomMismatchError(error)) {
+      return NextResponse.json({ error: (error as Error).message }, { status: 400 });
+    }
+    throw error;
+  }
+
+  const hasApprovedSource = Boolean(approvedSourceId);
   const prompt =
     validated.data.editInstruction && hasApprovedSource
       ? buildNanoBananaEditPrompt(validated.data.roomId, validated.data.editInstruction)

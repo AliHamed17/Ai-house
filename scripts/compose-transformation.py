@@ -183,6 +183,30 @@ def main() -> int:
     total = int(round(duration * fps))
     arrays = {k: np.asarray(v, dtype=np.uint8) for k, v in base_images.items()}
 
+    # A clip animates FROM the previous stage's still INTO this stage's state,
+    # so it is a transition, not the stage itself. Playing it from offset zero
+    # once stage_at had already switched meant the opening frames of the target
+    # interval showed the OLD furniture while the manifest, the hand timing and
+    # the 3D handoff all reported the new stage — the video and the stage id
+    # disagreeing at exactly the boundary they are supposed to share.
+    #
+    # Scheduling it to FINISH at stage.start fixes that: the transition plays
+    # out across the tail of the previous stage, and from stage.start onward
+    # the target still already shows the completed state everything else
+    # claims. Frame index -> the clip frame to draw.
+    clip_schedule: dict[int, Path] = {}
+    for stage in stages:
+        frames = clip_frames.get(stage["id"])
+        if not frames:
+            continue
+        end_frame = int(round(stage["start"] * fps))
+        start_frame = max(0, end_frame - len(frames))
+        for frame_index in range(start_frame, end_frame):
+            # When the clip is longer than the room before the boundary, drop
+            # its head rather than its tail — the tail is the part that has to
+            # land exactly on stage.start.
+            clip_schedule[frame_index] = frames[len(frames) - (end_frame - frame_index)]
+
     # Each stage still already carries its own baked lighting state, so the
     # absolute envelope must not be applied on top of it or the arc is counted
     # twice. What the envelope contributes is the *within-stage* ramp, taken
@@ -206,16 +230,14 @@ def main() -> int:
         norm = stage_norm[stage["id"]]
         rel = exposure_at(envelope, t) / norm if norm > 0 else 1.0
 
-        # An approved clip supplies this stage's motion; the still is the
-        # fallback. Either way the same exposure envelope and hand layer are
-        # applied on top, so the edit timing stays the compositor's to control.
-        stage_clip = clip_frames.get(stage["id"])
-        if stage_clip:
-            offset = int(round((t - stage["start"]) * fps))
-            source = np.asarray(
-                Image.open(stage_clip[min(offset, len(stage_clip) - 1)]).convert("RGB"),
-                dtype=np.uint8,
-            )
+        # An approved clip supplies the transition INTO a stage, scheduled to
+        # finish exactly on that stage's boundary (see clip_schedule above);
+        # every other frame comes from the stage still. Either way the same
+        # exposure envelope and hand layer are applied on top, so edit timing
+        # stays the compositor's to control.
+        scheduled = clip_schedule.get(f)
+        if scheduled is not None:
+            source = np.asarray(Image.open(scheduled).convert("RGB"), dtype=np.uint8)
         else:
             source = arrays[stage["id"]]
 

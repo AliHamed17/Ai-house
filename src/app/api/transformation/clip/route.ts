@@ -14,6 +14,8 @@ import { TRANSFORMATION_ROOM_ID } from '@/data/kitchenTransformation';
 
 export const dynamic = 'force-dynamic';
 
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9-]{8,100}$/;
+
 /** The clip plan, so an operator/UI can see what would be generated without
  *  submitting anything. Purely derived from committed source. */
 export async function GET() {
@@ -65,8 +67,17 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
-  if (typeof payload.idempotencyKey !== 'string' || payload.idempotencyKey.length < 8) {
-    return NextResponse.json({ error: 'An idempotencyKey of at least 8 characters is required.' }, { status: 400 });
+  // Same bounded format the other generation routes enforce (see
+  // IDEMPOTENCY_KEY_PATTERN in validateGenerationInput.server.ts). An
+  // unbounded key matters here because the key STRING is retained in the
+  // bounded idempotency map for the whole TTL, so accepting request-body-sized
+  // keys would let a caller park hundreds of megabytes of attacker-controlled
+  // text in a long-running process just by retrying.
+  if (typeof payload.idempotencyKey !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(payload.idempotencyKey)) {
+    return NextResponse.json(
+      { error: 'idempotencyKey must be 8-100 characters of letters, digits or hyphens.' },
+      { status: 400 },
+    );
   }
 
   const entry = clipPlanEntry(payload.stageId);

@@ -103,7 +103,14 @@ export function RoomTransformation({ onEnterRoom }: { onEnterRoom: (roomId: Room
   // list carries the same information without moving.
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || reducedMotion) return;
+    if (!video) return;
+    // Enabling the preference mid-playback has to stop the motion that is
+    // already running — returning early here would have honoured the
+    // preference only for playback that had not started yet.
+    if (reducedMotion) {
+      video.pause();
+      return;
+    }
     if (inView) {
       video.play().catch(() => {
         /* autoplay can be refused; the explicit Play control still works */

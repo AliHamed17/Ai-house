@@ -862,6 +862,24 @@ export function AIStudioPanel() {
           return;
         }
         transientFailures = 0;
+        // The status response carries the job's AUTHORITATIVE roomId and
+        // outputType. A stale or corrupted recovery entry can pair a valid
+        // job id with the wrong ones, and accepting that would leave the
+        // panel showing the persisted room while displaying another room's
+        // result — which Approve would then store as approvedSource under
+        // the wrong room, letting a later refinement or billed clip animate
+        // a mismatched source. Refuse the job rather than render it.
+        if (statusData.roomId !== roomId || statusData.outputType !== outputType) {
+          setSubmitting(false);
+          setRecoverableJobId(null);
+          // Settled, not abandoned: the entry is genuinely bogus, so drop it
+          // and let a legitimate sibling entry be adopted as usual.
+          clearOwnRecoveryEntry(jobRecoveryId(jobId));
+          setError(
+            'That recovered generation belongs to a different room or output type, so it was not restored.',
+          );
+          return;
+        }
         setJob(statusData);
         if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
           setSubmitting(false);

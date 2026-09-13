@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Html } from '@react-three/drei';
 import { allFurnitureItems } from '@/data/furniture';
 import { useViewerStore } from '@/lib/store/viewerStore';
-import { isFurnitureVisibleAtStage } from '@/lib/transformation';
+import { getStage, isFurnitureVisibleAtStage } from '@/lib/transformation';
 import { FurnitureMesh } from './FurnitureMesh';
 
 /**
@@ -23,6 +23,19 @@ export function FurnitureHotspots() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const transformationStage = useViewerStore((s) => s.transformationStage);
+  const lightingMode = useViewerStore((s) => s.lightingMode);
+
+  // Fixtures and display joinery glow whenever the room is lit artificially:
+  // in the transformation's dusk/warm-reveal beats, and in ordinary evening
+  // mode. Without this the "enter this exact moment in 3D" handoff dropped
+  // into an unlit version of a stage the video had just shown glowing.
+  const stageLighting = transformationStage ? getStage(transformationStage).lighting : null;
+  const warmLight =
+    stageLighting === 'dusk' || stageLighting === 'warm-evening'
+      ? true
+      : stageLighting !== null
+        ? false
+        : lightingMode === 'evening';
 
   return (
     <group>
@@ -48,7 +61,7 @@ export function FurnitureHotspots() {
               document.body.style.cursor = 'auto';
             }}
           >
-            <FurnitureMesh item={item} />
+            <FurnitureMesh item={item} warmLight={warmLight} />
             {hoveredId === item.id && selectedId !== item.id && (
               <Html center distanceFactor={8} position={[0, anchorY, 0]} style={{ pointerEvents: 'none' }}>
                 <div className="rounded-full bg-charcoal/90 px-3 py-1 text-xs font-medium tracking-wide text-ivory shadow-lg whitespace-nowrap">

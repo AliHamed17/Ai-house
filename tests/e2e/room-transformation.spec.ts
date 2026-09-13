@@ -59,6 +59,29 @@ test.describe('room transformation section', () => {
     await expect(page.getByText(/Showing the kitchen mid-build/i)).toHaveCount(0);
   });
 
+  test('never autoplays for a visitor who asked for reduced motion (regression)', async ({ browser }) => {
+    // This has been wrong twice: first because the preference was read from a
+    // store only the 3D explorer populates (and the explorer is not mounted on
+    // the landing page), then because enabling it mid-playback returned early
+    // without pausing. The CSS reduced-motion rule does not pause video, so
+    // nothing else catches either case.
+    const context = await browser.newContext({ reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    await page.goto('/');
+    const section = page.locator('#transformation');
+    await section.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1500);
+
+    const paused = await section.locator('video').evaluate((v: HTMLVideoElement) => v.paused);
+    expect(paused, 'the transformation video must not autoplay under reduced motion').toBe(true);
+
+    // The sequence must still be fully usable without motion: the stage list
+    // and captions carry the same information.
+    await section.getByRole('button', { name: /Warm reveal/ }).click();
+    await expect(section.getByText(/integrated 2700K lighting/i)).toBeVisible();
+    await context.close();
+  });
+
   test('the published master video and poster are actually served', async ({ page }) => {
     for (const asset of [
       '/transformation/kitchen-transformation.mp4',

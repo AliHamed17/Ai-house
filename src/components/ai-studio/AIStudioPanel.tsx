@@ -1,0 +1,1639 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
+import { houseModel } from '@/data/house';
+import { materialVariants } from '@/data/materials';
+import { roomEvidenceFrame } from '@/data/evidenceFrames';
+import type { GenerationJob, GenerationOutputType, RoomId } from '@/lib/types';
+
+const VIDEO_CAPABLE_ROOMS = new Set<RoomId>(['stair_landing', 'living', 'kitchen', 'dining', 'mamad', 'twin_bed', 'parents_bed', 'bathroom_main']);
+
+const STATUS_COPY: Record<GenerationJob['status'], string> = {
+  queued: 'Queued…',
+  in_progress: 'Generating…',
+  completed: 'Complete',
+  failed: 'Failed',
+  moderated: 'Moderated',
+};
+
+function conceptImagePath(roomId: RoomId): string | null {
+  return VIDEO_CAPABLE_ROOMS.has(roomId) ? `/generated/concepts/${roomId}.svg` : null;
+}
+
+// A completed video job whose result is a real playable clip (a live
+// Higgsfield URL), as opposed to the demo mode's still (its own placeholder
+// SVG, or — when Nano Banana was live — the actual approved concept image)
+// that we animate with a CSS pan instead. Checking job.provider rather than
+// sniffing the resultUrl's shape is what lets the mock provider return
+// either kind of still and always get the pan treatment: a mock job is
+// never a real video regardless of what its resultUrl looks like.
+function isPlayableVideo(job: GenerationJob): boolean {
+  return job.outputType === 'video' && job.provider !== 'mock' && Boolean(job.resultUrl);
+}
+
+interface LiveStatus {
+  nanoBanana: boolean;
+  higgsfield: boolean;
+}
+
+// Mirrors recoverableJobId/recoverableSubmission into localStorage so a paid
+// (or possibly-paid) generation whose fate is still unknown is not silently
+// forgotten if the visitor reloads or closes the tab mid-flight — in-memory
+// React state alone does not survive that. Restored on mount into the exact
+// same recoverableJobId/recoverableSubmission state and rendered by the
+// existing "Resume checking status" / "Resume submission" banners, so
+// resuming still requires the visitor's own click rather than silently
+// firing a request on page load.
+// Each entry lives under its OWN key (this prefix plus its own recoveryEntryId
+// — see recoveryStorageKey below), never sharing one key's JSON blob with any
+// other entry. Two tabs each persisting their own entry around the same time
+// previously shared one key: both could read that key's blob before either
+// wrote back, so each write was a stale snapshot missing the other's own
+// addition — whichever tab's setItem ran second silently discarded the
+// other's entry (a lost-update regression a single JSON blob under one key
+// can never fully avoid, since localStorage has no atomic read-modify-write
+// across tabs). Per-entry keys make every write/clear a single, independent
+// localStorage call that can never race with — or clobber — any other entry.
+const RECOVERY_STORAGE_PREFIX = 'ai-studio:unresolved-generation:';
+// Ceilings mirror exactly what the server can actually still back up, so an
+// entry is never offered for Resume past the point its server-side
+// reservation (idempotency.server) could already be gone — at which point
+// Resume wouldn't reconcile anything, it would silently start a genuinely
+// new, separately billed submission.
+//  - 'job' only ever drives a status POLL (a read), which is safe to retry
+//    indefinitely — Higgsfield's own servers, not this server's in-memory
+//    stores, are the source of truth for whether a live job is still
+//    checkable, so a generous window here is never a billing risk.
+//  - 'submission' resumes by POSTing again with the same idempotencyKey.
+//    Its reservation's TTL depends on WHY it was recorded as recoverable in
+//    the first place, and the two cases are not equivalent:
+//      - ambiguous: true — the 504 submit-timeout case (isSubmitTimeout in
+//        higgsfield.server / nanoBanana.server). The server explicitly
+//        upgrades THIS reservation to AMBIGUOUS_TTL_MS (60 min) specifically
+//        because it knows the outcome is unresolved.
+//      - ambiguous: false — a network-level failure (the fetch itself
+//        throwing). The client cannot tell from this alone whether the
+//        request reached the server, and if it did, whether it went on to
+//        succeed (kept at the ordinary TTL_MS, 10 min — success never
+//        upgrades a reservation) or fail definitively (deleted entirely,
+//        safe either way). The worst case that ISN'T "safe to retry" is
+//        "succeeded, still cached" — bounded by the SHORT ordinary TTL_MS,
+//        so that's the ceiling this case must assume.
+//    Using the long (ambiguous) ceiling for BOTH would let a network-loss
+//    recovery whose request actually succeeded outlive its real 10-minute
+//    reservation and silently double-submit on Resume.
+const RECOVERY_MAX_AGE_MS = {
+  job: 24 * 60 * 60_000,
+  // 5min margin under idempotency.server's AMBIGUOUS_TTL_MS (60 min) for
+  // clock/network skew between writing this entry and the server's own
+  // reservation window actually starting.
+  submissionAmbiguous: 55 * 60_000,
+  // Margin under idempotency.server's TTL_MS (10 min), same reasoning.
+  submissionOrdinary: 9 * 60_000,
+} as const;
+
+type RecoveryEntry =
+  | {
+      kind: 'job';
+      jobId: string;
+      roomId: RoomId;
+      outputType: GenerationOutputType;
+      createdAt: number;
+      // Set when this job entry is the direct continuation of a submission
+      // entry (the common case: submitOnce got a jobId back, or a resumed
+      // submission finally did) — see startPolling's own comment for why
+      // this matters: a locally-abandoned submission's tombstone is keyed
+      // by ITS id, which does not survive this identity change on its own.
+      originatingIdempotencyKey?: string;
+    }
+  | {
+      kind: 'submission';
+      ambiguous: boolean;
+      idempotencyKey: string;
+      endpoint: string;
+      body: Record<string, unknown>;
+      roomId: RoomId;
+      outputType: GenerationOutputType;
+      createdAt: number;
+    };
+
+const VALID_RECOVERY_ROOM_IDS = new Set<string>(houseModel.rooms.map((r) => r.id));
+
+// JSON.parse only proves the stored text was syntactically valid JSON — a
+// same-origin localStorage entry can otherwise be `null`, an object left
+// over from a since-changed shape, or one simply missing a field, and none
+// of those throw on parse. Without checking the actual shape here, an
+// unconditional `as RecoveryEntry` cast lies to the type system: the very
+// next read (the age check's entry.createdAt) can throw on a genuinely
+// null/undefined value, uncaught, crashing the studio on mount until the
+// corrupt key is cleared by hand. Every required field and enum is checked
+// explicitly so a malformed entry is discarded the same way a JSON parse
+// failure already is, rather than ever being trusted.
+function isValidRecoveryEntry(value: unknown): value is RecoveryEntry {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.createdAt !== 'number' || !Number.isFinite(v.createdAt)) return false;
+  if (typeof v.roomId !== 'string' || !VALID_RECOVERY_ROOM_IDS.has(v.roomId)) return false;
+  if (v.outputType !== 'image' && v.outputType !== 'video') return false;
+  if (v.kind === 'job') {
+    if (typeof v.jobId !== 'string' || v.jobId.length === 0) return false;
+    return v.originatingIdempotencyKey === undefined || (typeof v.originatingIdempotencyKey === 'string' && v.originatingIdempotencyKey.length > 0);
+  }
+  if (v.kind === 'submission') {
+    if (
+      typeof v.ambiguous !== 'boolean' ||
+      typeof v.idempotencyKey !== 'string' ||
+      v.idempotencyKey.length === 0 ||
+      typeof v.endpoint !== 'string' ||
+      v.endpoint.length === 0 ||
+      typeof v.body !== 'object' ||
+      v.body === null
+    ) {
+      return false;
+    }
+    // Resume/Abandon read the REQUEST body's own idempotencyKey (it's what
+    // actually gets POSTed and is what a resumed submitOnce's own
+    // writeRecoveryEntry call re-keys by) — see handleResumeSubmission,
+    // handleAbandonSubmission, and the storage-event handler's trackedId
+    // computation, all of which cast body.idempotencyKey to a string
+    // without checking it first. A body missing (or disagreeing with) it
+    // would make those compute the wrong storage id (submission:undefined,
+    // or one that doesn't match this entry's own key) — Resume then can't
+    // find the real entry, and Abandon's tombstone misses it entirely,
+    // immediately re-adopting the exact entry Abandon just tried to stop
+    // tracking and permanently locking Generate.
+    const body = v.body as Record<string, unknown>;
+    if (body.idempotencyKey !== v.idempotencyKey) return false;
+    // handleGenerate always posts body.roomId equal to this same entry's own
+    // top-level roomId, and always pairs outputType 'image'/'video' with
+    // exactly '/api/nano-banana/generate'/'/api/higgsfield/generate'
+    // respectively. A stale/corrupted entry whose nested body names a
+    // DIFFERENT room, or whose endpoint disagrees with its own outputType,
+    // would still pass the top-level checks above (adoption drives the UI
+    // from those) — but Resume then POSTs the mismatched body to that
+    // endpoint, so the response can be displayed and approved under the
+    // wrong room and reused as that room's own source for a further billed
+    // generation.
+    if (body.roomId !== v.roomId) return false;
+    const expectedEndpoint = v.outputType === 'image' ? '/api/nano-banana/generate' : '/api/higgsfield/generate';
+    return v.endpoint === expectedEndpoint;
+  }
+  return false;
+}
+
+// sessionStorage, unlike localStorage, is never shared with any other
+// browser tab (not even a duplicate of this one) but DOES survive a reload
+// of THIS same tab — exactly what lets abandonRecoveryEntry remember, for
+// the rest of THIS tab's own session, which entries this tab has locally
+// abandoned, so a reload right after Abandon does not immediately re-adopt
+// and re-display the exact entry the visitor just dismissed (see
+// abandonRecoveryEntry below).
+const LOCALLY_IGNORED_IDS_KEY = 'ai-studio:locally-ignored-ids';
+function readLocallyIgnoredIds(): Set<string> {
+  try {
+    const raw = sessionStorage.getItem(LOCALLY_IGNORED_IDS_KEY);
+    return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+function addLocallyIgnoredId(id: string): void {
+  try {
+    const ids = readLocallyIgnoredIds();
+    ids.add(id);
+    sessionStorage.setItem(LOCALLY_IGNORED_IDS_KEY, JSON.stringify([...ids]));
+  } catch {
+    // Best-effort — the in-memory ref this mirrors still works for the rest
+    // of this tab's current session either way.
+  }
+}
+
+function recoveryMaxAgeMs(entry: RecoveryEntry): number {
+  if (entry.kind === 'job') return RECOVERY_MAX_AGE_MS.job;
+  return entry.ambiguous ? RECOVERY_MAX_AGE_MS.submissionAmbiguous : RECOVERY_MAX_AGE_MS.submissionOrdinary;
+}
+
+// Every entry is keyed by its own generation's stable identity — a job's
+// jobId, or a submission's idempotencyKey — rather than all sharing one
+// slot. Two tabs (genuinely different browser tabs, or two tabs of the same
+// browser both open to this page) each tracking their own in-flight
+// generation write to the SAME origin-wide localStorage; a single shared key
+// meant either tab's write, or either tab's terminal-state clear, could
+// silently overwrite or destroy the OTHER tab's still-active recovery record
+// (regression) — after which a reload of that other tab would offer no
+// recovery at all and silently permit a second, possibly duplicate-billed
+// submission. Keying by identity means a write or clear only ever touches
+// the one entry it actually owns.
+function jobRecoveryId(jobId: string): string {
+  return `job:${jobId}`;
+}
+function submissionRecoveryId(idempotencyKey: string): string {
+  return `submission:${idempotencyKey}`;
+}
+function recoveryEntryId(entry: RecoveryEntry): string {
+  return entry.kind === 'job' ? jobRecoveryId(entry.jobId) : submissionRecoveryId(entry.idempotencyKey);
+}
+
+function recoveryStorageKey(id: string): string {
+  return `${RECOVERY_STORAGE_PREFIX}${id}`;
+}
+
+// A snapshot array, not a live view — later localStorage.removeItem calls
+// (e.g. while pruning in readAllRecoveryEntries below) never affect indices
+// already collected here, so callers can freely remove keys while iterating
+// this result without the re-indexing hazards of mutating storage mid-scan.
+function recoveryStorageKeys(): string[] {
+  const keys: string[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(RECOVERY_STORAGE_PREFIX)) keys.push(key);
+    }
+  } catch {
+    // Best-effort (private browsing, storage disabled) — same as every
+    // other localStorage access here.
+  }
+  return keys;
+}
+
+// Reads every still-valid entry across all of this tab's origin's recovery
+// keys, opportunistically removing any that have expired or turned out to be
+// corrupt — each removal is its own independent localStorage.removeItem
+// (never a shared blob rewritten wholesale), so pruning one entry can never
+// lose or race with a genuinely different tab's own concurrent write to a
+// DIFFERENT entry's key.
+function readAllRecoveryEntries(): Record<string, RecoveryEntry> {
+  const all: Record<string, RecoveryEntry> = {};
+  for (const key of recoveryStorageKeys()) {
+    let raw: string | null;
+    try {
+      raw = localStorage.getItem(key);
+    } catch {
+      continue;
+    }
+    if (!raw) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // best-effort
+      }
+      continue;
+    }
+    if (!isValidRecoveryEntry(parsed)) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // best-effort
+      }
+      continue;
+    }
+    const entry = parsed;
+    const id = key.slice(RECOVERY_STORAGE_PREFIX.length);
+    // Every write path (writeRecoveryEntry) derives the storage key from the
+    // entry's OWN identity, so under normal operation this always matches —
+    // but a stale key left behind by an older/incompatible client version,
+    // or any other unforeseen corruption, could still leave a payload stored
+    // under a DIFFERENT key than its own recoveryEntryId would produce. Every
+    // other reader here (Resume, Abandon, the storage-event listener)
+    // computes ITS OWN key from the payload, never from wherever the entry
+    // happened to be found — so a mismatched key would never be found by
+    // Resume, never correctly tombstoned by Abandon (which would then
+    // immediately re-adopt this same wrongly-keyed entry instead), leaving
+    // Generate locked until storage is cleared by hand.
+    if (recoveryEntryId(entry) !== id) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // best-effort
+      }
+      continue;
+    }
+    if (Date.now() - entry.createdAt > recoveryMaxAgeMs(entry)) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // best-effort
+      }
+      continue;
+    }
+    all[id] = entry;
+  }
+  return all;
+}
+
+function writeRecoveryEntry(entry: RecoveryEntry): void {
+  try {
+    const key = recoveryStorageKey(recoveryEntryId(entry));
+    localStorage.setItem(key, JSON.stringify(entry));
+  } catch {
+    // Best-effort (private browsing, storage disabled, quota) — the
+    // in-memory state this mirrors still works for as long as the tab
+    // stays open either way, so a write failure here is not fatal.
+  }
+}
+
+function clearRecoveryEntry(id: string): void {
+  try {
+    localStorage.removeItem(recoveryStorageKey(id));
+  } catch {
+    // best-effort
+  }
+}
+
+export function AIStudioPanel() {
+  const [roomId, setRoomId] = useState<RoomId>('living');
+  const [styleVariant, setStyleVariant] = useState(materialVariants[0].id);
+  const [outputType, setOutputType] = useState<GenerationOutputType>('image');
+  const [editInstruction, setEditInstruction] = useState('');
+  const [simulate, setSimulate] = useState<'success' | 'failure' | 'moderated'>('success');
+  const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
+  // True only once a genuine (non-fallback) /api/generation/mode response has
+  // been received — see the probe effect below. liveVideoNeedsApproval is
+  // gated on this rather than on liveStatus.higgsfield directly, so neither
+  // failure mode is possible: a fallback "assume live" guess (kept for the
+  // cost-confirmation banner, which must fail safe) can never relax the
+  // approval requirement for an actually-live deployment, and it can never
+  // permanently lock out a genuinely-demo deployment's cinematic-clip path
+  // either, since the gate only tightens (never loosens) while unconfirmed.
+  const [modeConfirmed, setModeConfirmed] = useState(false);
+  const [modeProbeRetryNonce, setModeProbeRetryNonce] = useState(0);
+  const [confirmingLiveRun, setConfirmingLiveRun] = useState(false);
+  const [job, setJob] = useState<GenerationJob | null>(null);
+  const [approved, setApproved] = useState(false);
+  const [approvedSource, setApprovedSource] = useState<{ path: string; roomId: RoomId } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // A job whose status-polling gave up after repeated transient failures
+  // (see startPolling below) rather than reaching a terminal state. The
+  // provider-side job may still be running (and already billed), so its id
+  // is kept here — not just dropped — until the visitor resumes checking on
+  // it or deliberately starts a fresh generation.
+  const [recoverableJobId, setRecoverableJobId] = useState<string | null>(null);
+  // A submission whose HTTP response never reached us (a dropped connection,
+  // a client-side timeout) — the server may have already accepted, run, and
+  // billed it. Holds exactly what's needed to retry the identical request:
+  // its idempotencyKey lets the server recognize the retry and return the
+  // job it already created instead of starting a duplicate one.
+  const [recoverableSubmission, setRecoverableSubmission] = useState<{ endpoint: string; body: Record<string, unknown> } | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Bumped on every new generation; each in-flight fetch captures the value and
+  // bails if a newer run has superseded it, so a slow/out-of-order status
+  // response can never overwrite the current job's state.
+  const pollTokenRef = useRef(0);
+  // Entries this tab has locally abandoned WITHOUT deleting from shared
+  // storage (see abandonRecoveryEntry) — mirrors sessionStorage (see
+  // readLocallyIgnoredIds/addLocallyIgnoredId above), seeded from it in the
+  // mount effect below, so a reload of THIS same tab does not immediately
+  // re-adopt the exact entry Abandon just tried to stop tracking, while a
+  // genuinely different tab (with its own separate sessionStorage) is
+  // completely unaffected.
+  const locallyIgnoredIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => () => {
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+  }, []);
+
+  // Restores a paid-job recovery point left behind by a previous page load,
+  // OR by a genuinely different tab sharing this origin's localStorage that
+  // has since written its own entry (see writeRecoveryEntry) — into the same
+  // recoverableJobId/recoverableSubmission state a same-session outage would
+  // have produced, reusing the existing "Resume checking status" / "Resume
+  // submission" banners rather than silently resuming anything itself. Only
+  // adopts an entry while THIS tab has none of its own tracked yet — never
+  // overrides an in-flight local one with a different tab's, which could
+  // otherwise strand this tab's own submission mid-flight with no way to
+  // reconcile it. roomId/outputType are restored alongside it so the locked
+  // selectors reflect the room the outstanding job actually belongs to, not
+  // whatever this tab happened to have selected.
+  // override lets a caller that already knows the answer skip the
+  // state-based guard just below, which reads the plain `job`/`approved`
+  // component state — necessarily whatever it was AS OF THIS RENDER, not
+  // necessarily as of right now:
+  //  - 'preserve': force-defer even if the read below would say proceed.
+  //    Needed by startPolling's completion branch, whose poll() closure is
+  //    created once and reused across every retry via setTimeout(poll, ...)
+  //    rather than redefined on each render — job/approved there are frozen
+  //    to whatever they were when startPolling was first called, not the
+  //    fresh terminal statusData a `setJob` call two lines above it just
+  //    (asynchronously) queued.
+  //  - 'proceed': force-adopt even if the read below would say defer.
+  //    Needed by Reject's onClick: it calls setJob(null) then this in the
+  //    SAME synchronous handler, so — for the identical reason — the `job`
+  //    read below still sees the OLD (just-rejected) completed job, not the
+  //    null it is about to become.
+  //  - undefined (every other caller): trust the state read normally.
+  // Returns whether an entry was actually adopted — Approve's onClick uses
+  // this to know whether ITS OWN setApproved(true) (see below) is still the
+  // right call, or whether adoption's setApproved(false) must be left to
+  // stand instead.
+  function adoptRecoveryEntry(override?: 'preserve' | 'proceed'): boolean {
+    // A completed job this tab hasn't approved or discarded yet is still
+    // awaiting the visitor's own decision — and by every call site here,
+    // this tab's OWN recovery key for it is already gone (settling always
+    // clears it first; see clearOwnRecoveryEntry and its callers). Adopting
+    // a sibling right now would both reassign roomId/outputType out from
+    // under that result (see the setJob(null) below — job is otherwise
+    // assumed to always belong to the CURRENT room) and, via that same
+    // reset, discard it outright — permanently, since there is no longer
+    // any recovery entry to fall back on. Defer entirely until the Approve
+    // or Reject action clears this guard (Reject sets job to null directly;
+    // Approve sets approved), rather than risk silently losing a
+    // possibly-billed result the visitor never even got to see.
+    //
+    // Deliberately NOT failed/moderated: those render neither Approve nor
+    // Reject (just an error message — see job.error below), so nothing
+    // could ever clear a defer keyed on them, permanently stranding a
+    // waiting sibling and leaving Generate wrongly enabled with no lock
+    // against it (regression) — exactly the multi-tab hole this mechanism
+    // exists to close. There is also no asset to lose for those statuses;
+    // preservation only matters for a completed result someone might Approve.
+    const hasUnacknowledgedTerminalJob = job !== null && !approved && job.status === 'completed';
+    if (override !== 'proceed' && (override === 'preserve' || hasUnacknowledgedTerminalJob)) {
+      return false;
+    }
+    // Picks the most recently written still-valid entry — a reasonable
+    // choice when more than one is present (see the multi-tab note above) —
+    // excluding anything THIS tab has locally abandoned (see
+    // abandonRecoveryEntry): otherwise this would immediately re-adopt the
+    // exact entry Abandon just tried to stop tracking.
+    let entry: RecoveryEntry | null = null;
+    for (const [id, candidate] of Object.entries(readAllRecoveryEntries())) {
+      if (locallyIgnoredIdsRef.current.has(id)) continue;
+      // A job entry that is the continuation of a locally-abandoned
+      // submission (see originatingIdempotencyKey) is the SAME generation
+      // under a new identity, not a genuinely different one that happens to
+      // be unignored — without this, abandoning an adopted submission while
+      // its owner is still mid-request only tombstones the submission id;
+      // once the owner gets a jobId and this tab's storage listener sees
+      // that new, never-ignored entry, it would otherwise immediately
+      // re-adopt it, silently undoing the visitor's own "Abandon and start
+      // over" choice the moment the owner's request finally settles.
+      if (candidate.kind === 'job' && candidate.originatingIdempotencyKey && locallyIgnoredIdsRef.current.has(submissionRecoveryId(candidate.originatingIdempotencyKey))) {
+        continue;
+      }
+      if (!entry || candidate.createdAt > entry.createdAt) entry = candidate;
+    }
+    if (!entry) return false;
+    setRoomId(entry.roomId);
+    setOutputType(entry.outputType);
+    // A settled job (or its approval) this tab was showing a moment ago
+    // belongs to whatever room it was actually generated for, not
+    // necessarily the room this adoption is about to switch to — the
+    // Approve handler below pairs job.resultUrl with the panel's CURRENT
+    // roomId state, not the job's own, so leaving a stale job/approval
+    // displayed here would let clicking Approve record that image's URL
+    // under the wrong (newly adopted) room, and a later live refinement or
+    // video could then be billed using the wrong room's source. error is
+    // deliberately NOT cleared here: unlike job/approved/approvedSource it
+    // carries no billing risk, and clearing it would wipe a message the
+    // very same call path just set for THIS attempt's own definite outcome
+    // (e.g. submitOnce's non-504 branch reporting a real failure right
+    // before clearOwnRecoveryEntry happens to also adopt a sibling).
+    setJob(null);
+    setApproved(false);
+    setApprovedSource(null);
+    if (entry.kind === 'job') {
+      setRecoverableJobId(entry.jobId);
+    } else {
+      setRecoverableSubmission({ endpoint: entry.endpoint, body: entry.body });
+    }
+    return true;
+  }
+
+  // Clears this tab's own recovery record, then immediately re-checks for a
+  // remaining one. A same-document localStorage write never fires this same
+  // tab's `storage` listener (see handleStorageEvent below), so once this
+  // tab's own tracked job/submission settles, nothing else would notice a
+  // genuinely different tab's still-outstanding entry — the Generate button
+  // would incorrectly re-enable (hasUnresolvedJob false) while that other
+  // entry's possibly-billed outcome is still unresolved. Always call this
+  // instead of clearRecoveryEntry directly for a genuinely SETTLED entry
+  // (never for Abandon — see abandonRecoveryEntry below). Safe
+  // unconditionally: adoptRecoveryEntry is a no-op when nothing remains.
+  // override is forwarded as-is to adoptRecoveryEntry — see its own comment.
+  // Returns whether a sibling was actually adopted, forwarded from
+  // adoptRecoveryEntry, so a caller that was about to take some OTHER
+  // action of its own (a fresh submission, a room switch) can tell it
+  // needs to stand down instead, deferring to the just-adopted recovery.
+  function clearOwnRecoveryEntry(id: string, override?: 'preserve' | 'proceed'): boolean {
+    clearRecoveryEntry(id);
+    return adoptRecoveryEntry(override);
+  }
+
+  // Used by Abandon (never by a settle/resolve path, which always owns what
+  // it's clearing and calls clearOwnRecoveryEntry directly instead). Even
+  // when THIS tab is genuinely the one that originally wrote the entry, a
+  // completely different tab may since have adopted the very same record —
+  // adoptRecoveryEntry never announces itself anywhere, so there is no
+  // reliable way to rule that out — and still depend on it: deleting it out
+  // from under that tab would fire ITS `storage` listener and silently
+  // clear its unrelated tracking too, letting both tabs believe a
+  // possibly-still-billing job is resolved when neither has actually
+  // confirmed that (regression). Abandoning is therefore ALWAYS purely
+  // local, exactly what the banner already promises ("stops checking
+  // locally"): the shared record itself is left completely untouched, and
+  // only genuinely reaching a terminal outcome (clearOwnRecoveryEntry's own
+  // callers) ever removes it.
+  function abandonRecoveryEntry(id: string): void {
+    locallyIgnoredIdsRef.current.add(id);
+    addLocallyIgnoredId(id);
+    adoptRecoveryEntry();
+  }
+
+  useEffect(() => {
+    // Restoring from an external system (localStorage/sessionStorage) on
+    // mount, not deriving from other React state — see MobileControls.tsx
+    // for the same sanctioned pattern and rule exception.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    locallyIgnoredIdsRef.current = readLocallyIgnoredIds();
+    adoptRecoveryEntry();
+    /* eslint-enable react-hooks/set-state-in-effect */
+    // job is always its null initial value on this very first render, so
+    // adoptRecoveryEntry's own job/approved read can never be stale here —
+    // safe to run mount-only despite depending on a function that (in
+    // general) closes over changing state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The mount effect above only ever runs once, so a tab that was ALREADY
+  // open before a genuinely different tab started its own generation would
+  // otherwise never learn that one now exists — hasUnresolvedJob would stay
+  // stuck at false, letting this tab start a second, separately billed
+  // submission for the same default room (regression). The browser's own
+  // `storage` event fires in every OTHER tab (never the one that made the
+  // write) whenever localStorage changes, which is exactly the live signal
+  // needed to catch up.
+  useEffect(() => {
+    function handleStorageEvent(event: StorageEvent) {
+      if (event.key !== null && !event.key.startsWith(RECOVERY_STORAGE_PREFIX)) return;
+
+      // If this tab is currently tracking an entry — whether it originally
+      // submitted it or only ever adopted a sibling tab's — and THIS event
+      // is that exact entry's own key being removed (newValue === null),
+      // the record is gone regardless of why (most commonly: the owning
+      // tab just resolved or abandoned it). Without reacting here, the
+      // guard below would keep blocking this tab forever on a Resume banner
+      // for a record that no longer exists anywhere, since it already has
+      // a non-null recoverable state of its own.
+      const trackedId =
+        recoverableJobId !== null
+          ? jobRecoveryId(recoverableJobId)
+          : recoverableSubmission !== null
+            ? submissionRecoveryId(recoverableSubmission.body.idempotencyKey as string)
+            : null;
+      if (trackedId !== null && event.key === recoveryStorageKey(trackedId) && event.newValue === null) {
+        setRecoverableJobId(null);
+        setRecoverableSubmission(null);
+        adoptRecoveryEntry();
+        return;
+      }
+
+      // submitOnce writes THIS tab's own pre-fetch entry to storage before it
+      // has any chance to settle, but only ever mirrors it into
+      // recoverableSubmission/recoverableJobId once something has gone
+      // wrong — while a fresh submission or a resume is genuinely still in
+      // flight (submitting === true), both stay null, so without this check
+      // a different tab's own write during that exact window would pass the
+      // guard below and adopt its (unrelated) room/output and recovery
+      // state right out from under this tab's own in-flight, possibly
+      // paid request — whose eventual result would then land against the
+      // wrong room.
+      if (submitting || recoverableJobId !== null || recoverableSubmission !== null) return;
+      adoptRecoveryEntry();
+    }
+    window.addEventListener('storage', handleStorageEvent);
+    return () => window.removeEventListener('storage', handleStorageEvent);
+    // job/approved: adoptRecoveryEntry reads both to decide whether an
+    // unacknowledged terminal result must be preserved. Without listing
+    // them, approving or discarding a result without also touching
+    // submitting/recoverableJobId/recoverableSubmission would leave this
+    // listener's closure on the stale pre-approval value, deferring a
+    // sibling's adoption for longer than necessary (never incorrectly
+    // clobbering — see adoptRecoveryEntry — but no reason to accept even
+    // that when re-attaching the listener costs nothing). adoptRecoveryEntry
+    // itself is deliberately not also listed: it is a plain function
+    // redefined every render (not useCallback-memoized, matching this
+    // file's other handlers), so adding it here would re-attach the
+    // listener on every render instead of only when the values above
+    // change — job/approved already cover everything it reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitting, recoverableJobId, recoverableSubmission, job, approved]);
+
+  // Sync which providers are live (billed) vs. demo, so the UI can require
+  // confirmation before a paid run instead of only learning the mode after
+  // the first submission already fired it. /api/generation/mode is a
+  // same-origin route with no external I/O, so a real deployment (live or
+  // demo) almost always resolves it well within this retry window; it
+  // retries persistently on failure rather than giving up after one attempt,
+  // and only falls back to a display-only "assume live" guess once that
+  // window is exhausted. modeProbeRetryNonce re-arms this effect for one
+  // more attempt — bumped by the manual "Check again" action rendered next
+  // to the video-approval notice below — so an unresolved provider mode is
+  // never a permanent dead end even in that fallback case.
+  useEffect(() => {
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
+    const MAX_AUTO_RETRIES = 4;
+    const RETRY_DELAY_MS = 1500;
+
+    const scheduleRetryOrFallback = () => {
+      attempt += 1;
+      if (attempt <= MAX_AUTO_RETRIES) {
+        timeoutId = setTimeout(probe, RETRY_DELAY_MS);
+        return;
+      }
+      // Display/cost-confirmation purposes only (never silently assume demo,
+      // which could let a live submission through unconfirmed). modeConfirmed
+      // stays false, so liveVideoNeedsApproval keeps requiring an approved
+      // image until a genuine response arrives.
+      setLiveStatus({ nanoBanana: true, higgsfield: true });
+    };
+
+    function probe() {
+      fetch('/api/generation/mode')
+        .then((res) => (res.ok ? (res.json() as Promise<LiveStatus>) : null))
+        .then((data) => {
+          if (cancelled) return;
+          if (data) {
+            setLiveStatus(data);
+            setModeConfirmed(true);
+          } else scheduleRetryOrFallback();
+        })
+        .catch(() => {
+          if (!cancelled) scheduleRetryOrFallback();
+        });
+    }
+
+    probe();
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [modeProbeRetryNonce]);
+
+  const videoAvailableForRoom = VIDEO_CAPABLE_ROOMS.has(roomId);
+  const isLiveForOutput = outputType === 'image' ? liveStatus?.nanoBanana : liveStatus?.higgsfield;
+  const approvedForCurrentRoom = approvedSource !== null && approvedSource.roomId === roomId;
+  // A live (billed) Higgsfield clip must animate a real approved concept, not
+  // the placeholder still. Default to requiring approval whenever the mode
+  // isn't genuinely confirmed yet — never relax this on an unconfirmed
+  // fallback guess — and only relax it once a genuine response confirms
+  // Higgsfield is actually in demo mode for this deployment.
+  const liveVideoNeedsApproval = outputType === 'video' && !approvedForCurrentRoom && (!modeConfirmed || Boolean(liveStatus?.higgsfield));
+  // Either kind of unresolved job (a submission whose response was lost, or
+  // one whose status-polling gave up) must block both a new submission and
+  // a room/output change — changing context out from under an unresolved
+  // job would let its eventual result get displayed, approved, or billed
+  // against the wrong room.
+  const hasUnresolvedJob = recoverableJobId !== null || recoverableSubmission !== null;
+
+  // A completed-but-unacknowledged job is deliberately kept in storage until
+  // Approve/Reject (see startPolling's completion branch), so a reload or
+  // crash before that decision can still recover it. Every OTHER way this
+  // tab can stop displaying it — a deliberate new generation (handleGenerate)
+  // or switching away from its room (handleRoomChange) — is just as much the
+  // visitor's own choice to abandon it without ever acknowledging it, so its
+  // own persisted entry must be cleared right here too: left behind, it
+  // would still be sitting in storage the next time some OTHER job settles
+  // as failed/moderated, and adoptRecoveryEntry would then mistake it for a
+  // genuinely outstanding sibling rather than this tab's own
+  // already-superseded result (regression, caught by this file's own
+  // simulate-failure/simulate-moderated tests — first fixed only in
+  // handleGenerate, then found to still be reachable via handleRoomChange,
+  // which clears the same `job` state through a different door). A
+  // failed/moderated job needs no such handling — it already clears its own
+  // entry the moment it settles (same completion branch) — and neither does
+  // an already-approved one (Approve clears its own entry unconditionally).
+  //
+  // Uses clearOwnRecoveryEntry (clear + adopt), not a plain clearRecoveryEntry,
+  // and forwards its own "was a sibling adopted?" result to the caller:
+  // while THIS unacknowledged job was displayed, adoptRecoveryEntry's own
+  // defer guard (hasUnacknowledgedTerminalJob) would have silently deferred
+  // any genuinely different sibling that arrived via another tab's write in
+  // the meantime — nothing else ever re-checks for it once this job is
+  // discarded (regression, caught by this file's own deferred-sibling
+  // adoption tests). 'proceed' forces past that same guard, which would
+  // otherwise still read the stale (not-yet-cleared) job/approved state in
+  // THIS synchronous call. A caller that was about to take some action of
+  // its own (a fresh submission, a room switch) must stand down when this
+  // returns true — the visitor needs to see and resolve the just-adopted
+  // recovery first, not have it silently overwritten or raced against.
+  function clearUnacknowledgedCompletedJob(): boolean {
+    if (job !== null && !approved && job.status === 'completed') {
+      return clearOwnRecoveryEntry(jobRecoveryId(job.jobId), 'proceed');
+    }
+    return false;
+  }
+
+  function handleRoomChange(nextRoomId: RoomId) {
+    // The selector is disabled in this state too; this guard is defense in
+    // depth so an unresolved job's eventual result can never be displayed,
+    // approved, or billed against a room switched to after it was submitted.
+    if (hasUnresolvedJob) return;
+    // Read before setRoomId/setJob below: a completed-but-unacknowledged
+    // result belongs to the room being left, and switching away from it
+    // without acknowledging it is abandoning it just as much as starting a
+    // fresh generation would be (see clearUnacknowledgedCompletedJob's own
+    // comment) — otherwise its entry would linger in storage, invisible to
+    // this tab, while Generate stays free to start another (possibly
+    // billed) run for the NEW room. If that same call also turned up a
+    // genuinely different, still-unresolved sibling, its own recovery
+    // banner (and whatever room/output it belongs to) must stand instead —
+    // not get silently overwritten by this room switch a moment later.
+    if (clearUnacknowledgedCompletedJob()) return;
+    setRoomId(nextRoomId);
+    if (!VIDEO_CAPABLE_ROOMS.has(nextRoomId) && outputType === 'video') setOutputType('image');
+    setConfirmingLiveRun(false);
+    // The room selector is disabled while a generation is in flight, so no
+    // active (possibly billed) job is ever discarded here — just clear the
+    // shown result and its approval, which belong to the room being left.
+    setJob(null);
+    setError(null);
+    setApproved(false);
+    setApprovedSource(null);
+  }
+
+  function handleOutputTypeChange(nextOutputType: GenerationOutputType) {
+    if (hasUnresolvedJob) return;
+    if (nextOutputType === 'video' && !videoAvailableForRoom) return;
+    setOutputType(nextOutputType);
+    setConfirmingLiveRun(false);
+  }
+
+  function handleGenerateClick() {
+    if (liveStatus === null) return;
+    if (liveVideoNeedsApproval) return;
+    // Never start a new (possibly billed) job while a previous one's fate is
+    // still unknown — resume checking on it instead of risking a duplicate.
+    if (hasUnresolvedJob) return;
+    if (isLiveForOutput && !confirmingLiveRun) {
+      setConfirmingLiveRun(true);
+      return;
+    }
+    // True only on the click that actually passed through the confirmation
+    // step above (isLiveForOutput && confirmingLiveRun were both true just
+    // now) — false whenever this tab believed the run was free and skipped
+    // that step entirely, which is exactly the case the server itself must
+    // independently re-verify before billing anything (see
+    // LIVE_RUN_NOT_CONFIRMED_MESSAGE in registry.server.ts): this tab's own
+    // cached mode probe can go stale between the probe and this exact click.
+    const liveRunConfirmed = Boolean(isLiveForOutput) && confirmingLiveRun;
+    setConfirmingLiveRun(false);
+    void handleGenerate(liveRunConfirmed);
+  }
+
+  // Self-scheduling poll: the next status request is only queued after the
+  // current one resolves, so a slow live poll never spawns overlapping
+  // requests, and the token check drops any stale/out-of-order response. A
+  // live job keeps running provider-side, so a transient status error (a
+  // brief 502 or dropped connection) is retried a few times with backoff
+  // rather than abandoning a job that may already be billed — and if every
+  // retry is exhausted, the job id is kept (recoverableJobId) rather than
+  // lost, so "resume checking" can pick the same job back up instead of the
+  // only remaining option being to start a new, possibly duplicate, job.
+  // Shared between a fresh submission (handleGenerate) and resuming an
+  // unresolved one (handleResumeStatusCheck) so both get identical
+  // retry/backoff behavior from one place.
+  // originatingIdempotencyKey: this job's own submission's idempotencyKey,
+  // when known — carried into the written entry (see RecoveryEntry's own
+  // comment) so a tab that locally abandoned that submission's tombstone
+  // still recognizes this job as the SAME generation, rather than treating
+  // it as an unrelated, non-ignored entry to adopt (regression).
+  // A job that never reaches a terminal state — a genuine backend bug, or an
+  // unrecognized provider status higgsfield.server's mapStatus defaults to
+  // 'queued' — would otherwise poll forever: MAX_TRANSIENT_FAILURES below
+  // only counts FAILED responses, and a perfectly OK but non-terminal one
+  // resets that counter every time, so it never catches this case. Without a
+  // ceiling the panel stays stuck in `submitting` (Generate disabled, no
+  // Abandon action offered) until the visitor manually reloads. 10 minutes
+  // comfortably outlasts every legitimate job this app issues — a mock job
+  // settles within ~3s, and a live Higgsfield clip within its own 30s submit
+  // window plus generation time — while still catching a genuinely wedged one.
+  const POLL_STUCK_AFTER_MS = 10 * 60_000;
+
+  function startPolling(jobId: string, token: number, originatingIdempotencyKey?: string) {
+    // Written up front — not only once retries are exhausted — so a reload
+    // during an otherwise-healthy poll still leaves a recovery breadcrumb;
+    // right now that case loses the job with no trace at all.
+    writeRecoveryEntry({ kind: 'job', jobId, roomId, outputType, createdAt: Date.now(), originatingIdempotencyKey });
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    const MAX_TRANSIENT_FAILURES = 5;
+    let transientFailures = 0;
+    const retryOrFail = (fallbackMessage: string, serverMessage?: string) => {
+      transientFailures += 1;
+      if (transientFailures > MAX_TRANSIENT_FAILURES) {
+        setError(serverMessage ?? fallbackMessage);
+        setSubmitting(false);
+        setRecoverableJobId(jobId);
+        return;
+      }
+      pollTimerRef.current = setTimeout(poll, 1500);
+    };
+    const poll = async () => {
+      if (token !== pollTokenRef.current) return;
+      try {
+        const statusRes = await fetch(`/api/generation/status/${jobId}`);
+        const statusData = (await statusRes.json().catch(() => ({}))) as GenerationJob & { error?: string };
+        if (token !== pollTokenRef.current) return;
+        if (!statusRes.ok) {
+          if (statusRes.status === 429) {
+            // Rate-limiting here is keyed by job id, not by tab (see the
+            // status route's own comment) — several tabs all resuming the
+            // SAME long-running job share one budget, so a 429 is an
+            // expected, benign consequence of that, not a sign anything is
+            // actually wrong. Treating it as an ordinary transient failure
+            // would exhaust MAX_TRANSIENT_FAILURES from a handful of
+            // closely-spaced 429s alone (a fixed 1.5s retry against a
+            // ~60s-wide rate-limit window), moving every tab into recovery
+            // well before that window has even cleared. Honor the server's
+            // own Retry-After instead, and spend none of that budget on it.
+            const retryAfterSeconds = Number(statusRes.headers.get('Retry-After'));
+            const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : 1500;
+            pollTimerRef.current = setTimeout(poll, retryAfterMs);
+            return;
+          }
+          retryOrFail('Could not fetch generation status.', statusData.error);
+          return;
+        }
+        transientFailures = 0;
+        setJob(statusData);
+        if (statusData.status === 'completed' || statusData.status === 'failed' || statusData.status === 'moderated') {
+          setSubmitting(false);
+          setRecoverableJobId(null);
+          if (statusData.status === 'completed') {
+            // Deliberately NOT clearRecoveryEntry here (regression): this
+            // result is still awaiting the visitor's own Approve/Reject —
+            // in-memory `job` state alone doesn't survive a reload or crash,
+            // so deleting its only persisted breadcrumb the moment it
+            // completes would make a possibly-billed result unrecoverable
+            // through the UI for the entire window between completion and
+            // that decision. Approve and Reject each clear it themselves
+            // once genuinely acknowledged (see their own onClick handlers).
+            // 'preserve' still defers sibling adoption exactly as before —
+            // statusData (just set above) is that exact fresh completion,
+            // always unapproved at the moment it first lands, but this poll
+            // loop closure is reused across every retry via
+            // setTimeout(poll, ...) rather than redefined on each render, so
+            // the `job`/`approved` bindings adoptRecoveryEntry would
+            // otherwise read here are frozen to whatever they were when
+            // startPolling was first called, not this fresh completion.
+            adoptRecoveryEntry('preserve');
+          } else {
+            // failed/moderated render neither Approve nor Reject — no asset
+            // to lose and nothing to acknowledge, so clear immediately as
+            // before. 'proceed' (rather than falling through to the same
+            // frozen-binding hazard described above) is forced explicitly:
+            // if an EARLIER job had already completed in this same tab
+            // before this polling session started (e.g. the visitor
+            // generated once, then generated again), that stale binding
+            // could itself still show a completed, unapproved job, wrongly
+            // deferring this failed/moderated result the same way
+            // (regression, caught by this file's own failed/moderated
+            // adoption test).
+            clearOwnRecoveryEntry(jobRecoveryId(jobId), 'proceed');
+          }
+          return;
+        }
+        // Still queued/in_progress — but for how long? A job that never
+        // reaches a terminal state must not poll forever (see
+        // POLL_STUCK_AFTER_MS's own comment); elapsed time is read from the
+        // job's own immutable createdAt, not a poll count, so it reflects
+        // real time stuck regardless of this loop's actual interval.
+        if (Date.now() - new Date(statusData.createdAt).getTime() > POLL_STUCK_AFTER_MS) {
+          setError('This generation is taking far longer than expected and may be stuck.');
+          setSubmitting(false);
+          setRecoverableJobId(jobId);
+          return;
+        }
+        pollTimerRef.current = setTimeout(poll, 1000);
+      } catch {
+        if (token !== pollTokenRef.current) return;
+        retryOrFail('Lost connection while checking generation status.');
+      }
+    };
+    void poll();
+  }
+
+  function handleResumeStatusCheck() {
+    if (!recoverableJobId) return;
+    const jobId = recoverableJobId;
+    const token = ++pollTokenRef.current;
+    setSubmitting(true);
+    setError(null);
+    // Read before startPolling's own write below replaces this entry
+    // outright (with a fresh createdAt) — carrying its originatingIdempotencyKey
+    // (if any) forward is what keeps a locally-abandoned submission's
+    // tombstone matching this job across more than one resume, not just the
+    // first one (see RecoveryEntry's and startPolling's own comments).
+    const persisted = readAllRecoveryEntries()[jobRecoveryId(jobId)];
+    const originatingIdempotencyKey = persisted?.kind === 'job' ? persisted.originatingIdempotencyKey : undefined;
+    // Cleared eagerly; startPolling re-sets it if this attempt also
+    // exhausts its retries, so the banner never shows a stale/wrong state
+    // while a fresh attempt is in flight.
+    setRecoverableJobId(null);
+    startPolling(jobId, token, originatingIdempotencyKey);
+  }
+
+  // A job can become PERMANENTLY uncheckable (e.g. the provider credentials
+  // it needs are removed after submission) — every status attempt then
+  // exhausts its retries the same way forever, "Resume checking status"
+  // never succeeds, and the 24h recovery ceiling is only evaluated at mount,
+  // so a tab that is never reloaded would otherwise stay locked out of
+  // Generate indefinitely with no way out (regression). This gives the
+  // visitor an explicit, deliberate way to stop tracking it locally instead.
+  function handleAbandonJob() {
+    if (!recoverableJobId) return;
+    // A newer token means any already-scheduled retry timeout from the
+    // abandoned poll loop drops its result instead of acting on it — the
+    // same guard startPolling's own responses already rely on.
+    ++pollTokenRef.current;
+    const id = jobRecoveryId(recoverableJobId);
+    setRecoverableJobId(null);
+    setError(null);
+    abandonRecoveryEntry(id);
+  }
+
+  // Same reasoning as handleAbandonJob, for a submission whose outcome is
+  // ambiguous rather than a job that is merely uncheckable.
+  function handleAbandonSubmission() {
+    if (!recoverableSubmission) return;
+    ++pollTokenRef.current;
+    const id = submissionRecoveryId(recoverableSubmission.body.idempotencyKey as string);
+    setRecoverableSubmission(null);
+    setError(null);
+    abandonRecoveryEntry(id);
+  }
+
+  // Submits one generation request. On a definite failure (a non-OK HTTP
+  // response the server has already conclusively resolved) it just reports
+  // the error. Two cases are NOT definite, and both keep the exact request
+  // (endpoint, body, and its idempotencyKey) as recoverableSubmission so a
+  // retry reuses the same key — the server recognizes it and returns the
+  // job it already created (or, for the second case, the same ambiguous
+  // outcome — see idempotency.server's isAmbiguousFailure) rather than
+  // starting and billing a second one:
+  //  - a network-level failure (the fetch itself throwing), where we
+  //    cannot tell "never reached the server" apart from "reached the
+  //    server, which ran and billed it, but the response never came back";
+  //  - a 504 from either generate route, its explicit signal that the
+  //    submission timed out in a way that may still have been accepted and
+  //    billed (see isSubmitTimeout in higgsfield.server / nanoBanana.server)
+  //    — this DID reach the client as a normal response, but is exactly as
+  //    ambiguous as a dropped connection would have been.
+  // A 410 (from either route) is a third, definite case that still gets
+  // special handling: the approved source it named expired from the
+  // server's cache before this request used it (see SOURCE_EXPIRED_MESSAGE).
+  // Nothing was billed, so it isn't kept as recoverableSubmission — instead
+  // approvedSource is cleared so the next Generate uses a fresh source
+  // rather than retrying this exact request and failing the same way again.
+  // A 429 is a fourth case, but the opposite kind of "not definite": it means
+  // this specific attempt never even reached the idempotency/provider logic
+  // (the rate limiter runs first), so it says NOTHING about whether an
+  // earlier ambiguous submission this is resuming succeeded or failed —
+  // isResume (true only from handleResumeSubmission) is what makes that
+  // existing recoverableSubmission survive it, rather than being silently
+  // discarded by a throttle that has nothing to do with the original request.
+  // Shared between a fresh submission (handleGenerate) and resuming one
+  // (handleResumeSubmission). resumedCreatedAt/resumedAmbiguous are only
+  // ever passed by the latter — the ORIGINAL persisted entry's own
+  // createdAt/ambiguous, read once before this attempt even starts (see
+  // handleResumeSubmission's own staleness check). A resumed attempt's own
+  // outcome proves nothing reliable about the server-side idempotency
+  // reservation's true age or ambiguity: reserving (idempotency.server's
+  // reserveIdempotentSubmission) only stamps/refreshes createdAt — and only
+  // an ambiguous provider failure ever upgrades ttlMs to AMBIGUOUS_TTL_MS —
+  // on a key's FIRST-ever reservation (or when that original run's own
+  // promise later settles ambiguously); a resume that finds an existing
+  // reservation just re-awaits whatever that original promise already
+  // settled to, however long ago. Restamping createdAt to THIS resume's own
+  // "now", or downgrading an already-ambiguous entry back to false, on a
+  // network failure or a 504 below would silently shrink or misjudge the
+  // client's believed validity window relative to the server's true one,
+  // letting a late-enough resume slip past the server's real TTL and start
+  // a second, separately billed submission — see the writeRecoveryEntry
+  // calls below that use them.
+  async function submitOnce(
+    endpoint: string,
+    body: Record<string, unknown>,
+    token: number,
+    isResume = false,
+    resumedCreatedAt?: number,
+    resumedAmbiguous?: boolean,
+  ): Promise<string | null> {
+    // Written before fetch() is even called, not only once it settles — a
+    // tab closing or crashing while THIS exact POST is still in flight
+    // otherwise leaves no trace anywhere (not persisted, not even in
+    // memory) that a possibly-billed submission happened at all, even
+    // though the server may have already accepted (and is running, or has
+    // already run) it. ambiguous: false is the same safe assumption used
+    // for a network-level failure below: we don't yet know the outcome, so
+    // assume the shorter, ordinary-TTL ceiling rather than the longer one.
+    // Skipped for a resume: the entry it's resuming already exists (that's
+    // why Resume is being offered) and already covers this same case: if
+    // this attempt is also interrupted, that untouched original entry is
+    // what a later reload falls back to.
+    const createdAt = Date.now();
+    const idempotencyKey = body.idempotencyKey as string;
+    if (!isResume) {
+      writeRecoveryEntry({ kind: 'submission', ambiguous: false, idempotencyKey, endpoint, body, roomId, outputType, createdAt });
+    }
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (token !== pollTokenRef.current) return null; // a newer run superseded this one
+      if (!res.ok) {
+        setSubmitting(false);
+        if (res.status === 429) {
+          const retryAfterSeconds = res.headers.get('Retry-After');
+          setError(
+            retryAfterSeconds
+              ? `Too many attempts — please wait ${retryAfterSeconds}s and try again.`
+              : (data.error ?? 'Too many attempts. Please wait a moment and try again.'),
+          );
+          if (isResume) {
+            // Deliberately does NOT clearRecoveryEntry(): this was never a
+            // conclusive outcome for the original submission, only a local
+            // throttle on THIS attempt. handleResumeSubmission already
+            // optimistically cleared the in-memory state before calling
+            // this, so it's restored here — the persisted entry (predating
+            // this resume attempt, and never touched by the pre-fetch write
+            // above since that's skipped for a resume) is still exactly as
+            // it was.
+            setRecoverableSubmission({ endpoint, body });
+          } else {
+            // Nothing reached the provider — the rate limiter rejected this
+            // fresh attempt before it got anywhere near reserveIdempotentSubmission.
+            // The pre-fetch entry above was only ever a speculative just-in-case
+            // write and can be discarded now that the outcome is known.
+            clearOwnRecoveryEntry(submissionRecoveryId(idempotencyKey));
+          }
+          return null;
+        }
+        setError(data.error ?? 'Generation request failed.');
+        if (res.status === 504) {
+          // NOT a genuine settle-to-idle moment — this same submission's own
+          // entry is about to be immediately re-written below (upgraded to
+          // ambiguous: true), never abandoned, so this must not adopt a
+          // sibling out from under it the way clearOwnRecoveryEntry would:
+          // adopting here would change roomId/outputType to the sibling's,
+          // while recoverableSubmission (re-set right below) stays this
+          // request's own — a mismatch that would let the eventual job this
+          // resume produces get recorded and displayed under the wrong room.
+          // writeRecoveryEntry below overwrites this same key directly, so
+          // there is nothing to clear first.
+          setRecoverableSubmission({ endpoint, body });
+          // ambiguous: true. A FIRST attempt uses a fresh timestamp here —
+          // mirrors isSubmitTimeout server-side (the only way either generate
+          // route returns a 504), which is exactly when idempotency.server
+          // refreshes createdAt and upgrades to the longer AMBIGUOUS_TTL_MS
+          // for THIS same newly-detected ambiguity. A RESUMED attempt's own
+          // 504 is not that same event, though (see submitOnce's own comment
+          // above) — it carries the ORIGINAL persisted timestamp forward
+          // instead of restamping to this resume's own "now".
+          writeRecoveryEntry({
+            kind: 'submission',
+            ambiguous: true,
+            idempotencyKey,
+            endpoint,
+            body,
+            roomId,
+            outputType,
+            createdAt: isResume ? (resumedCreatedAt ?? createdAt) : Date.now(),
+          });
+        } else {
+          // A genuinely definite, terminal outcome (whichever way it
+          // resolved) — a stale entry from an earlier ambiguous attempt on
+          // this same request (see handleResumeSubmission) must not survive
+          // it, and this tab's own slot is now genuinely empty, so checking
+          // for a remaining sibling is correct here.
+          clearOwnRecoveryEntry(submissionRecoveryId(idempotencyKey));
+        }
+        // A definite, pre-billing failure — the approved source this request
+        // named fell out of the server's cache. Nothing to resume: clear it
+        // so the next Generate falls back to a fresh source instead of
+        // retrying the same request and failing the same way forever.
+        if (res.status === 410) setApprovedSource(null);
+        // The server's own mode resolution disagreed with what this tab's
+        // cached probe believed (see LIVE_RUN_NOT_CONFIRMED_MESSAGE) —
+        // nothing was billed, but this tab's cached liveStatus is now known
+        // to be stale. Force a fresh probe so the next click sees the
+        // deployment's actual current mode and shows the confirmation this
+        // attempt skipped, rather than failing the same way again.
+        if (res.status === 428) {
+          setModeConfirmed(false);
+          setModeProbeRetryNonce((n) => n + 1);
+        }
+        return null;
+      }
+      return data.jobId as string;
+    } catch {
+      if (token !== pollTokenRef.current) return null;
+      setError('Could not reach the generation service. If it was already submitted, Resume below reuses the exact same request instead of starting a new one.');
+      setSubmitting(false);
+      setRecoverableSubmission({ endpoint, body });
+      // A FIRST attempt is ambiguous: false, keeping the ORIGINAL pre-fetch
+      // createdAt (not a fresh Date.now() here) — a network-level failure
+      // never upgrades a server-side reservation, so if the request reached
+      // the server and succeeded, that reservation's own clock started at
+      // (approximately) when the request arrived, not when this client-side
+      // catch fired. A RESUMED attempt carries the true original entry's
+      // timestamp AND ambiguity forward instead (see submitOnce's own
+      // comment above): this resume's own fetch throwing says nothing about
+      // when the underlying reservation was really made, and — critically —
+      // says nothing that would justify DOWNGRADING an entry an earlier 504
+      // already marked ambiguous back to false, which would wrongly shrink
+      // its ceiling from AMBIGUOUS_TTL_MS to the much shorter ordinary one
+      // while the server may still be holding that longer reservation.
+      writeRecoveryEntry({
+        kind: 'submission',
+        ambiguous: isResume ? (resumedAmbiguous ?? false) : false,
+        idempotencyKey,
+        endpoint,
+        body,
+        roomId,
+        outputType,
+        createdAt: isResume ? (resumedCreatedAt ?? createdAt) : createdAt,
+      });
+      return null;
+    }
+  }
+
+  function handleResumeSubmission() {
+    if (!recoverableSubmission) return;
+    const { endpoint, body } = recoverableSubmission;
+    const idempotencyKey = body.idempotencyKey as string;
+    // recoverableSubmission is plain React state with no timestamp of its
+    // own — this banner can sit open far longer than the entry's own
+    // staleness ceiling (RECOVERY_MAX_AGE_MS), well past the point the
+    // server's idempotency reservation could already be gone (10/60 min —
+    // see idempotency.server.ts). Re-validate the PERSISTED entry's age
+    // right before resuming, rather than trusting whatever was true when
+    // this state was originally set. readAllRecoveryEntries already prunes
+    // (and removes from storage) anything past its ceiling as it scans, so
+    // a missing result here means either it never existed or just aged out.
+    const persisted = readAllRecoveryEntries()[submissionRecoveryId(idempotencyKey)];
+    if (!persisted) {
+      setRecoverableSubmission(null);
+      setError('This recovery has expired. Please start a new generation — resuming now could risk starting a second, separately billed one.');
+      // The expired entry was already removed from storage by the scan
+      // above, but that's a same-document write, which never fires this
+      // tab's own storage listener — without re-checking here, a remaining
+      // SIBLING entry (a genuinely different, still-unresolved job) would
+      // stay unadopted and Generate would incorrectly re-enable while it's
+      // still outstanding (regression).
+      adoptRecoveryEntry();
+      return;
+    }
+    const token = ++pollTokenRef.current;
+    setSubmitting(true);
+    setError(null);
+    setRecoverableSubmission(null);
+    // persisted is always the 'submission' variant here — this function
+    // only ever reads/writes keys produced by submissionRecoveryId.
+    const persistedAmbiguous = persisted.kind === 'submission' ? persisted.ambiguous : false;
+    void (async () => {
+      // persisted.createdAt/persistedAmbiguous — not this resume attempt's
+      // own start time or a fresh guess — are the only values submitOnce
+      // can trust if this attempt also fails (see its own comment): they're
+      // the true, original age and ambiguity the checks just above (and any
+      // earlier 504) already established.
+      const jobId = await submitOnce(endpoint, body, token, true, persisted.createdAt, persistedAmbiguous);
+      if (jobId) {
+        // The submission's own entry is now superseded by the job entry
+        // startPolling writes below — clear it explicitly so it doesn't
+        // linger in storage until it eventually ages out on its own.
+        clearRecoveryEntry(submissionRecoveryId(idempotencyKey));
+        startPolling(jobId, token, idempotencyKey);
+      }
+    })();
+  }
+
+  async function handleGenerate(liveRunConfirmed: boolean) {
+    // See clearUnacknowledgedCompletedJob's own comment: a deliberate new
+    // generation abandons any completed-but-unacknowledged prior result the
+    // same way switching rooms does. Checked BEFORE touching submitting/
+    // job/etc below: if that same call also turned up a genuinely
+    // different, still-unresolved sibling, its own recovery banner must
+    // stand instead — never start a brand new (possibly billed) generation
+    // racing against an already-unresolved one.
+    if (clearUnacknowledgedCompletedJob()) return;
+    const token = ++pollTokenRef.current;
+    setSubmitting(true);
+    setError(null);
+    setJob(null);
+    setApproved(false);
+    // A deliberate new submission is the other case where abandoning a
+    // prior unresolved job is the visitor's own informed choice, not silent
+    // loss. (handleGenerateClick already returns early while
+    // hasUnresolvedJob is true, so recoverableJobId/recoverableSubmission
+    // are already guaranteed null here — this is a safety net, not a
+    // no-op that could ever discard a real pending recovery.)
+    setRecoverableJobId(null);
+    setRecoverableSubmission(null);
+
+    const endpoint = outputType === 'image' ? '/api/nano-banana/generate' : '/api/higgsfield/generate';
+    // Once a concept for THIS room has been approved, both a refinement and a
+    // cinematic clip operate on that approved image; before then, an image
+    // starts from the room's evidence frame and a clip from its concept still.
+    const approvedForRoom = approvedSource && approvedSource.roomId === roomId ? approvedSource.path : undefined;
+    const sourceAssetPath = approvedForRoom ?? (outputType === 'image' ? roomEvidenceFrame[roomId]?.path : conceptImagePath(roomId));
+    const body = {
+      roomId,
+      styleVariant,
+      sourceAssetPath,
+      editInstruction: editInstruction || undefined,
+      simulate,
+      idempotencyKey: crypto.randomUUID(),
+      liveRunConfirmed,
+    };
+
+    const jobId = await submitOnce(endpoint, body, token);
+    if (jobId) {
+      // The submission's own entry is now superseded by the job entry
+      // startPolling writes below — clear it explicitly so it doesn't linger
+      // in storage until it eventually ages out on its own.
+      clearRecoveryEntry(submissionRecoveryId(body.idempotencyKey));
+      startPolling(jobId, token, body.idempotencyKey);
+    }
+  }
+
+  const activeRoom = houseModel.rooms.find((r) => r.id === roomId)!;
+
+  return (
+    <div className="rounded-3xl border border-limestone/60 bg-ivory p-6 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-display text-xl text-charcoal">AI Design Studio</h3>
+        {liveStatus !== null && (
+          <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${isLiveForOutput ? 'bg-bronze/15 text-bronze' : 'bg-olive/15 text-olive'}`}>
+            {isLiveForOutput ? 'Live provider' : 'Demo mode — no API credentials'}
+          </span>
+        )}
+      </div>
+      <p className="mt-1 text-sm text-charcoal/70">
+        Select a room, choose an output, and generate. Nano Banana produces photorealistic room concepts; Higgsfield
+        animates an approved concept still into a short cinematic clip.
+      </p>
+
+      <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-semibold text-charcoal/80">Room</span>
+          <select
+            value={roomId}
+            onChange={(e) => handleRoomChange(e.target.value as RoomId)}
+            disabled={submitting || hasUnresolvedJob}
+            className="rounded-xl border border-limestone/60 bg-ivory px-3 py-2 text-charcoal disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {houseModel.rooms.map((room) => (
+              <option key={room.id} value={room.id}>
+                {room.hotspotLabel}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-semibold text-charcoal/80">Style variation</span>
+          <select
+            value={styleVariant}
+            onChange={(e) => setStyleVariant(e.target.value)}
+            className="rounded-xl border border-limestone/60 bg-ivory px-3 py-2 text-charcoal"
+          >
+            {materialVariants.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <fieldset className="flex flex-col gap-1 text-sm">
+          <legend className="font-semibold text-charcoal/80">Output</legend>
+          <div className="flex overflow-hidden rounded-xl border border-limestone/60">
+            <button
+              type="button"
+              onClick={() => handleOutputTypeChange('image')}
+              disabled={submitting || hasUnresolvedJob}
+              className={`flex-1 px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${outputType === 'image' ? 'bg-bronze text-ivory' : 'bg-ivory text-charcoal'}`}
+            >
+              Photorealistic image (Nano Banana)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOutputTypeChange('video')}
+              disabled={submitting || hasUnresolvedJob || !videoAvailableForRoom}
+              className={`flex-1 px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${outputType === 'video' ? 'bg-bronze text-ivory' : 'bg-ivory text-charcoal'}`}
+              title={videoAvailableForRoom ? undefined : 'Cinematic clips are limited to the principal rooms.'}
+            >
+              Cinematic clip (Higgsfield)
+            </button>
+          </div>
+        </fieldset>
+
+        {liveStatus !== null && !isLiveForOutput && (
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-semibold text-charcoal/80">Demo: simulate outcome</span>
+            <select
+              value={simulate}
+              onChange={(e) => setSimulate(e.target.value as typeof simulate)}
+              className="rounded-xl border border-limestone/60 bg-ivory px-3 py-2 text-charcoal"
+            >
+              <option value="success">Success</option>
+              <option value="failure">Failure</option>
+              <option value="moderated">Moderated</option>
+            </select>
+          </label>
+        )}
+
+        {outputType === 'image' && (
+          <label className="flex flex-col gap-1 text-sm md:col-span-2">
+            <span className="font-semibold text-charcoal/80">Optional refinement instruction</span>
+            <input
+              type="text"
+              value={editInstruction}
+              onChange={(e) => setEditInstruction(e.target.value)}
+              placeholder="e.g. warm up the pendant light, swap the rug to a darker weave"
+              className="rounded-xl border border-limestone/60 bg-ivory px-3 py-2 text-charcoal"
+              maxLength={200}
+            />
+          </label>
+        )}
+      </div>
+
+      {confirmingLiveRun && isLiveForOutput ? (
+        <div className="mt-5 rounded-xl border border-bronze/40 bg-bronze/10 p-4">
+          <p className="text-sm font-semibold text-charcoal">
+            This runs a real, billed {outputType === 'image' ? 'Nano Banana' : 'Higgsfield'} generation using the
+            configured API credentials.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={handleGenerateClick}
+              className="rounded-full bg-bronze px-4 py-2 text-xs font-semibold text-ivory shadow"
+            >
+              Yes, generate (may incur cost)
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingLiveRun(false)}
+              className="rounded-full border border-limestone/60 px-4 py-2 text-xs font-semibold text-charcoal hover:bg-limestone/30"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={handleGenerateClick}
+          disabled={submitting || liveStatus === null || liveVideoNeedsApproval || hasUnresolvedJob}
+          className="mt-5 w-full rounded-full bg-bronze px-4 py-3 text-sm font-semibold text-ivory shadow disabled:opacity-60 md:w-auto"
+        >
+          {liveStatus === null
+            ? 'Checking provider status…'
+            : submitting
+              ? 'Working…'
+              : `Generate ${outputType === 'image' ? 'concept image' : 'cinematic clip'}`}
+        </button>
+      )}
+      {recoverableJobId && (
+        <div className="mt-4 rounded-xl border border-bronze/40 bg-bronze/10 px-4 py-3">
+          <p className="text-sm font-semibold text-charcoal">
+            Lost connection while checking on a generation that may still be running (and already billed)
+            provider-side. Starting a new one risks a duplicate charge.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleResumeStatusCheck}
+              className="rounded-full bg-bronze px-4 py-2 text-xs font-semibold text-ivory shadow"
+            >
+              Resume checking status
+            </button>
+            <button
+              type="button"
+              onClick={handleAbandonJob}
+              className="rounded-full border border-limestone/60 px-4 py-2 text-xs font-semibold text-charcoal hover:bg-limestone/30"
+            >
+              Abandon and start over
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-charcoal/60">
+            Abandoning only stops checking locally — if this is genuinely stuck (e.g. provider credentials changed
+            after it was submitted), it&apos;s the only way to unlock a new generation.
+          </p>
+        </div>
+      )}
+      {recoverableSubmission && (
+        <div className="mt-4 rounded-xl border border-bronze/40 bg-bronze/10 px-4 py-3">
+          <p className="text-sm font-semibold text-charcoal">
+            The outcome of this generation is unclear (a lost connection, or a provider timeout) — it may have
+            already been received and billed. Resuming reuses the exact same request rather than starting a new,
+            possibly duplicate one.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleResumeSubmission}
+              className="rounded-full bg-bronze px-4 py-2 text-xs font-semibold text-ivory shadow"
+            >
+              Resume submission
+            </button>
+            <button
+              type="button"
+              onClick={handleAbandonSubmission}
+              className="rounded-full border border-limestone/60 px-4 py-2 text-xs font-semibold text-charcoal hover:bg-limestone/30"
+            >
+              Abandon and start over
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-charcoal/60">
+            Abandoning only stops checking locally — if this is genuinely stuck, it&apos;s the only way to unlock a
+            new generation.
+          </p>
+        </div>
+      )}
+      {liveVideoNeedsApproval && modeConfirmed && (
+        <p className="mt-2 text-xs font-semibold text-bronze">
+          Generate a concept image for this room and Approve it first — a live cinematic clip animates the approved
+          still, not a placeholder.
+        </p>
+      )}
+      {liveVideoNeedsApproval && !modeConfirmed && (
+        <p className="mt-2 text-xs font-semibold text-bronze">
+          Still confirming whether cinematic clips are live-billed on this deployment before allowing generation.{' '}
+          <button type="button" onClick={() => setModeProbeRetryNonce((n) => n + 1)} className="underline hover:no-underline">
+            Check again
+          </button>
+        </p>
+      )}
+      <p className="mt-2 text-xs text-charcoal/50">
+        {outputType === 'video'
+          ? 'Uses the approved concept still as its source — this triggers a real paid job when live credentials are configured.'
+          : `Uses ${roomEvidenceFrame[roomId]?.path.split('/').pop()} as the architectural reference frame for ${activeRoom.hotspotLabel}.`}
+      </p>
+
+      {error && <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+
+      {job && (
+        <div className="mt-6 rounded-2xl border border-limestone/50 bg-ivory p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-charcoal">{STATUS_COPY[job.status]}</span>
+            {job.status !== 'completed' && job.status !== 'failed' && job.status !== 'moderated' && (
+              <span className="h-3 w-3 animate-pulse rounded-full bg-bronze" aria-hidden />
+            )}
+          </div>
+
+          {job.status === 'completed' && job.resultUrl && (
+            <div className="mt-3">
+              {isPlayableVideo(job) ? (
+                // A live Higgsfield job returns an actual video URL, which an
+                // <img>/next-image element cannot decode — render it as video.
+                <video
+                  src={job.resultUrl}
+                  controls
+                  playsInline
+                  loop
+                  className="h-64 w-full rounded-xl bg-limestone/30 object-cover"
+                />
+              ) : (
+                <div className={`relative h-64 w-full overflow-hidden rounded-xl bg-limestone/30 ${job.outputType === 'video' ? 'animate-[kenburns_8s_ease-in-out_infinite_alternate]' : ''}`}>
+                  <Image
+                    src={job.resultUrl}
+                    alt={`Generated concept for ${activeRoom.hotspotLabel}`}
+                    fill
+                    sizes="600px"
+                    className="object-cover"
+                    unoptimized={job.resultUrl.startsWith('data:') || job.resultUrl.endsWith('.svg') || job.resultUrl.startsWith('/api/')}
+                  />
+                </div>
+              )}
+              {job.outputType === 'video' && !isPlayableVideo(job) && (
+                <p className="mt-2 text-xs italic text-charcoal/50">
+                  Demo mode simulates the cinematic move with a gentle pan over the approved still; a live Higgsfield job
+                  returns an actual video clip here instead.
+                </p>
+              )}
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Like Reject, Approve is a call site where this tab's own
+                    // unacknowledged result was what deferred adoption (see
+                    // adoptRecoveryEntry), and clicking Approve is the visitor's
+                    // explicit decision that settles it — a sibling waiting
+                    // behind it otherwise has no other trigger to ever get
+                    // adopted. clearRecoveryEntry here (not before, at
+                    // completion time) is what actually removes this job's
+                    // persisted breadcrumb now that the visitor has genuinely
+                    // acknowledged it (regression: completion alone used to
+                    // delete it immediately, so a reload or crash between
+                    // completing and this click lost an unapproved,
+                    // possibly-billed result for good — see startPolling's own
+                    // comment). adoptRecoveryEntry is called BEFORE
+                    // setApprovedSource below (rather than after, as Reject
+                    // does) because it matters here specifically: its own
+                    // setApprovedSource(null) reset then runs FIRST in the same
+                    // batch, so the explicit call below — reading job/roomId
+                    // from this same click's closure, still the ORIGINAL
+                    // room/job regardless of any room switch adoption just
+                    // queued — lands last and is what actually takes effect,
+                    // rather than the visitor's just-made approval being
+                    // silently discarded by it (that was the gap: adoption used
+                    // to leave a just-made approval unrecorded, with the
+                    // sibling still never adopted either since nothing here
+                    // called this at all).
+                    clearRecoveryEntry(jobRecoveryId(job.jobId));
+                    const adoptedSibling = adoptRecoveryEntry('proceed');
+                    // Only set true when nothing was adopted: when a sibling
+                    // WAS adopted, `job` is about to become that sibling's
+                    // (null for now, then whatever it resumes to) — a fresh
+                    // job this approval says nothing about. Leaving
+                    // adoptRecoveryEntry's own setApproved(false) stand for
+                    // that case (rather than this click's own true winning
+                    // the batch either way, as an earlier version did) is
+                    // what stops an unrelated later job — from resuming the
+                    // very entry just adopted — from opening already marked
+                    // "✓ Approved" while approvedSource below still names
+                    // THIS image, silently feeding a stale source into any
+                    // refinement or video the visitor generates from it
+                    // (regression).
+                    if (!adoptedSibling) setApproved(true);
+                    // Keep the approved image so a later refinement or cinematic
+                    // clip is generated from it rather than the raw frame/placeholder —
+                    // but only when it is a genuine generated image (job.provider !==
+                    // 'mock'): otherwise, with Nano Banana in demo mode and Higgsfield
+                    // live, this placeholder SVG would satisfy the live-video approval
+                    // gate and let a real billed clip animate a fake concept.
+                    if (job.outputType === 'image' && job.resultUrl && job.provider !== 'mock') {
+                      setApprovedSource({ path: job.resultUrl, roomId });
+                    }
+                  }}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold ${approved ? 'bg-olive text-ivory' : 'border border-limestone/60 text-charcoal hover:bg-limestone/30'}`}
+                >
+                  {approved ? '✓ Approved' : 'Approve'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setJob(null);
+                    setApproved(false);
+                    // Only drop the approved baseline if we're rejecting that exact
+                    // approved image; rejecting a later refinement or clip that was
+                    // generated FROM it must not lose the still-good baseline.
+                    if (approvedSource && approvedSource.path === job.resultUrl) {
+                      setApprovedSource(null);
+                    }
+                    // This tab's own unacknowledged result is what was
+                    // deferring adoption (see adoptRecoveryEntry), and Reject
+                    // is the visitor's own explicit decision that settles it —
+                    // clearOwnRecoveryEntry both removes this job's persisted
+                    // breadcrumb now that it's genuinely acknowledged
+                    // (regression: completion alone used to delete it
+                    // immediately, losing an unapproved, possibly-billed
+                    // result for good on a reload before this click — see
+                    // startPolling's own comment) and looks for a sibling with
+                    // 'proceed', since setJob(null) just above only takes
+                    // effect next render — the plain state read inside
+                    // adoptRecoveryEntry would otherwise still see the job
+                    // just rejected and keep deferring, and a sibling waiting
+                    // behind it may otherwise never get picked up (nothing
+                    // else re-triggers this check on its own).
+                    clearOwnRecoveryEntry(jobRecoveryId(job.jobId), 'proceed');
+                  }}
+                  className="rounded-full border border-limestone/60 px-4 py-2 text-xs font-semibold text-charcoal hover:bg-limestone/30"
+                >
+                  Reject
+                </button>
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-1 text-[11px] text-charcoal/50">
+                <div>
+                  <dt className="inline font-semibold">Model: </dt>
+                  <dd className="inline">{job.meta.model}</dd>
+                </div>
+                <div>
+                  <dt className="inline font-semibold">Variant: </dt>
+                  <dd className="inline">{job.meta.styleVariant}</dd>
+                </div>
+              </dl>
+            </div>
+          )}
+
+          {(job.status === 'failed' || job.status === 'moderated') && (
+            <p className="mt-2 text-sm text-charcoal/70">{job.error}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

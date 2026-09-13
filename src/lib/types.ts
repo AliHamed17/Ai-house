@@ -91,12 +91,16 @@ export interface OpeningDef {
 
 export interface StructuralFeature {
   id: string;
-  kind: 'column' | 'pier';
+  kind: 'column' | 'pier' | 'low_wall';
   position: Vec2;
-  /** Round columns only. Square piers use `sizeM` instead. */
+  /** Round columns only. Square piers and low walls use `sizeM`/`thicknessM`. */
   radiusM: number;
-  /** Plan side length of a square pier, meters. */
+  /** Plan side length of a square pier, or span of a low wall, meters. */
   sizeM?: number;
+  /** Low walls only: depth across the span, meters. */
+  thicknessM?: number;
+  /** Low walls only: radians, 0 = span runs along +x. */
+  rotationRad?: number;
   heightM: number;
   roomId: RoomId;
 }

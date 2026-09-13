@@ -6,6 +6,7 @@ import { houseModel } from '@/data/house';
 import type { BuiltWall, WallVoid } from '@/lib/geometry/wallPanels';
 import { builtWalls } from '@/lib/geometry/builtHouse';
 import { resolveFloorColor, resolveWallColor } from '@/data/materials';
+import { Furniture } from './Furniture';
 import type { RoomDef } from '@/lib/types';
 
 function polygonShape(polygon: { x: number; z: number }[]): THREE.Shape {
@@ -102,8 +103,16 @@ function StructuralColumns() {
   return (
     <>
       {houseModel.structuralFeatures.map((f) => (
-        <mesh key={f.id} position={[f.position.x, f.heightM / 2, f.position.z]} castShadow>
-          {f.kind === 'pier' ? (
+        <mesh
+          key={f.id}
+          position={[f.position.x, f.heightM / 2, f.position.z]}
+          rotation={[0, f.rotationRad ?? 0, 0]}
+          castShadow
+          receiveShadow
+        >
+          {f.kind === 'low_wall' ? (
+            <boxGeometry args={[f.sizeM ?? 0.5, f.heightM, f.thicknessM ?? 0.2]} />
+          ) : f.kind === 'pier' ? (
             <boxGeometry args={[f.sizeM ?? 0.5, f.heightM, f.sizeM ?? 0.5]} />
           ) : (
             <cylinderGeometry args={[f.radiusM, f.radiusM, f.heightM, 16]} />
@@ -141,6 +150,7 @@ export function HouseGeometry({ variantId }: { variantId: string }) {
         />
       ))}
       <StructuralColumns />
+      <Furniture variantId={variantId} />
     </group>
   );
 }

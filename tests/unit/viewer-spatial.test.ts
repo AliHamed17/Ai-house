@@ -5,6 +5,44 @@ import { houseModel, PLAYER_RADIUS_M } from '@/data/house';
 import { houseBounds, enclosedBounds } from '@/lib/geometry/houseBounds';
 import { builtWalls } from '@/lib/geometry/builtHouse';
 import { resolveCollision, pointInPolygon } from '@/lib/geometry/collision';
+import { obstacles } from '@/lib/geometry/obstacleCollision';
+import type { Vec2 } from '@/lib/types';
+
+/** yaw=0 faces -z (north) and rotates toward +z at yaw=PI, matching
+ * FirstPersonControls' `camera.rotation.set(pitch, yaw, 0, 'YXZ')`. */
+function forwardOf(yaw: number): Vec2 {
+  return { x: -Math.sin(yaw), z: -Math.cos(yaw) };
+}
+
+function firstHitDistance(from: Vec2, dir: Vec2, maxRange = 6): number {
+  const step = 0.05;
+  for (let d = step; d <= maxRange; d += step) {
+    const p = { x: from.x + dir.x * d, z: from.z + dir.z * d };
+    for (const wall of builtWalls) {
+      const dx = p.x - wall.start.x;
+      const dz = p.z - wall.start.z;
+      const t = dx * wall.ux + dz * wall.uz;
+      const n = -dx * wall.uz + dz * wall.ux;
+      if (t < 0 || t > wall.length) continue;
+      if (Math.abs(n) > wall.thicknessM / 2) continue;
+      for (const span of wall.collisionSolidSpans) {
+        if (t >= span.t0 && t <= span.t1) return d;
+      }
+    }
+    for (const o of obstacles) {
+      if (o.radius !== undefined) {
+        if (Math.hypot(p.x - o.cx, p.z - o.cz) <= o.radius) return d;
+        continue;
+      }
+      const cos = Math.cos(-o.rot);
+      const sin = Math.sin(-o.rot);
+      const lx = (p.x - o.cx) * cos - (p.z - o.cz) * sin;
+      const lz = (p.x - o.cx) * sin + (p.z - o.cz) * cos;
+      if (Math.abs(lx) <= o.halfW && Math.abs(lz) <= o.halfD) return d;
+    }
+  }
+  return maxRange;
+}
 
 const SRC = path.resolve(import.meta.dirname, '../../src');
 
@@ -79,5 +117,17 @@ describe('3D viewer spatial assumptions', () => {
       expect(w.length, w.wallId).toBeGreaterThan(0.05);
       expect(w.heightM, w.wallId).toBeGreaterThan(0.5);
     }
+  });
+
+  it('never spawns a room facing a wall or a piece of furniture within arm’s reach', () => {
+    const MIN_SIGHTLINE_M = 0.9;
+    const tooClose: string[] = [];
+    for (const room of houseModel.rooms) {
+      const dist = firstHitDistance(room.cameraSpawn, forwardOf(room.cameraSpawnYaw));
+      if (dist < MIN_SIGHTLINE_M) {
+        tooClose.push(`${room.id} sees only ${dist.toFixed(2)} m ahead (yaw ${room.cameraSpawnYaw.toFixed(2)})`);
+      }
+    }
+    expect(tooClose).toEqual([]);
   });
 });

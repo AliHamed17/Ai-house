@@ -242,19 +242,14 @@ describe('structural columns', () => {
     expect(houseModel.structuralFeatures.length).toBeGreaterThanOrEqual(8);
   });
 
-  it('models the living/kitchen divider as a 0.50 m square floor-to-ceiling pier', () => {
-    const pier = houseModel.structuralFeatures.find((f) => f.id === 'pier_living_kitchen');
-    expect(pier, 'pier_living_kitchen missing').toBeDefined();
-    expect(pier!.kind).toBe('pier');
-    expect(pier!.sizeM).toBeCloseTo(0.5, 3);
-    expect(pier!.heightM).toBeCloseTo(CEILING_HEIGHT_M, 3);
-
-    const living = rooms.find((r) => r.id === 'living')!;
-    expect(pointInPolygon(pier!.position, living.floorPolygon)).toBe(true);
-
-    const half = pier!.sizeM! / 2;
-    expect(pier!.position.z + half).toBeCloseTo(5.35, 2);
-    expect(pier!.position.x + half).toBeCloseTo(0.5, 2);
+  it('models the living/kitchen divider as a 0.50 m high, 0.50 m wide low wall', () => {
+    const lw = houseModel.structuralFeatures.find((f) => f.id === 'lowwall_living_kitchen');
+    expect(lw, 'lowwall_living_kitchen missing').toBeDefined();
+    expect(lw!.kind).toBe('low_wall');
+    expect(lw!.sizeM).toBeCloseTo(0.5, 3);
+    expect(lw!.heightM).toBeCloseTo(0.5, 3);
+    expect(lw!.heightM).toBeLessThan(CEILING_HEIGHT_M);
+    expect(lw!.position.z).toBeCloseTo(5.35, 2);
   });
 
   it('leaves the rest of the living/kitchen boundary genuinely open', () => {

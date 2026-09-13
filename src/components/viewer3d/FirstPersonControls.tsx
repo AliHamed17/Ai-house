@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { useViewerStore } from '@/lib/store/viewerStore';
 import { builtWalls } from '@/lib/geometry/builtHouse';
 import { resolveCollision, pointInPolygon } from '@/lib/geometry/collision';
+import { resolveObstacleCollision } from '@/lib/geometry/obstacleCollision';
 import { houseModel } from '@/data/house';
 import { EYE_HEIGHT_M, PLAYER_RADIUS_M } from '@/data/house';
 
@@ -88,7 +89,10 @@ export function FirstPersonControls() {
     const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
     pitchRef.current = THREE.MathUtils.clamp(euler.x, -PITCH_LIMIT_RAD, PITCH_LIMIT_RAD);
     yawRef.current = euler.y;
-    const resolved = resolveCollision({ x: camera.position.x, z: camera.position.z }, PLAYER_RADIUS_M, builtWalls);
+    const resolved = resolveObstacleCollision(
+      resolveCollision({ x: camera.position.x, z: camera.position.z }, PLAYER_RADIUS_M, builtWalls),
+      PLAYER_RADIUS_M,
+    );
     camera.position.set(resolved.x, EYE_HEIGHT_M, resolved.z);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
@@ -201,7 +205,10 @@ export function FirstPersonControls() {
         x: camera.position.x + worldDX * MOVE_SPEED_M_S * dt,
         z: camera.position.z + worldDZ * MOVE_SPEED_M_S * dt,
       };
-      const resolved = resolveCollision(candidate, PLAYER_RADIUS_M, builtWalls);
+      const resolved = resolveObstacleCollision(
+        resolveCollision(candidate, PLAYER_RADIUS_M, builtWalls),
+        PLAYER_RADIUS_M,
+      );
       camera.position.x = resolved.x;
       camera.position.z = resolved.z;
     }

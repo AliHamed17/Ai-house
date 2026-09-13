@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { houseModel } from '@/data/house';
+import { furniture } from '@/data/furniture';
 import type { RoomId } from '@/lib/types';
 
 const CONFIDENCE_LABEL: Record<string, string> = {
@@ -81,20 +82,46 @@ export function InteractiveFloorPlan({ onRoomActivate, activateLabel = 'Enter ro
             .map((o) => (
               <circle key={o.id} cx={o.position.x} cy={o.position.z} r={0.12} fill="#F3EFE7" stroke="#4B4037" strokeWidth={0.03} />
             ))}
+          {furniture
+            .filter((f) => !f.detail)
+            .map((f) => {
+              const deg = ((f.rotationRad ?? 0) * 180) / Math.PI;
+              return (
+                <rect
+                  key={f.id}
+                  x={f.position.x - f.size.w / 2}
+                  y={f.position.z - f.size.d / 2}
+                  width={f.size.w}
+                  height={f.size.d}
+                  transform={`rotate(${deg.toFixed(2)} ${f.position.x} ${f.position.z})`}
+                  fill={f.kind === 'rug' ? '#C9BCA6' : '#A9917A'}
+                  fillOpacity={f.kind === 'rug' ? 0.35 : 0.55}
+                  stroke="#6B5F51"
+                  strokeWidth={0.025}
+                  strokeOpacity={0.7}
+                  pointerEvents="none"
+                />
+              );
+            })}
           {houseModel.structuralFeatures.map((f) =>
-            f.kind === 'pier' ? (
+            f.kind === 'pier' || f.kind === 'low_wall' ? (
               <rect
                 key={f.id}
                 x={f.position.x - (f.sizeM ?? 0.5) / 2}
-                y={f.position.z - (f.sizeM ?? 0.5) / 2}
+                y={f.position.z - (f.kind === 'low_wall' ? (f.thicknessM ?? 0.2) : (f.sizeM ?? 0.5)) / 2}
                 width={f.sizeM ?? 0.5}
-                height={f.sizeM ?? 0.5}
+                height={f.kind === 'low_wall' ? (f.thicknessM ?? 0.2) : (f.sizeM ?? 0.5)}
+                transform={`rotate(${(((f.rotationRad ?? 0) * 180) / Math.PI).toFixed(2)} ${f.position.x} ${f.position.z})`}
                 fill="#8B7C6C"
                 stroke="#24221F"
                 strokeWidth={0.04}
                 pointerEvents="none"
               >
-                <title>{`Structural pier — ${((f.sizeM ?? 0.5) * 100).toFixed(0)} × ${((f.sizeM ?? 0.5) * 100).toFixed(0)} cm, floor to ceiling`}</title>
+                <title>
+                  {f.kind === 'low_wall'
+                    ? `Low wall — ${((f.sizeM ?? 0.5) * 100).toFixed(0)} cm span, ${(f.heightM * 100).toFixed(0)} cm high`
+                    : `Structural pier — ${((f.sizeM ?? 0.5) * 100).toFixed(0)} cm square, floor to ceiling`}
+                </title>
               </rect>
             ) : (
               <circle

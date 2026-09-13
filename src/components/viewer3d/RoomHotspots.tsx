@@ -25,7 +25,16 @@ export function DoorHotspots() {
     [],
   );
 
-  if (mode === 'floorplan') return null;
+  // "Whichever side I'm not on" only means something when the visitor is
+  // actually standing in one specific room — in orbit/Dollhouse, every door
+  // marker in the whole house renders at once with activeRoomId matching
+  // neither side for nearly all of them, so the ternary below silently
+  // picked roomA regardless of which side a visitor would expect (e.g.
+  // clicking the parents-bedroom doorway from the exterior approach jumped
+  // to hall_south instead). RoomLabelHotspots already covers unambiguous
+  // room-to-room jumping from orbit mode, so door markers are floorplan-only
+  // in the other direction too: both are "not walking through a door" views.
+  if (mode === 'floorplan' || mode === 'orbit') return null;
 
   return (
     <group>
@@ -40,10 +49,11 @@ export function DoorHotspots() {
               rotation={[-Math.PI / 2, 0, 0]}
               onClick={(e) => {
                 e.stopPropagation();
-                // These door markers render in orbit (Dollhouse) mode too —
-                // only floorplan mode hides them — so the same mode-aware
-                // fix applies here: without it, clicking one from Dollhouse
-                // would move the camera while leaving Dollhouse selected.
+                // Only ever rendered in first-person mode now (see the
+                // floorplan/orbit guard above), so this is always an
+                // in-house teleport with no mode switch of its own needed —
+                // kept explicit anyway to stay correct if that guard ever
+                // changes.
                 requestTeleport(targetRoom.id);
                 setMode('first-person');
               }}

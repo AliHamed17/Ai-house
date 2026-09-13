@@ -98,24 +98,59 @@ function WindowGlazing({ wall, voidDef }: { wall: BuiltWall; voidDef: WallVoid }
   );
 }
 
+/** One wall segment's own texture, scaled to ITS OWN widthM/heightM — not
+ * the whole wall's. Every renderPanel is its own boxGeometry with normalized
+ * [0,1] UVs, so sharing one wall-length-scaled texture clone across a
+ * narrow lintel strip and the full-width panel beside it would repeat the
+ * pattern the same number of times over a much smaller physical size,
+ * making the material's real-world scale shrink and jump at every
+ * door/window edge (regression fixed here: each panel gets its own clone). */
+function WallPanelMesh({
+  panel,
+  baseMaterialId,
+  color,
+  roughness,
+  castShadow,
+  receiveShadow,
+}: {
+  panel: BuiltWall['renderPanels'][number];
+  baseMaterialId: string;
+  color: string;
+  roughness: number;
+  castShadow: boolean;
+  receiveShadow: boolean;
+}) {
+  const map = useMaterialTexture(baseMaterialId, panel.widthM, panel.heightM);
+  return (
+    <mesh
+      position={[panel.center.x, panel.center.y, panel.center.z]}
+      rotation={[0, panel.rotationYRad, 0]}
+      castShadow={castShadow}
+      receiveShadow={receiveShadow}
+    >
+      <boxGeometry args={[panel.widthM, panel.heightM, panel.depthM]} />
+      <meshStandardMaterial map={map ?? undefined} color={color} roughness={roughness} metalness={0} />
+    </mesh>
+  );
+}
+
 function WallMesh({ wall, variantId, isProtected }: { wall: BuiltWall; variantId: string; isProtected: boolean }) {
   const room = houseModel.rooms.find((r) => r.id === wall.roomId)!;
   const baseMaterialId = wall.exterior ? 'exterior-render' : room.wallMaterialId;
   const color = resolveWallColor(baseMaterialId, variantId);
-  const map = useMaterialTexture(baseMaterialId, wall.length, wall.heightM);
   const windows = wall.voids.filter((v) => v.kind === 'window');
   return (
     <group>
       {wall.renderPanels.map((panel, i) => (
-        <mesh key={i} position={[panel.center.x, panel.center.y, panel.center.z]} rotation={[0, panel.rotationYRad, 0]} castShadow receiveShadow>
-          <boxGeometry args={[panel.widthM, panel.heightM, panel.depthM]} />
-          <meshStandardMaterial
-            map={map ?? undefined}
-            color={isProtected ? '#8a6a4a' : color}
-            roughness={wall.exterior ? 0.85 : 0.9}
-            metalness={0}
-          />
-        </mesh>
+        <WallPanelMesh
+          key={i}
+          panel={panel}
+          baseMaterialId={baseMaterialId}
+          color={isProtected ? '#8a6a4a' : color}
+          roughness={wall.exterior ? 0.85 : 0.9}
+          castShadow
+          receiveShadow
+        />
       ))}
       {windows.map((v) => (
         <WindowGlazing key={v.openingId} wall={wall} voidDef={v} />

@@ -10,7 +10,14 @@ const providersById: Record<GenerationProviderId, MediaGenerationProvider> = {
   higgsfield: higgsfieldProvider,
 };
 
+/** Hard off-switch for billed providers: credentials merely existing in the
+ * environment is otherwise enough to make a run live and spend money. */
+export function isDemoForced(): boolean {
+  return process.env.AI_FORCE_DEMO === '1' || process.env.AI_FORCE_DEMO === 'true';
+}
+
 export function isProviderConfigured(id: GenerationProviderId): boolean {
+  if (isDemoForced()) return false;
   if (id === 'nano-banana') return isNanoBananaConfigured();
   if (id === 'higgsfield') return isHiggsfieldConfigured();
   return true;

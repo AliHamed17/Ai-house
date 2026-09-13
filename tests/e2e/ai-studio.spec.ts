@@ -30,7 +30,7 @@ test.describe('AI Design Studio (demo mode)', () => {
 
   test('cinematic clip output is only offered for the principal rooms', async ({ page }) => {
     await page.goto('/#ai-studio');
-    await page.locator('select').first().selectOption('wc_guest');
+    await page.locator('select').first().selectOption('wc');
     await expect(page.getByRole('button', { name: /Cinematic clip/i })).toBeDisabled();
     await page.locator('select').first().selectOption('living');
     await expect(page.getByRole('button', { name: /Cinematic clip/i })).toBeEnabled();

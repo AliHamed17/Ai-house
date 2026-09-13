@@ -12,6 +12,47 @@ import { retryOnce, withTimeout } from './resilience.server';
 const HF_ENDPOINT = process.env.HF_IMAGE2VIDEO_ENDPOINT || '/v1/image2video/dop';
 const HF_MODEL = process.env.HF_MODEL || 'dop-turbo';
 
+const DEFAULT_TRUSTED_HOST_SUFFIX = 'higgsfield.ai';
+const SAFE_REQUEST_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+function trustedHostSuffixes(): string[] {
+  const extra = (process.env.HF_TRUSTED_HOSTS || '')
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  return [DEFAULT_TRUSTED_HOST_SUFFIX, ...extra];
+}
+
+function isTrustedStatusUrl(candidate: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:') return false;
+  const host = parsed.hostname.toLowerCase();
+  return trustedHostSuffixes().some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+}
+
+/**
+ * Job ids are unsigned and client-supplied, so `higgsfieldStatusUrl` is
+ * untrusted input that would otherwise be fetched with the HF secret attached.
+ */
+export function resolveHiggsfieldStatusUrl(payload: {
+  higgsfieldStatusUrl?: string;
+  higgsfieldRequestId?: string;
+}): string {
+  if (payload.higgsfieldStatusUrl && isTrustedStatusUrl(payload.higgsfieldStatusUrl)) {
+    return payload.higgsfieldStatusUrl;
+  }
+  const requestId = payload.higgsfieldRequestId;
+  if (!requestId || !SAFE_REQUEST_ID.test(requestId)) {
+    throw new Error('Higgsfield job is missing a usable request id.');
+  }
+  return `https://platform.${DEFAULT_TRUSTED_HOST_SUFFIX}/requests/${requestId}/status`;
+}
+
 function getCredentials(): string {
   const combined = process.env.HF_CREDENTIALS;
   if (combined) return combined;
@@ -95,7 +136,7 @@ export const higgsfieldProvider: MediaGenerationProvider = {
   async status(jobId: string): Promise<GenerationJob> {
     const payload = decodeJobId(jobId);
     const credentials = getCredentials();
-    const url = payload.higgsfieldStatusUrl || `https://platform.higgsfield.ai/requests/${payload.higgsfieldRequestId}/status`;
+    const url = resolveHiggsfieldStatusUrl(payload);
     const res = await retryOnce(() =>
       withTimeout(fetch(url, { headers: { Authorization: `Key ${credentials}` } }), 10_000, 'Higgsfield status check timed out'),
     );

@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { houseModel } from '@/data/house';
 import { roomEvidenceFrame } from '@/data/evidenceFrames';
+import { interiorRenders } from '@/data/interiors';
 import { roomPromptById } from '@/data/roomPrompts';
 import type { RoomId } from '@/lib/types';
 
@@ -19,12 +20,19 @@ export function RoomStories({ onEnterRoom }: { onEnterRoom: (roomId: RoomId) => 
 
       <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {houseModel.rooms.map((room) => {
+          const render = interiorRenders[room.id];
           const frame = roomEvidenceFrame[room.id];
           const prompt = roomPromptById.get(room.id);
           return (
             <article key={room.id} className="flex flex-col overflow-hidden rounded-3xl border border-limestone/60 bg-ivory shadow-sm">
-              <div className="relative h-44 w-full">
-                <Image src={frame.path} alt={`Unfinished ${room.hotspotLabel}`} fill sizes="(max-width: 640px) 100vw, 33vw" className="object-cover" />
+              <div className="relative h-56 w-full">
+                <Image
+                  src={render?.path ?? frame.path}
+                  alt={render ? `Warm-modern-luxury concept for ${room.hotspotLabel}` : `Unfinished ${room.hotspotLabel}`}
+                  fill
+                  sizes="(max-width: 640px) 100vw, 33vw"
+                  className="object-cover"
+                />
                 {room.isProtected && (
                   <span className="absolute left-3 top-3 rounded-full bg-charcoal/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-ivory">
                     🛡 MAMAD protected

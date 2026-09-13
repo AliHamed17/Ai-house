@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F3EFE7" />
+      <stop offset="100%" stop-color="#9A7656" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#bg)" />
+  <rect x="16" y="16" width="768" height="568" fill="none" stroke="#4B4037" stroke-opacity="0.35" stroke-width="1.5" />
+  <rect x="309.1" y="475.5" width="172.9" height="76.3" rx="6.6" fill="#4B4037" opacity="0.10" />
+      <rect x="539.5" y="292.3" width="90.7" height="120.4" rx="8.4" fill="#4B4037" opacity="0.10" />
+      <rect x="222.7" y="275.0" width="213.5" height="84.2" rx="11.2" fill="#4B4037" opacity="0.10" />
+      <rect x="402.5" y="417.4" width="81.2" height="56.2" rx="8.4" fill="#4B4037" opacity="0.10" />
+      <rect x="359.5" y="350.7" width="216.9" height="72.0" rx="9.7" fill="#4B4037" opacity="0.10" />
+  <line x1="60" y1="240" x2="740" y2="240" stroke="#4B4037" stroke-opacity="0.25" stroke-width="1" />
+  <text x="400" y="150" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="40" fill="#24221F">Twin Bedroom</text>
+  <text x="400" y="190" text-anchor="middle" font-family="Georgia, serif" font-size="17" font-style="italic" fill="#73745F">Warm-modern-luxury concept — placeholder</text>
+  <rect x="290" y="520" width="220" height="34" rx="17" fill="#24221F" opacity="0.85" />
+  <text x="400" y="543" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" letter-spacing="0.5" fill="#F3EFE7">DEMO MODE — NOT AI-GENERATED</text>
+</svg>

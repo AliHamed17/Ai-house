@@ -4,12 +4,12 @@ import { buildAllWalls, buildWall } from '@/lib/geometry/wallPanels';
 import { resolveCollision, pointInPolygon } from '@/lib/geometry/collision';
 
 describe('wall panel geometry', () => {
-  it('attaches the protected MAMAD door to mamad_w and splits the wall around it', () => {
+  it('attaches the protected MAMAD door to mamad_s and splits the wall around it', () => {
     const mamad = getRoom('mamad')!;
-    const wallSpec = mamad.walls.find((w) => w.id === 'mamad_w')!;
+    const wallSpec = mamad.walls.find((w) => w.id === 'mamad_s')!;
     const built = buildWall(wallSpec, mamad, houseModel.openings);
     expect(built.voids).toHaveLength(1);
-    expect(built.voids[0].openingId).toBe('door_entry_mamad');
+    expect(built.voids[0].openingId).toBe('door_corridor_mamad');
     expect(built.voids[0].isProtected).toBe(true);
     // A door void produces a floor-level gap, so the wall should render at
     // least two solid panels: below/beside nothing (door starts at floor)
@@ -30,11 +30,11 @@ describe('wall panel geometry', () => {
     expect(built.collisionSolidSpans).toEqual([{ t0: 0, t1: built.length }]);
   });
 
-  it('handles two windows on one wall (living west wall) without overlap', () => {
+  it('handles the three windows on the living west wall without overlap', () => {
     const living = getRoom('living')!;
     const wallSpec = living.walls.find((w) => w.id === 'living_w')!;
     const built = buildWall(wallSpec, living, houseModel.openings);
-    expect(built.voids).toHaveLength(2);
+    expect(built.voids).toHaveLength(3);
     // 2 windows on one wall -> 3 solid t-strips (below/between/above are not
     // stacked since windows share the same y-range, so we expect 3 solid
     // panels: left of both, between them, right of both, each full height
@@ -45,9 +45,9 @@ describe('wall panel geometry', () => {
   });
 
   it('builds a solid, gapless wall for a wall with no openings', () => {
-    const parents = getRoom('parents_bed')!;
-    const wallSpec = parents.walls.find((w) => w.id === 'parents_s')!;
-    const built = buildWall(wallSpec, parents, houseModel.openings);
+    const corridor = getRoom('corridor')!;
+    const wallSpec = corridor.walls.find((w) => w.id === 'corridor_s')!;
+    const built = buildWall(wallSpec, corridor, houseModel.openings);
     expect(built.voids).toHaveLength(0);
     expect(built.renderPanels).toHaveLength(1);
     expect(built.collisionSolidSpans).toEqual([{ t0: 0, t1: built.length }]);
@@ -68,14 +68,10 @@ describe('collision resolution', () => {
     const mamad = getRoom('mamad')!;
     const wallSpec = mamad.walls.find((w) => w.id === 'mamad_e')!; // solid, no opening
     const built = buildWall(wallSpec, mamad, houseModel.openings);
-    // mamad_e runs from (10.8,0) to (10.8,3.0); push a point from just west
-    // of it (inside mamad) toward the wall until it would clip through.
-    const insideNearWall = { x: 10.8 - 0.05, z: 1.5 };
+    const insideNearWall = { x: 11.2 - 0.05, z: 1.7 };
     const resolved = resolveCollision(insideNearWall, 0.28, [built]);
-    // Resolved point must stay on the mamad side (x < 10.8) and be pushed
-    // out by roughly thickness/2 + radius from the centerline.
-    expect(resolved.x).toBeLessThan(10.8);
-    expect(10.8 - resolved.x).toBeGreaterThanOrEqual(0.1 + 0.28 - 0.02);
+    expect(resolved.x).toBeLessThan(11.2);
+    expect(11.2 - resolved.x).toBeGreaterThanOrEqual(0.1 + 0.28 - 0.02);
   });
 
   it('does not obstruct a door gap (open_threshold stays walkable)', () => {

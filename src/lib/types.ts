@@ -7,20 +7,18 @@
 export type ConfidenceLevel = 'high' | 'medium-high' | 'medium' | 'low';
 
 export type RoomId =
+  | 'terrace_nw'
   | 'stair_landing'
-  | 'balcony_service'
-  | 'entry_hall'
   | 'living'
+  | 'entry_hall'
   | 'kitchen'
   | 'dining'
-  | 'terrace_social'
   | 'mamad'
-  | 'twin_bed'
-  | 'hall_south'
-  | 'bathroom_main'
-  | 'bathroom_ensuite'
-  | 'wc_guest'
-  | 'parents_bed';
+  | 'corridor'
+  | 'bath_family'
+  | 'wc'
+  | 'bedroom_twin'
+  | 'bedroom_parents';
 
 /** A 2D point in meters, on the house's horizontal (floor) plane. */
 export interface Vec2 {
@@ -93,9 +91,16 @@ export interface OpeningDef {
 
 export interface StructuralFeature {
   id: string;
-  kind: 'column';
+  kind: 'column' | 'pier' | 'low_wall';
   position: Vec2;
+  /** Round columns only. Square piers and low walls use `sizeM`/`thicknessM`. */
   radiusM: number;
+  /** Plan side length of a square pier, or span of a low wall, meters. */
+  sizeM?: number;
+  /** Low walls only: depth across the span, meters. */
+  thicknessM?: number;
+  /** Low walls only: radians, 0 = span runs along +x. */
+  rotationRad?: number;
   heightM: number;
   roomId: RoomId;
 }

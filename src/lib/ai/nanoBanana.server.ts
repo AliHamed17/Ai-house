@@ -3,6 +3,7 @@ import { GoogleGenAI } from '@google/genai';
 import type { GenerationInput, GenerationJob, MediaGenerationProvider } from '@/lib/types';
 import { decodeJobId, encodeJobId } from './jobId';
 import { readPublicFileAsBase64 } from './publicAsset.server';
+import { getGeneratedImage, putGeneratedImage } from './resultStore.server';
 import { withTimeout } from './resilience.server';
 
 /**
@@ -13,16 +14,20 @@ import { withTimeout } from './resilience.server';
  */
 const NANO_BANANA_MODEL = process.env.NANO_BANANA_MODEL || 'gemini-3-pro-image';
 
+function apiKey(): string | undefined {
+  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+}
+
 function getClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured. Nano Banana generation is unavailable in this environment.');
+  const key = apiKey();
+  if (!key) {
+    throw new Error('Set GEMINI_API_KEY (or GOOGLE_API_KEY). Nano Banana generation is unavailable in this environment.');
   }
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenAI({ apiKey: key });
 }
 
 export function isNanoBananaConfigured(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return Boolean(apiKey());
 }
 
 /**
@@ -55,6 +60,7 @@ export const nanoBananaProvider: MediaGenerationProvider = {
     }
 
     const mimeType = imagePart.inlineData.mimeType || 'image/png';
+    const resultKey = putGeneratedImage(`data:${mimeType};base64,${imagePart.inlineData.data}`);
     const jobId = encodeJobId({
       provider: 'nano-banana',
       roomId: input.roomId,
@@ -62,22 +68,25 @@ export const nanoBananaProvider: MediaGenerationProvider = {
       styleVariant: input.styleVariant,
       prompt: input.prompt,
       createdAt: Date.now(),
-      resultDataUrl: `data:${mimeType};base64,${imagePart.inlineData.data}`,
+      resultKey,
     });
     return { jobId };
   },
 
   async status(jobId: string): Promise<GenerationJob> {
     const payload = decodeJobId(jobId);
+    const resultUrl = payload.resultKey ? getGeneratedImage(payload.resultKey) : undefined;
+    const expired = Boolean(payload.resultKey) && !resultUrl;
     return {
       jobId,
       provider: 'nano-banana',
       outputType: 'image',
       roomId: payload.roomId,
-      status: 'completed',
+      status: expired ? 'failed' : 'completed',
+      error: expired ? 'This generated image is no longer available. Please generate it again.' : undefined,
       createdAt: new Date(payload.createdAt).toISOString(),
       updatedAt: new Date().toISOString(),
-      resultUrl: payload.resultDataUrl,
+      resultUrl,
       meta: {
         model: NANO_BANANA_MODEL,
         styleVariant: payload.styleVariant,

@@ -8,13 +8,11 @@ const GALLERY_ROOMS: Array<keyof typeof roomEvidenceFrame> = [
   'stair_landing',
   'entry_hall',
   'living',
-  'terrace_social',
-  'bathroom_main',
-  'hall_south',
+  'bath_family',
+  'corridor',
   'mamad',
-  'twin_bed',
-  'bathroom_ensuite',
-  'parents_bed',
+  'bedroom_twin',
+  'bedroom_parents',
 ];
 
 export function EvidenceSection() {
@@ -53,7 +51,7 @@ export function EvidenceSection() {
                 className="group absolute inset-0 flex items-center justify-center"
                 aria-label="Play the site walkthrough video"
               >
-                <Image src="/evidence/frames/00-00-16_open-social-zone.jpg" alt="Walkthrough poster frame" fill sizes="360px" className="object-cover opacity-70" />
+                <Image src={roomEvidenceFrame.living.path} alt="Walkthrough poster frame" fill sizes="360px" className="object-cover opacity-70" />
                 <span className="relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-ivory/90 text-charcoal shadow-lg transition-transform group-hover:scale-105">
                   ▶
                 </span>

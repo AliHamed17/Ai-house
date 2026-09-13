@@ -4,8 +4,7 @@ import { useRef } from 'react';
 import { OrbitControls } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { useViewerStore } from '@/lib/store/viewerStore';
-
-const HOUSE_CENTER = { x: 7.9, z: 2.2 };
+import { houseBounds } from '@/lib/geometry/houseBounds';
 
 /** Orbit / "dollhouse" camera: rotate, pan, and zoom around the whole house. */
 export function OrbitDollhouseControls() {
@@ -16,9 +15,9 @@ export function OrbitDollhouseControls() {
     <OrbitControls
       ref={controlsRef}
       makeDefault
-      target={[HOUSE_CENTER.x, 1.2, HOUSE_CENTER.z]}
+      target={[houseBounds.center.x, 1.2, houseBounds.center.z]}
       minDistance={3}
-      maxDistance={28}
+      maxDistance={Math.max(28, houseBounds.width * 1.8)}
       minPolarAngle={0.05}
       maxPolarAngle={1.45}
       enableDamping={!reducedMotion}

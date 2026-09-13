@@ -56,7 +56,7 @@ describe('house model structural validation', () => {
   it('every room has a unique stable id matching the RoomId union', () => {
     const ids = houseModel.rooms.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.length).toBeGreaterThanOrEqual(14);
+    expect(ids.length).toBeGreaterThanOrEqual(12);
   });
 
   it('every opening references at least one room that exists', () => {

@@ -26,15 +26,21 @@ const PALETTE = {
   olive: '#73745F',
 };
 
+// Must stay in sync with every room id in src/data/house.ts — a missing entry
+// leaves the AI Studio pointing at a 404 in demo mode.
 const ROOMS = [
-  { id: 'stair_landing', label: 'Exterior Approach', tone: PALETTE.limestone },
+  { id: 'terrace_nw', label: 'North-West Terrace', tone: PALETTE.olive },
+  { id: 'stair_landing', label: 'Entry Stair', tone: PALETTE.limestone },
   { id: 'living', label: 'Living Room', tone: PALETTE.limestone },
+  { id: 'entry_hall', label: 'Entry Hall', tone: PALETTE.limestone },
   { id: 'kitchen', label: 'Kitchen', tone: PALETTE.limestone },
-  { id: 'dining', label: 'Dining Area', tone: PALETTE.limestone },
+  { id: 'dining', label: 'Dining Bay', tone: PALETTE.limestone },
   { id: 'mamad', label: 'MAMAD', tone: PALETTE.oak },
-  { id: 'twin_bed', label: 'Twin Bedroom', tone: PALETTE.oak },
-  { id: 'parents_bed', label: "Parents' Bedroom", tone: PALETTE.oak },
-  { id: 'bathroom_main', label: 'Main Bathroom', tone: '#C9C1B4' },
+  { id: 'corridor', label: 'Bedroom Corridor', tone: PALETTE.taupe },
+  { id: 'bath_family', label: 'Family Shower', tone: '#C9C1B4' },
+  { id: 'wc', label: 'Guest WC', tone: '#C9C1B4' },
+  { id: 'bedroom_twin', label: 'Twin Bedroom', tone: PALETTE.oak },
+  { id: 'bedroom_parents', label: "Parents' Bedroom", tone: PALETTE.oak },
 ];
 
 function seededShapes(seed) {

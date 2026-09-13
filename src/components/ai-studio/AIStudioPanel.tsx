@@ -6,8 +6,9 @@ import { houseModel } from '@/data/house';
 import { materialVariants } from '@/data/materials';
 import { roomEvidenceFrame } from '@/data/evidenceFrames';
 import type { GenerationJob, GenerationOutputType, RoomId } from '@/lib/types';
+import { isPlayableVideo } from '@/lib/media';
 
-const VIDEO_CAPABLE_ROOMS = new Set<RoomId>(['stair_landing', 'living', 'kitchen', 'dining', 'mamad', 'twin_bed', 'parents_bed', 'bathroom_main']);
+const VIDEO_CAPABLE_ROOMS = new Set<RoomId>(['stair_landing', 'living', 'kitchen', 'dining', 'mamad', 'bedroom_twin', 'bedroom_parents', 'bath_family']);
 
 const STATUS_COPY: Record<GenerationJob['status'], string> = {
   queued: 'Queued…',
@@ -18,7 +19,7 @@ const STATUS_COPY: Record<GenerationJob['status'], string> = {
 };
 
 function conceptImagePath(roomId: RoomId): string | null {
-  return VIDEO_CAPABLE_ROOMS.has(roomId) ? `/generated/concepts/${roomId}.svg` : null;
+  return `/generated/concepts/${roomId}.svg`;
 }
 
 interface LiveStatus {
@@ -296,17 +297,28 @@ export function AIStudioPanel() {
 
           {job.status === 'completed' && job.resultUrl && (
             <div className="mt-3">
-              <div className={`relative h-64 w-full overflow-hidden rounded-xl bg-limestone/30 ${job.outputType === 'video' ? 'animate-[kenburns_8s_ease-in-out_infinite_alternate]' : ''}`}>
-                <Image
-                  src={job.resultUrl}
-                  alt={`Generated concept for ${activeRoom.hotspotLabel}`}
-                  fill
-                  sizes="600px"
-                  className="object-cover"
-                  unoptimized={job.resultUrl.startsWith('data:') || job.resultUrl.endsWith('.svg')}
-                />
+              <div className={`relative h-64 w-full overflow-hidden rounded-xl bg-limestone/30 ${job.outputType === 'video' && !isPlayableVideo(job.resultUrl) ? 'animate-[kenburns_8s_ease-in-out_infinite_alternate]' : ''}`}>
+                {isPlayableVideo(job.resultUrl) ? (
+                  <video
+                    src={job.resultUrl}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    aria-label={`Generated cinematic clip for ${activeRoom.hotspotLabel}`}
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                ) : (
+                  <Image
+                    src={job.resultUrl}
+                    alt={`Generated concept for ${activeRoom.hotspotLabel}`}
+                    fill
+                    sizes="600px"
+                    className="object-cover"
+                    unoptimized={job.resultUrl.startsWith('data:') || job.resultUrl.endsWith('.svg')}
+                  />
+                )}
               </div>
-              {job.outputType === 'video' && (
+              {job.outputType === 'video' && !isPlayableVideo(job.resultUrl) && (
                 <p className="mt-2 text-xs italic text-charcoal/50">
                   Demo mode simulates the cinematic move with a gentle pan over the approved still; a live Higgsfield job
                   returns an actual video clip here instead.

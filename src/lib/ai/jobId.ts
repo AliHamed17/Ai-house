@@ -19,7 +19,7 @@ export interface JobIdPayload {
   simulate?: 'success' | 'failure' | 'moderated';
   higgsfieldRequestId?: string;
   higgsfieldStatusUrl?: string;
-  resultDataUrl?: string;
+  resultKey?: string;
   resultWidth?: number;
   resultHeight?: number;
 }

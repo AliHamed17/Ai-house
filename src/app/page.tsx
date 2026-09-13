@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { useCallback, useState } from 'react';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { Hero } from '@/components/landing/Hero';
+import { HouseJourney } from '@/components/journey/HouseJourney';
 import { EvidenceSection } from '@/components/landing/EvidenceSection';
 import { FloorPlanSection } from '@/components/landing/FloorPlanSection';
 import { RoomStories } from '@/components/landing/RoomStories';
@@ -44,6 +45,7 @@ export default function Home() {
       <SiteHeader onEnter3D={openExplorer} />
       <main className="flex-1">
         <Hero onEnter3D={openExplorer} />
+        <HouseJourney onEnterRoom={openExplorerAt} />
         <EvidenceSection />
         <FloorPlanSection onEnterRoom={openExplorerAt} />
         <RoomStories onEnterRoom={openExplorerAt} />

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F3EFE7" />
+      <stop offset="100%" stop-color="#C9C1B4" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#bg)" />
+  <rect x="16" y="16" width="768" height="568" fill="none" stroke="#4B4037" stroke-opacity="0.35" stroke-width="1.5" />
+  <rect x="395.3" y="359.4" width="211.6" height="89.9" rx="8.0" fill="#4B4037" opacity="0.10" />
+      <rect x="565.5" y="476.3" width="150.3" height="49.4" rx="8.8" fill="#4B4037" opacity="0.10" />
+      <rect x="553.5" y="283.9" width="96.3" height="103.1" rx="8.0" fill="#4B4037" opacity="0.10" />
+      <rect x="162.4" y="275.8" width="181.7" height="118.2" rx="8.1" fill="#4B4037" opacity="0.10" />
+      <rect x="187.1" y="400.5" width="98.3" height="120.6" rx="13.7" fill="#4B4037" opacity="0.10" />
+  <line x1="60" y1="240" x2="740" y2="240" stroke="#4B4037" stroke-opacity="0.25" stroke-width="1" />
+  <text x="400" y="150" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="40" fill="#24221F">Family Shower</text>
+  <text x="400" y="190" text-anchor="middle" font-family="Georgia, serif" font-size="17" font-style="italic" fill="#73745F">Warm-modern-luxury concept — placeholder</text>
+  <rect x="290" y="520" width="220" height="34" rx="17" fill="#24221F" opacity="0.85" />
+  <text x="400" y="543" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" letter-spacing="0.5" fill="#F3EFE7">DEMO MODE — NOT AI-GENERATED</text>
+</svg>

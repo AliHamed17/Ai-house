@@ -9,63 +9,130 @@ are available; nothing else needs to change, since the 3D model, floor plan,
 minimap, and AI prompts are all derived from that one file.
 
 See `analysis/house-evidence.json` for the full machine-readable version of
-this list (with per-item confidence levels and source notes), and
-`Ali_House_Evidence_Interior_Design_Brief.md` for the original interpretation
-this project was built from.
+this list, including the 14 corrections applied when the model was rebuilt.
+
+## Owner corrections applied
+
+The map below was rebuilt from the drawing and the walkthrough, then corrected
+on site by the owner. Three rooms the drawing implies **do not exist** in the
+built house and have been deleted:
+
+- **South terrace** — not built. The dining bay's south wall is exterior glazing.
+- **MAMAD entry recess** — not built. The protected door opens straight onto the
+  corridor, which is now a plain rectangle.
+- **Second shower room** — not built. The plan's two compartments (170 and 150)
+  are one shower room, and its only door opens off the parents' bedroom.
+
+Three more corrections changed how the open plan works:
+
+- The living room is **open to the kitchen**, separated only by a single
+  **0.50 x 0.50 m reinforced pier running floor to ceiling** at the west end,
+  where the facade steps 50 cm. It is modelled as a square structural pier
+  (`pier_living_kitchen`), not as a wall and not as a round column.
+- The dining bay is **part of the kitchen volume** — one continuous space, no
+  dividing wall.
+- The guest WC has **two doors**, one from the entry hall and one from the
+  dining bay.
+
+## What the model is
+
+A **15.00 m × 8.72 m east-west bar**, aspect 1.72:1, plus a north terrace and
+stair strip. Twelve rooms. Both of the architect's dimension chains
+close exactly on those figures:
+
+- across the top: `760 + 740 = 1500`
+- down the centre: `30 + 300 + 20 + 100 + 20 + 137 + 10 + 235 + 20 = 872`
+
+Coordinates are metres, `+x` east, `+z` south, origin at the west outer wall
+face by the north outer face of the east block. Room polygons meet at
+interior wall **centrelines** and exterior wall **outer faces**, so each
+polygon is larger than its printed clear dimension by 0.05 m per partition and
+0.20 m per exterior wall. `dimensions` on each room carries the printed clear
+value; `dimensionSource` says where it came from.
+
+## Reading the plan photograph
+
+The sheet is a photo of paper and is **globally bowed** — long straight lines
+curve, including the dimension chains themselves. Curvature is camera
+distortion, not drawn geometry. The previous model encoded a 1.30 m chamfered
+"curved facade corner" (`LIVING_CHAMFER_M`) that was purely this artefact; the
+living room's north-west corner is square. When a line looks bent, check
+whether every other line on the sheet bends with it.
+
+The architect's own drawing carries roughly 5% internal inconsistency in the
+west half: the mid horizontal chain sums 1506 against a printed 1500, and
+`232 + 517` sums 749 against a printed 760. The model absorbs that slack in
+the entry hall rather than forcing closure.
 
 ## Most urgent to confirm
 
-1. **Ceiling height (`CEILING_HEIGHT_M` in `src/data/house.ts`, currently
-   2.70 m).** Not reliably shown in either source. Every room's wall height,
-   door/window proportions, and camera framing depend on this single
-   constant — confirming it first has the highest leverage.
-2. **Overall building envelope.** The plan's uncertain long dimension
-   strings (~9.04 m / 11.70 m / 15.00 m) were not confidently traced to
-   specific endpoints. The modeled house is roughly 15.2 m × 15.4 m
-   (bounding box across all rooms in `src/data/house.ts`); the 15.00 m
-   string is the closest loose match but was not verified.
-3. **Entry hall and private-corridor footprints** (`entry_hall`,
-   `hall_south` in `src/data/house.ts`). These circulation spaces were sized
-   from adjacency and typical clearances, not from a legible plan dimension.
-4. **Guest WC and parents' en-suite dimensions** (`wc_guest`,
-   `bathroom_ensuite`). Approximate, adjacency-based; the plan crop supplied
-   did not show legible dimensions for these two rooms.
-5. **Bathroom door relationships.** Whether the parents' bedroom has a direct
-   en-suite connection (vs. hall-only access to `bathroom_ensuite`) is not
-   confirmed. The model currently connects `bathroom_ensuite` to
-   `hall_south` only.
+1. **Ceiling height** (`CEILING_HEIGHT_M`, currently 2.70 m). Not reliably
+   shown in either source. Every wall height, door/window proportion, and
+   camera framing depends on this one constant — highest leverage to confirm.
+   The floor is marked `+6.20 / 18.52` while site levels around it read
+   12.03–12.19 m, and the video never shows an interior stair or a second
+   storey, so the storey context is unresolved.
+2. **Guest WC width** (`wc`). The one compartment the architect never
+   dimensioned — the lower chain reads `232 | 10 | blank | 10 | 170 | 10 | 150`.
+   ~100 cm clear is a scaled measurement against the adjacent printed values,
+   not a transcription.
+3. **Corridor length** (`corridor`, 3.07 m east-west). Not dimensioned. It is
+   derived from two dimensioned ends rather than measured, so it inherits the
+   accumulated chain error.
+4. **East facade step** (`bedroom_parents`). 0.68 m by chain arithmetic but
+   0.84 m by naive pixel differencing. The chain value is kept because it
+   closes; a site measurement would settle it.
 
 ## Everything else carried as an assumption
 
+- **Which bedroom is which.** `bedroom_parents` is the room filmed at
+  t=43–46.8 s solely because the camera walks from it straight into the shower
+  room, and the shower room has exactly one door. Both rooms are corner rooms
+  with windows on adjacent walls, and every east window is blown out in the
+  video, so the imagery alone does not disambiguate them.
 - **Wall thickness** (`WALL_THICKNESS_M`, 0.20 m) — matches the plan's
-  repeated "20" (cm) markings at wall segments, but was not independently
-  verified.
-- **Living-room facade chamfer** (`LIVING_CHAMFER_M`, ~1.30 m) — stands in
-  for the plan's drawn curved/angled exterior corner. The true curve radius
-  is not legible on the perspective-distorted photograph.
-- **Terrace/loggia dimensions** (`terrace_social`) — inferred only from the
-  walkthrough video (00:20–00:25), not dimensioned on the legible plan area.
-- **Balcony/service area use** (`balcony_service`) — leisure vs.
-  laundry/service use is unconfirmed; kept configurable per the brief.
-- **Door swing directions and hinge sides** — not modeled; only opening
+  repeated "20" (cm) markings, but was not independently verified. Interior
+  partitions in the wet block are drawn at 10 cm.
+- **Shower room width** (`bath_family`, 3.30 m clear) — the plan draws two
+  compartments here; the owner confirms one room. The merged clear width is
+  derived from the two printed values plus the removed partition.
+- **Structural columns** — ten round columns plus the owner-confirmed square
+  living/kitchen pier, each traced to a discrete blue blob
+  on the plan and cross-checked against the walkthrough. The plan draws them
+  as rectangular piers and blades; the video reads several as rounded
+  rendered columns. The radii (0.18–0.22 m) are a rendering choice, not a
+  measurement. One round column with a spalled chip visible at t=55.4 s has no
+  counterpart anywhere on the plan.
+- **Dining bay depth** (`dining`, 2.82 m) — inferred from a drawn ~40 cm
+  facade step at the kitchen/dining line, not printed. The brief's claim that
+  dining shares the kitchen's 322 depth was checked and is wrong.
+- **Wet-room ventilation** — small high windows are modelled on the south
+  wall of each wet room from the walkthrough; the guest WC window is the least
+  supported of the three.
+- **Door swing directions and hinge sides** — not modelled; only opening
   position and width are represented (`src/data/house.ts:openings`).
-- **Red/blue wall-segment plan markings** — no legend was supplied, so no
-  structural (load-bearing vs. partition) distinction is encoded anywhere.
-- **Wet-room ventilation** (`wc_guest`, `bathroom_ensuite`) — modeled with no
-  window (assumed mechanical extraction); unconfirmed.
-- **Structural column position** (`structuralFeatures` in
-  `src/data/house.ts`) — placed to match its approximate position in the
-  walkthrough (00:12–00:20), not measured.
+- **True north** — unconfirmed. There is no unambiguous north arrow on the
+  sheet; the hatched circle at top right may be a rainwater gully rather than
+  a compass. All compass language in this project means up/down on the
+  drawing.
 
 ## Non-negotiable constraint (not an assumption)
 
-The `mamad` room is an Israeli protected room. Its door, window,
-ventilation, and required clearances are fixed in the data model
-(`isProtected: true` on the room and on its one door/window in
-`src/data/house.ts`) and are validated by
-`tests/unit/house-validation.test.ts`. No material variant, lighting mode,
-or AI-generated concept in this project alters them — material variants only
-ever change floor/wall colors (`src/data/materials.ts`), never geometry.
+The `mamad` room is an Israeli protected room. Its door, window, ventilation,
+and required clearances are fixed in the data model (`isProtected: true` on
+the room and on its one door and one window in `src/data/house.ts`) and are
+validated by `tests/unit/house-validation.test.ts` and
+`tests/unit/house-geometry-invariants.test.ts`.
+
+It has **exactly one door, in its south wall**, opening onto the corridor. It
+has **no opening onto the entry hall** — an earlier model placed the door in the
+west wall, which is drawn as unbroken reinforced concrete. No material variant,
+lighting mode, or AI-generated concept alters any of this; material variants
+only ever change floor/wall colours (`src/data/materials.ts`), never geometry.
+
+The generated interior concepts in `public/generated/interiors/` are prompted to
+hold the blast door, blast window and filtration penetration fixed and visible.
+Treat any render that hides or restyles them as invalid.
 
 ## Remaining limitation
 

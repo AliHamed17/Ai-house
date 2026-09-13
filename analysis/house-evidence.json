@@ -1,267 +1,801 @@
 {
-  "$schema": "https://ai-house.local/schemas/house-evidence.schema.json",
-  "generatedBy": "Claude Code — interactive-3d-house build",
-  "generatedAt": "2026-09-05",
-  "units": "meters",
-  "notice": "Interpretation of one photographed floor-plan drawing and one 61.37s handheld walkthrough video of an unfinished house. Suitable for concept design and a web prototype only. This is NOT a construction survey. All dimensions are approximate until verified against the architect's original CAD/PDF plan and an on-site measurement.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "generatedBy": "plan+walkthrough reconciliation, adversarially verified",
+  "units": "meters unless a printed value is quoted in cm",
+  "notice": "Rebuilt from scratch after the previous model was found to describe a 15.73 x 15.35 m near-square with a detached stair tower, two transposed bedrooms and a fabricated corridor. The building is a 15.00 x 8.72 m east-west bar. Both of the architect's dimension chains close exactly on those figures: 760+740=1500 across, and 30+300+20+100+20+137+10+235+20=872 down. Where the plan and the video conflict on topology the video wins; where they conflict on metric dimensions the plan wins. Subsequently corrected by the owner on site: the south terrace, the MAMAD entry recess and the second shower room do not exist; the living/kitchen/dining volume is fully open apart from a 0.5 m stub; the guest WC opens from both the entry hall and the dining bay. See ownerCorrections.",
+  "frame": {
+    "origin": "west outer wall face (x=0) by the north outer face of the east block (z=0)",
+    "axes": "+x east, +z south, 1 unit = 1 m",
+    "tiling": "polygons meet at interior wall centrelines and exterior wall outer faces",
+    "enclosedExtents": {
+      "x": [
+        0,
+        15.0
+      ],
+      "z": [
+        0,
+        8.72
+      ]
+    }
+  },
   "sources": [
     {
       "id": "floorplan",
       "filename": "Ali_House_Floorplan_Cleaned.jpg",
-      "mediaType": "image/jpeg",
       "resolution": "2060x1800",
-      "description": "Rotated, cropped, contrast-enhanced photograph of the architect's floor-plan drawing. Contains Hebrew room labels, printed dimension strings (centimeters), red/blue wall-segment markings of unconfirmed meaning, and a level/spot-height marker (+6.20 / 18.52)."
+      "role": "controls metric dimensions",
+      "caution": "Photograph of paper: globally bowed. Long straight lines curve, including the dimension chains. Curvature is camera distortion, not drawn geometry - the previously modelled 1.3 m chamfered living-room facade was this artefact."
     },
     {
       "id": "walkthrough",
       "filename": "Ali_House_Walkthrough_Claude_Under30MB.mp4",
-      "mediaType": "video/mp4",
       "duration": "61.37s",
       "resolution": "512x910",
       "frameRate": 30,
-      "description": "Handheld portrait walkthrough of the unfinished house during active construction (plastered walls, incomplete floors/fixtures/joinery)."
+      "role": "controls topology, daylight and spatial character",
+      "extraction": "10 fps, every frame scored by Laplacian variance x tiled edge energy, sharpest frame kept per 0.5 s window: 123 frames."
     },
     {
-      "id": "evidence-brief",
-      "filename": "Ali_House_Evidence_Interior_Design_Brief.md",
-      "mediaType": "text/markdown",
-      "description": "Prepared interpretation reconciling the plan and video: room list, visual observations, dimension cautions, and warm-modern-luxury design direction."
-    },
-    {
-      "id": "master-prompt",
-      "filename": "Claude_Master_Prompt_Interactive_3D_House.md",
-      "mediaType": "text/markdown",
-      "description": "Authoritative build specification for the interactive 3D house web experience."
+      "id": "whatsapp-videos",
+      "filename": "WhatsApp Video 2026-09-05 at 21.51.37(.1).mp4",
+      "role": "not used",
+      "caution": "The two files supplied as 'my house' and 'the reference reel' are byte-identical (MD5 BB68FBFEB048B52CCCF77CE62E98D6B4, 18.04s, 384x848). Neither is the house walkthrough."
     }
   ],
+  "envelope": {
+    "width": 15,
+    "depth": 8.72
+  },
   "rooms": [
     {
+      "id": "terrace_nw",
+      "nameEn": "North-West Terrace",
+      "floorPolygon": [
+        [
+          0.0,
+          -0.93
+        ],
+        [
+          2.32,
+          -0.93
+        ],
+        [
+          2.32,
+          1.14
+        ],
+        [
+          0.0,
+          1.14
+        ]
+      ],
+      "dimensionsM": {
+        "width": 2.32,
+        "depth": 2.07
+      },
+      "dimensionSource": "plan labels 232 / 207 (cm)",
+      "connectedRoomIds": [
+        "living"
+      ]
+    },
+    {
       "id": "stair_landing",
-      "nameEn": "Exterior approach & stair",
-      "nameHe": null,
-      "function": "exterior circulation",
-      "dimensions": { "widthM": 2.07, "depthM": 3.18 },
-      "dimensionSource": "assumption — not dimensioned on plan; derived from video framing only",
-      "confidence": "low",
-      "connectedRoomIds": ["balcony_service"],
-      "visibleFeatures": ["textured render exterior wall", "stone/tile steps", "upper landing", "neighborhood + hillside view"],
-      "unresolvedQuestions": ["Exact stair rise/run and total flight length are not legible in either source."]
-    },
-    {
-      "id": "balcony_service",
-      "nameEn": "Balcony / service landing",
-      "nameHe": "מרפסת",
-      "function": "small exterior balcony or service area beside the stair; exact use configurable",
-      "dimensions": { "widthM": 2.07, "depthM": 2.32 },
-      "dimensionSource": "plan labels 207 / 232 (cm) near the stair",
-      "confidence": "high",
-      "connectedRoomIds": ["stair_landing", "entry_hall"],
-      "visibleFeatures": ["adjoins exterior stair", "compact footprint"],
-      "unresolvedQuestions": ["Leisure vs. laundry/service use is not confirmed; kept configurable per the brief."]
-    },
-    {
-      "id": "entry_hall",
-      "nameEn": "Entry & central hall",
-      "nameHe": null,
-      "function": "arrival circulation linking exterior, social zone, MAMAD, and private wing",
-      "dimensions": { "widthM": 2.40, "depthM": 3.00 },
-      "dimensionSource": "assumption — circulation footprint inferred from adjacency, not individually dimensioned on the plan",
-      "confidence": "low",
-      "connectedRoomIds": ["balcony_service", "living", "mamad", "hall_south"],
-      "visibleFeatures": ["threshold into open social zone", "wet-room doorway visible in walkthrough 00:06-00:12"],
-      "unresolvedQuestions": []
+      "nameEn": "Exterior Stair & Covered Entry Landing",
+      "floorPolygon": [
+        [
+          2.32,
+          -0.91
+        ],
+        [
+          7.5,
+          -0.91
+        ],
+        [
+          7.5,
+          1.14
+        ],
+        [
+          2.32,
+          1.14
+        ]
+      ],
+      "dimensionsM": {
+        "width": 5.17,
+        "depth": 2.05
+      },
+      "dimensionSource": "plan labels 517 / 205 (cm)",
+      "connectedRoomIds": [
+        "entry_hall"
+      ]
     },
     {
       "id": "living",
-      "nameEn": "Living room",
-      "nameHe": "סלון",
-      "function": "principal lounge, open to kitchen and dining",
-      "dimensions": { "widthM": 4.67, "depthM": 3.96 },
+      "nameEn": "Living Room",
+      "floorPolygon": [
+        [
+          0.0,
+          1.14
+        ],
+        [
+          4.92,
+          1.14
+        ],
+        [
+          4.92,
+          5.35
+        ],
+        [
+          0.0,
+          5.35
+        ]
+      ],
+      "dimensionsM": {
+        "width": 4.67,
+        "depth": 3.96
+      },
       "dimensionSource": "plan labels 467 / 396 (cm)",
-      "confidence": "high",
-      "connectedRoomIds": ["entry_hall", "kitchen", "dining"],
-      "visibleFeatures": ["curved/angled exterior facade corner", "multiple tall window openings", "sofa group drawn on plan", "structural column visible in walkthrough 00:12-00:20"],
-      "unresolvedQuestions": ["Exact facade curve radius is not legible on the perspective-distorted photograph; modeled as a configurable ~1.3 m chamfer, flagged approximate."]
+      "connectedRoomIds": [
+        "terrace_nw",
+        "entry_hall",
+        "kitchen",
+        "dining"
+      ]
+    },
+    {
+      "id": "entry_hall",
+      "nameEn": "Entry Hall & Central Circulation",
+      "floorPolygon": [
+        [
+          4.92,
+          1.14
+        ],
+        [
+          7.5,
+          1.14
+        ],
+        [
+          7.5,
+          6.12
+        ],
+        [
+          7.17,
+          6.12
+        ],
+        [
+          7.17,
+          6.92
+        ],
+        [
+          6.07,
+          6.92
+        ],
+        [
+          6.07,
+          5.35
+        ],
+        [
+          4.92,
+          5.35
+        ]
+      ],
+      "dimensionsM": {
+        "width": 2.43,
+        "depth": 3.96
+      },
+      "dimensionSource": "plan label 249 (cm) on the mid chain, less half the flanking walls",
+      "connectedRoomIds": [
+        "stair_landing",
+        "living",
+        "dining",
+        "corridor",
+        "wc"
+      ]
     },
     {
       "id": "kitchen",
       "nameEn": "Kitchen",
-      "nameHe": "מטבח",
-      "function": "open kitchen attached to the social space",
-      "dimensions": { "widthM": 3.10, "depthM": 3.22 },
-      "dimensionSource": "plan labels 322 / 300 (cm)",
-      "confidence": "high",
-      "connectedRoomIds": ["living", "dining", "terrace_social"],
-      "visibleFeatures": ["L-shaped counter outline", "double-sink symbol"],
-      "unresolvedQuestions": ["Island feasibility depends on clearances not confirmed by this evidence; drawn L-shaped logic preserved by default."]
+      "floorPolygon": [
+        [
+          0.5,
+          5.35
+        ],
+        [
+          3.7,
+          5.35
+        ],
+        [
+          3.7,
+          8.72
+        ],
+        [
+          0.5,
+          8.72
+        ]
+      ],
+      "dimensionsM": {
+        "width": 3.0,
+        "depth": 3.22
+      },
+      "dimensionSource": "plan labels 300 / 322 (cm)",
+      "connectedRoomIds": [
+        "living",
+        "dining"
+      ]
     },
     {
       "id": "dining",
-      "nameEn": "Dining area",
-      "nameHe": null,
-      "function": "six-seat dining position, circulation hinge to private wing",
-      "dimensions": { "widthM": 1.80, "depthM": 3.30 },
-      "dimensionSource": "plan labels 232 / 300 (cm) near the oval table; room-footprint boundary is an assumption since living/kitchen/dining are one open-plan volume",
-      "confidence": "medium",
-      "connectedRoomIds": ["living", "kitchen", "terrace_social"],
-      "visibleFeatures": ["oval/round 6-seat table drawn on plan"],
-      "unresolvedQuestions": []
-    },
-    {
-      "id": "terrace_social",
-      "nameEn": "Covered terrace / loggia",
-      "nameHe": "מרפסת",
-      "function": "covered exterior space opening off the social zone",
-      "dimensions": { "widthM": 4.90, "depthM": 2.20 },
-      "dimensionSource": "assumption — inferred from walkthrough 00:20-00:25 (parapet-height openings, covered recess); not dimensioned on the legible plan area",
-      "confidence": "low",
-      "connectedRoomIds": ["kitchen", "dining"],
-      "visibleFeatures": ["covered recess/loggia", "parapet-height openings", "neighborhood view"],
-      "unresolvedQuestions": ["Exact depth and parapet height are not confirmed."]
+      "nameEn": "Dining Bay",
+      "floorPolygon": [
+        [
+          3.7,
+          5.35
+        ],
+        [
+          6.07,
+          5.35
+        ],
+        [
+          6.07,
+          8.32
+        ],
+        [
+          3.7,
+          8.32
+        ]
+      ],
+      "dimensionsM": {
+        "width": 2.32,
+        "depth": 2.82
+      },
+      "dimensionSource": "plan label 232 (cm); depth inferred — the glazed south wall sits ~40 cm north of the kitchen's",
+      "connectedRoomIds": [
+        "living",
+        "kitchen",
+        "entry_hall",
+        "wc"
+      ]
     },
     {
       "id": "mamad",
-      "nameEn": "MAMAD (protected room)",
-      "nameHe": "מ.מ.ד",
-      "function": "Israeli protected room; usable as bedroom, office, or flexible guest room without altering protected elements",
-      "dimensions": { "widthM": 3.50, "depthM": 3.00 },
-      "dimensionSource": "plan labels 350 / 300 (cm); reinforced perimeter indicated on plan",
-      "confidence": "high",
-      "connectedRoomIds": ["entry_hall"],
-      "visibleFeatures": ["single protected door to entry_hall only", "single protected window on exterior wall"],
-      "unresolvedQuestions": [],
-      "protected": true
+      "nameEn": "MAMAD (Protected Room)",
+      "floorPolygon": [
+        [
+          7.5,
+          0.0
+        ],
+        [
+          11.2,
+          0.0
+        ],
+        [
+          11.2,
+          3.4
+        ],
+        [
+          7.5,
+          3.4
+        ]
+      ],
+      "dimensionsM": {
+        "width": 3.5,
+        "depth": 3.0
+      },
+      "dimensionSource": "plan labels 350 / 300 (cm)",
+      "connectedRoomIds": [
+        "corridor"
+      ]
     },
     {
-      "id": "twin_bed",
-      "nameEn": "Twin / children's bedroom",
-      "nameHe": "ח. שינה",
-      "function": "children's, siblings', or flexible guest bedroom",
-      "dimensions": { "widthM": 4.39, "depthM": 3.50 },
-      "dimensionSource": "plan labels 439 / 350 (cm)",
-      "confidence": "high",
-      "connectedRoomIds": ["hall_south"],
-      "visibleFeatures": ["two single beds drawn on plan", "view-facing window in walkthrough 00:42-00:47"],
-      "unresolvedQuestions": []
+      "id": "corridor",
+      "nameEn": "Bedroom Corridor",
+      "floorPolygon": [
+        [
+          7.5,
+          3.4
+        ],
+        [
+          10.57,
+          3.4
+        ],
+        [
+          10.57,
+          6.12
+        ],
+        [
+          7.5,
+          6.12
+        ]
+      ],
+      "dimensionsM": {
+        "width": 3.07,
+        "depth": 2.72
+      },
+      "dimensionSource": "plan label 137 (cm) at the wet-block wall; length derived between two dimensioned walls",
+      "connectedRoomIds": [
+        "entry_hall",
+        "mamad",
+        "bedroom_twin",
+        "bedroom_parents"
+      ]
     },
     {
-      "id": "hall_south",
-      "nameEn": "Private corridor",
-      "nameHe": null,
-      "function": "circulation connecting the bedrooms and wet rooms",
-      "dimensions": { "widthM": 5.90, "depthM": 3.35 },
-      "dimensionSource": "assumption — corridor footprint inferred from adjacency, not individually dimensioned on the plan",
-      "confidence": "low",
-      "connectedRoomIds": ["entry_hall", "twin_bed", "bathroom_main", "bathroom_ensuite", "wc_guest", "parents_bed"],
-      "visibleFeatures": ["junction of unfinished door openings visible in walkthrough 00:33-00:38"],
-      "unresolvedQuestions": []
+      "id": "bath_family",
+      "nameEn": "Family Shower Room",
+      "floorPolygon": [
+        [
+          7.17,
+          6.12
+        ],
+        [
+          10.57,
+          6.12
+        ],
+        [
+          10.57,
+          8.72
+        ],
+        [
+          7.17,
+          8.72
+        ]
+      ],
+      "dimensionsM": {
+        "width": 3.3,
+        "depth": 2.35
+      },
+      "dimensionSource": "plan labels 170 + 150 (cm) merged into one room per owner correction; depth 235",
+      "connectedRoomIds": [
+        "bedroom_parents"
+      ]
     },
     {
-      "id": "bathroom_main",
-      "nameEn": "Main bathroom / shower room",
-      "nameHe": "מקלחת",
-      "function": "shared full bathroom",
-      "dimensions": { "widthM": 1.50, "depthM": 2.35 },
-      "dimensionSource": "plan label ~2.35 x 1.50 (m) per evidence brief interpretation",
-      "confidence": "medium-high",
-      "connectedRoomIds": ["hall_south"],
-      "visibleFeatures": ["toilet, basin, shower/bath fixtures drawn on plan", "dark waterproofing visible in walkthrough 00:25-00:33"],
-      "unresolvedQuestions": ["Exact door swing and fixture layout to be confirmed on site."],
-      "isWetRoom": true
-    },
-    {
-      "id": "bathroom_ensuite",
-      "nameEn": "Parents' en-suite shower room",
-      "nameHe": "מקלחת",
-      "function": "probable en-suite bathroom serving the parents' bedroom",
-      "dimensions": { "widthM": 1.10, "depthM": 1.50 },
-      "dimensionSource": "assumption — adjacency-based; exact dimensions not legible on the supplied plan crop",
-      "confidence": "medium",
-      "connectedRoomIds": ["hall_south"],
-      "visibleFeatures": ["second waterproofed wet area visible in walkthrough 00:47-00:51"],
-      "unresolvedQuestions": ["Direct en-suite connection to parents_bed vs. hall access only is not confirmed; modeled with hall access only until confirmed."],
-      "isWetRoom": true
-    },
-    {
-      "id": "wc_guest",
+      "id": "wc",
       "nameEn": "Guest WC",
-      "nameHe": null,
-      "function": "separate powder room",
-      "dimensions": { "widthM": 0.90, "depthM": 1.20 },
-      "dimensionSource": "assumption — adjacency-based; exact dimensions not legible on the supplied plan crop",
-      "confidence": "medium",
-      "connectedRoomIds": ["hall_south"],
-      "visibleFeatures": ["small WC compartment opens near social circulation"],
-      "unresolvedQuestions": [],
-      "isWetRoom": true
+      "floorPolygon": [
+        [
+          6.07,
+          6.92
+        ],
+        [
+          7.17,
+          6.92
+        ],
+        [
+          7.17,
+          8.72
+        ],
+        [
+          6.07,
+          8.72
+        ]
+      ],
+      "dimensionsM": {
+        "width": 1.0,
+        "depth": 1.55
+      },
+      "dimensionSource": "scaled from plan — the one compartment the architect never dimensioned",
+      "connectedRoomIds": [
+        "entry_hall",
+        "dining"
+      ]
     },
     {
-      "id": "parents_bed",
-      "nameEn": "Parents' bedroom",
-      "nameHe": "ח. הורים",
-      "function": "main bedroom",
-      "dimensions": { "widthM": 3.83, "depthM": 3.50 },
-      "dimensionSource": "plan labels 383 / 350 (cm)",
-      "confidence": "high",
-      "connectedRoomIds": ["hall_south"],
-      "visibleFeatures": ["double bed drawn on plan", "construction bags/materials and window visible in walkthrough 00:51-00:57"],
-      "unresolvedQuestions": ["Bathroom door relationship (direct en-suite vs. hall-only access) not confirmed from this evidence."]
+      "id": "bedroom_twin",
+      "nameEn": "Twin / Children's Bedroom",
+      "floorPolygon": [
+        [
+          11.2,
+          0.0
+        ],
+        [
+          15.0,
+          0.0
+        ],
+        [
+          15.0,
+          4.6
+        ],
+        [
+          10.57,
+          4.6
+        ],
+        [
+          10.57,
+          3.4
+        ],
+        [
+          11.2,
+          3.4
+        ]
+      ],
+      "dimensionsM": {
+        "width": 3.5,
+        "depth": 4.39
+      },
+      "dimensionSource": "plan labels 350 (E-W) / 439 (N-S) (cm)",
+      "connectedRoomIds": [
+        "corridor"
+      ]
+    },
+    {
+      "id": "bedroom_parents",
+      "nameEn": "Parents' Bedroom",
+      "floorPolygon": [
+        [
+          10.57,
+          4.6
+        ],
+        [
+          14.32,
+          4.6
+        ],
+        [
+          14.32,
+          8.72
+        ],
+        [
+          10.57,
+          8.72
+        ]
+      ],
+      "dimensionsM": {
+        "width": 3.5,
+        "depth": 3.83
+      },
+      "dimensionSource": "plan labels 350 (E-W) / 383 (N-S) (cm)",
+      "connectedRoomIds": [
+        "corridor",
+        "bath_family"
+      ]
     }
   ],
-  "openings": [
-    { "id": "door_stair_balcony", "kind": "door", "roomA": "stair_landing", "roomB": "balcony_service", "widthM": 1.20, "confidence": "low" },
-    { "id": "door_balcony_entry", "kind": "door", "roomA": "balcony_service", "roomB": "entry_hall", "widthM": 1.00, "confidence": "medium" },
-    { "id": "opening_entry_living", "kind": "open_threshold", "roomA": "entry_hall", "roomB": "living", "widthM": 1.60, "confidence": "medium" },
-    { "id": "door_entry_mamad", "kind": "door", "roomA": "entry_hall", "roomB": "mamad", "widthM": 1.00, "confidence": "high", "protected": true, "note": "MAMAD protected door — never remove, resize, or relocate." },
-    { "id": "opening_entry_hallsouth", "kind": "open_threshold", "roomA": "entry_hall", "roomB": "hall_south", "widthM": 1.50, "confidence": "low" },
-    { "id": "door_hallsouth_twin", "kind": "door", "roomA": "hall_south", "roomB": "twin_bed", "widthM": 1.00, "confidence": "medium" },
-    { "id": "door_hallsouth_bathmain", "kind": "door", "roomA": "hall_south", "roomB": "bathroom_main", "widthM": 0.90, "confidence": "medium" },
-    { "id": "door_hallsouth_bathensuite", "kind": "door", "roomA": "hall_south", "roomB": "bathroom_ensuite", "widthM": 0.90, "confidence": "low" },
-    { "id": "door_hallsouth_wcguest", "kind": "door", "roomA": "hall_south", "roomB": "wc_guest", "widthM": 0.80, "confidence": "low" },
-    { "id": "door_hallsouth_parents", "kind": "door", "roomA": "hall_south", "roomB": "parents_bed", "widthM": 1.00, "confidence": "medium" },
-    { "id": "opening_living_kitchen", "kind": "open_threshold", "roomA": "living", "roomB": "kitchen", "widthM": 3.10, "confidence": "high", "note": "Open social zone — no dividing wall, matches evidence of one continuous room." },
-    { "id": "opening_kitchen_dining", "kind": "open_threshold", "roomA": "kitchen", "roomB": "dining", "widthM": 3.30, "confidence": "medium" },
-    { "id": "opening_living_dining", "kind": "open_threshold", "roomA": "living", "roomB": "dining", "widthM": 1.80, "confidence": "medium" },
-    { "id": "exterior_opening_social_terrace", "kind": "exterior_opening", "roomA": "kitchen", "roomB": "terrace_social", "widthM": 4.00, "confidence": "low", "note": "Represents the large opening toward the covered exterior space seen at 00:20-00:25." },
-    { "id": "window_living_1", "kind": "window", "roomId": "living", "widthM": 1.20, "sillM": 0.40, "headM": 2.30, "confidence": "medium" },
-    { "id": "window_living_2", "kind": "window", "roomId": "living", "widthM": 1.20, "sillM": 0.40, "headM": 2.30, "confidence": "medium" },
-    { "id": "window_kitchen_1", "kind": "window", "roomId": "kitchen", "widthM": 1.00, "sillM": 1.00, "headM": 2.10, "confidence": "low" },
-    { "id": "window_mamad_1", "kind": "window", "roomId": "mamad", "widthM": 1.00, "sillM": 1.40, "headM": 1.90, "confidence": "medium", "protected": true, "note": "MAMAD protected window — never remove, resize, or relocate." },
-    { "id": "window_twin_1", "kind": "window", "roomId": "twin_bed", "widthM": 1.20, "sillM": 0.90, "headM": 2.10, "confidence": "medium" },
-    { "id": "window_twin_2", "kind": "window", "roomId": "twin_bed", "widthM": 1.20, "sillM": 0.90, "headM": 2.10, "confidence": "low" },
-    { "id": "window_parents_1", "kind": "window", "roomId": "parents_bed", "widthM": 1.10, "sillM": 0.90, "headM": 2.10, "confidence": "medium" },
-    { "id": "window_parents_2", "kind": "window", "roomId": "parents_bed", "widthM": 1.10, "sillM": 0.90, "headM": 2.10, "confidence": "low" },
-    { "id": "window_bathmain_1", "kind": "window", "roomId": "bathroom_main", "widthM": 0.60, "sillM": 1.50, "headM": 2.00, "confidence": "low" }
+  "structuralColumns": [
+    {
+      "x": 0.15,
+      "z": 1.35,
+      "radiusM": 0.2,
+      "evidence": "Blue RC pier at the living room's NW corner. Plan blue blob px (110-152, 453-504). Video t=12.6-13.6: the render-finished pier to the left of the first tall window."
+    },
+    {
+      "x": 0.1,
+      "z": 2.42,
+      "radiusM": 0.18,
+      "evidence": "Blue RC pier in the living-room west facade, between glazed bays 1 and 2. Plan blue blob px (104-132, 582-628). Video t=14.1-15.1."
+    },
+    {
+      "x": 0.1,
+      "z": 4.35,
+      "radiusM": 0.18,
+      "evidence": "Blue RC pier in the living-room west facade, between glazed bays 2 and 3. Plan blue blob px (101-129, 816-865). Video t=16.6-19.4, seen against the third roller-shutter recess."
+    },
+    {
+      "x": 0.32,
+      "z": 5.3,
+      "radiusM": 0.22,
+      "evidence": "L-shaped blue RC pier at the living room's SW corner, on the 50 cm facade step down to the kitchen. Plan blue blob px (95-200, 943-989). Video t=14.6: the projecting pier the small kitchen window sits behind."
+    },
+    {
+      "x": 4.6,
+      "z": 1.24,
+      "radiusM": 0.18,
+      "evidence": "Blue RC pier embedded in the north facade at the head of the living/entry fin wall. Plan blue blob px (656-705, 502-522). Video t=10.5, the jamb the camera passes on entering the salon."
+    },
+    {
+      "x": 0.22,
+      "z": -0.83,
+      "radiusM": 0.22,
+      "evidence": "Blue RC corner column at the NW terrace's outer corner. Plan blue blob px (112-168, 191-218). Video t=21.3-24.3: the rendered corner pier where the two perpendicular parapet bays meet."
+    },
+    {
+      "x": 3.46,
+      "z": -0.82,
+      "radiusM": 0.18,
+      "evidence": "Blue RC column in the stair landing's north parapet. Plan blue blob px (515-563, 247-270). Video t=4.5-5.0: the projecting pier on the covered landing beside the bare front-door opening."
+    },
+    {
+      "x": 0.62,
+      "z": 8.35,
+      "radiusM": 0.2,
+      "evidence": "Blue RC pier at the kitchen's SW corner. Plan blue blob px (160-191, 1313-1418)."
+    },
+    {
+      "x": 3.88,
+      "z": 8.27,
+      "radiusM": 0.2,
+      "evidence": "Blue RC pier at the kitchen/dining south-facade step, forming the west jamb of the dining bay's glazed sliding panel. Plan blue blob px (557-603, 1338-1355), which lands at model x=3.71 — an independent confirmation that the kitchen/dining line is x=3.70."
+    },
+    {
+      "x": 14.88,
+      "z": 0.2,
+      "radiusM": 0.2,
+      "evidence": "Blue RC corner column at the twin bedroom's NE corner, the building's north-east extremity. Plan blue blob px (1946-1975, 330-374)."
+    },
+    {
+      "x": 14.22,
+      "z": 8.52,
+      "radiusM": 0.2,
+      "evidence": "Blue RC corner column at the parents' bedroom SE corner, on the stepped-in east facade. Plan blue blob px (1827-1846, 1366-1408)."
+    }
+  ],
+  "walkOrder": [
+    "stair_landing",
+    "entry_hall",
+    "living",
+    "kitchen",
+    "dining",
+    "living",
+    "terrace_nw",
+    "living",
+    "entry_hall",
+    "corridor",
+    "bath_family",
+    "corridor",
+    "mamad_recess",
+    "mamad",
+    "mamad_recess",
+    "corridor",
+    "bedroom_parents",
+    "bath_ensuite",
+    "bedroom_parents",
+    "corridor",
+    "bedroom_twin",
+    "corridor",
+    "entry_hall",
+    "living"
   ],
   "timeline": [
-    { "range": "00:00-00:06", "evidence": "Textured exterior wall, stone/tile steps, upper landing, unfinished exterior surface", "likelyRoom": "stair_landing", "confidence": "high" },
-    { "range": "00:06-00:12", "evidence": "Entry threshold, white-plastered walls, open doorway into a dark wet room, broad unfinished floor", "likelyRoom": "entry_hall", "confidence": "medium-high" },
-    { "range": "00:12-00:20", "evidence": "Large open room with structural column, several tall window/opening locations, ceiling wire points", "likelyRoom": "living", "confidence": "high" },
-    { "range": "00:20-00:25", "evidence": "Covered outdoor recess/loggia with parapet-height openings and neighborhood view", "likelyRoom": "terrace_social", "confidence": "medium" },
-    { "range": "00:25-00:33", "evidence": "Hall and a small dark waterproofed room with a window and service penetrations", "likelyRoom": "bathroom_main", "confidence": "high" },
-    { "range": "00:33-00:38", "evidence": "Junction of unfinished door openings and private corridor", "likelyRoom": "hall_south", "confidence": "high" },
-    { "range": "00:38-00:42", "evidence": "Empty room with one window and wall service opening", "likelyRoom": "mamad", "confidence": "medium" },
-    { "range": "00:42-00:47", "evidence": "A second room with a larger view-facing window, electrical points, and ceiling cable", "likelyRoom": "twin_bed", "confidence": "medium-high" },
-    { "range": "00:47-00:51", "evidence": "Another compact waterproofed wet area", "likelyRoom": "bathroom_ensuite", "confidence": "high" },
-    { "range": "00:51-00:57", "evidence": "Additional bedroom with window, construction bags/materials, and unfinished floor", "likelyRoom": "parents_bed", "confidence": "medium" },
-    { "range": "00:57-01:01", "evidence": "Return toward the main open area and structural column", "likelyRoom": "living", "confidence": "high" }
+    {
+      "range": "00:00-00:07.2",
+      "roomId": "stair_landing",
+      "evidence": "Exterior stone stair, two flights, arriving at the covered landing.",
+      "confidence": "high"
+    },
+    {
+      "range": "00:07.3-00:10.3",
+      "roomId": "entry_hall",
+      "evidence": "Front-door threshold, white plaster, dark wet-room opening ahead.",
+      "confidence": "medium-high"
+    },
+    {
+      "range": "00:10.5-00:20.8",
+      "roomId": "living",
+      "evidence": "Open social volume: three tall west windows, RC piers, rubble floor.",
+      "confidence": "high"
+    },
+    {
+      "range": "00:13.6-00:14.6",
+      "roomId": "kitchen",
+      "evidence": "Small recessed square window past the projecting south-west pier.",
+      "confidence": "medium"
+    },
+    {
+      "range": "00:18.6-00:20.8",
+      "roomId": "dining",
+      "evidence": "Glazed south sliding panel; dining reads continuous with living and kitchen.",
+      "confidence": "medium"
+    },
+    {
+      "range": "00:21.3-00:24.3",
+      "roomId": "terrace_nw",
+      "evidence": "L-corner balcony, two perpendicular parapet bays, rendered corner pier.",
+      "confidence": "medium-high"
+    },
+    {
+      "range": "00:25.8-00:27.2",
+      "roomId": "corridor",
+      "evidence": "Distribution band with two bare doorways and red electrical markers.",
+      "confidence": "high"
+    },
+    {
+      "range": "00:28.5-00:31.3",
+      "roomId": "bath_family",
+      "evidence": "Tanked wet room, bitumen to ~0.9 m, high square window in hard sun.",
+      "confidence": "high"
+    },
+    {
+      "range": "00:33.6-00:37.8",
+      "roomId": "mamad_recess",
+      "evidence": "Ceiling downstand, switch bank, metal MAMAD door frame ahead.",
+      "confidence": "medium"
+    },
+    {
+      "range": "00:38.6-00:41.6",
+      "roomId": "mamad",
+      "evidence": "Protected room interior: single glazed blast window, filtration sleeve.",
+      "confidence": "medium"
+    },
+    {
+      "range": "00:43.0-00:46.8",
+      "roomId": "bedroom_parents",
+      "evidence": "Corner bedroom, east and south openings; camera exits into the en-suite.",
+      "confidence": "medium-high"
+    },
+    {
+      "range": "00:47.3-00:49.6",
+      "roomId": "bath_ensuite",
+      "evidence": "Second tanked wet room, entered through the bedroom, not the corridor.",
+      "confidence": "medium-high"
+    },
+    {
+      "range": "00:50.4-00:51.9",
+      "roomId": "corridor",
+      "evidence": "Return through the corridor toward the second bedroom.",
+      "confidence": "high"
+    },
+    {
+      "range": "00:52.8-00:57.5",
+      "roomId": "bedroom_twin",
+      "evidence": "Corner bedroom, two openings on adjacent walls, material bags on the floor.",
+      "confidence": "medium-high"
+    },
+    {
+      "range": "00:58.4-01:01.2",
+      "roomId": "living",
+      "evidence": "Return to the social zone; two RC columns visible simultaneously.",
+      "confidence": "high"
+    }
   ],
-  "assumptions": [
-    { "id": "ceiling-height", "item": "Ceiling height", "value": "2.70 m for all interior rooms", "impact": "Affects wall/door proportions and camera eye-height framing throughout the 3D model.", "confidencePath": "src/data/house.ts:CEILING_HEIGHT_M", "confidence": "low" },
-    { "id": "wall-thickness", "item": "Wall thickness", "value": "0.20 m", "impact": "Affects room clear dimensions and door reveal depth.", "confidencePath": "src/data/house.ts:WALL_THICKNESS_M", "confidence": "medium", "note": "Matches the plan's repeated '20' (cm) markings at wall segments." },
-    { "id": "facade-curve", "item": "Living-room facade chamfer radius", "value": "~1.30 m corner cut standing in for the drawn curved/angled facade", "impact": "Visual massing of the living room's exterior corner only; does not affect adjacency.", "confidencePath": "src/data/house.ts:LIVING_CHAMFER_M", "confidence": "low" },
-    { "id": "entry-hall-corridor-dims", "item": "Entry hall and private-corridor footprints", "value": "Sized from circulation adjacency, not individually dimensioned on the legible plan crop", "impact": "Overall building envelope and hall widths are approximate.", "confidencePath": "src/data/house.ts (rooms: entry_hall, hall_south)", "confidence": "low" },
-    { "id": "ensuite-wc-dims", "item": "En-suite bathroom and guest WC dimensions", "value": "1.10 x 1.50 m and 0.90 x 1.20 m respectively", "impact": "Fixture layout and clearances in these two rooms are indicative only.", "confidencePath": "src/data/house.ts (rooms: bathroom_ensuite, wc_guest)", "confidence": "medium" },
-    { "id": "terrace-dims", "item": "Covered terrace/loggia dimensions", "value": "4.90 x 2.20 m", "impact": "Exterior massing and terrace furniture layout only; does not affect interior adjacency.", "confidencePath": "src/data/house.ts:rooms.terrace_social", "confidence": "low" },
-    { "id": "overall-envelope", "item": "Overall building envelope", "value": "~15.2 m (E-W) x ~15.4 m (N-S) bounding box", "impact": "Cross-checked loosely against the plan's uncertain long dimension strings (9.04 m / 11.70 m / 15.00 m); the 15.00 m string is the closest match but endpoints were not confirmed.", "confidencePath": "src/data/house.ts", "confidence": "low" },
-    { "id": "wall-color-legend", "item": "Red/blue wall-segment plan markings", "value": "Not interpreted; no legend was supplied", "impact": "None on the model — all walls are treated as structurally load-bearing-agnostic until an engineer's legend is supplied.", "confidencePath": "n/a", "confidence": "low" },
-    { "id": "door-swings", "item": "Door swing directions and exact hinge sides", "value": "Not modeled; only opening position and width are represented", "impact": "Cosmetic only in the 3D door meshes.", "confidencePath": "src/data/house.ts (openings)", "confidence": "low" },
-    { "id": "wetroom-ventilation", "item": "Guest WC and en-suite mechanical ventilation vs. window", "value": "Assumed mechanical extraction, no window modeled", "impact": "None on navigable geometry; a technical/regulatory detail for the real build.", "confidencePath": "src/data/house.ts:rooms.wc_guest,bathroom_ensuite", "confidence": "low" }
+  "corrections": [
+    {
+      "id": "C01",
+      "severity": "high",
+      "summary": "F01 — Footprint aspect ratio. The model's bounding box is 15.73 x 15.35 m (aspect 1.02:1, a near-square); the building is a 15.00 x 8.72 m enclosed bar, aspect 1.72:1 (~9.65 m including the north stair/terrace strip). This is why the website map reads as visually wrong.",
+      "previousValue": "Rooms span x 0 -> 15.73 (parents_bed line 429) and z -5.50 -> 9.85 (stair_landing line 58 / hall_south line 314).",
+      "correction": "Rebuild every polygon in the frame used above: origin = west outer wall face (x=0) x north outer face of the EAST block (z=0), +x east, +z south. Enclosed extents x 0 -> 15.00, z 0 -> 8.72; north exterior strip down to z = -0.93; south terrace to z = 11.02. Do NOT simply clip coordinates >15.00 or >8.72 — that degenerates polygons and orphans walls/openings/cameraSpawns. The dominant causes are the two transposed bedrooms (F04, F05), the reversed east-facade step (F05), the fabricated north-south corridor leg (F07) and the north-projecting stair tower (F02)."
+    },
+    {
+      "id": "C02",
+      "severity": "high",
+      "summary": "F02 — The staircase is modelled as a detached 2.07 x 3.18 m tower projecting 5.5 m north of the house and flagged 'not dimensioned on plan'. It IS dimensioned: 517 x 205 cm, and it lies east-west hard against the west block's north face.",
+      "previousValue": "stair_landing lines 55-58: dimensions {2.07, 3.18}, floorPolygon [v(4.9,-5.5), v(6.97,-5.5), v(6.97,-2.32), v(4.9,-2.32)].",
+      "correction": "floorPolygon [[2.32,-0.91],[7.50,-0.91],[7.50,1.14],[2.32,1.14]]; dimensions {widthM 5.17, depthM 2.05}; dimensionSource 'plan labels 517 / 205 (cm)'; confidence high. Two parallel flights with the arrival landing at the EAST end, directly outside the front door. Delete walls stair_n/stair_e/stair_w and re-author them on the new edges; move cameraSpawn into the new polygon (e.g. [4.9,-0.1] facing south)."
+    },
+    {
+      "id": "C03",
+      "severity": "high",
+      "summary": "F03 — balcony_service carries the NW terrace's Hebrew name and its 207/232 dimensions, with width and depth swapped, but is placed on top of the staircase and wired to stair_landing + entry_hall.",
+      "previousValue": "balcony_service lines 79-99: nameHe 'מרפסת', dimensions {2.07, 2.32}, floorPolygon [v(4.9,-2.32) .. v(4.9,0)], connectedRoomIds ['stair_landing','entry_hall'].",
+      "correction": "Rename the room to 'terrace_nw' / 'North-West Terrace'; floorPolygon [[0,-0.93],[2.32,-0.93],[2.32,1.14],[0,1.14]]; dimensions {2.32, 2.07}; connectedRoomIds ['living'] only, and add 'terrace_nw' to living.connectedRoomIds. Replace door_balcony_entry with an exterior_opening ~1.22 m wide centred at x=1.54 in the living room's north wall (z=1.14). Repoint door_stair_balcony to a front door between stair_landing and entry_hall at roughly [7.05, 1.14], width 0.85, or ENTRY_ROOM_ID becomes unreachable. Rename the id in src/lib/types.ts, src/data/roomPrompts.ts and src/data/evidenceFrames.ts, or the unit tests fail on asymmetric adjacency."
+    },
+    {
+      "id": "C04",
+      "severity": "high",
+      "summary": "F04 — Twin bedroom width and depth are transposed: modelled 4.39 m E-W x 3.50 m N-S, but the plan prints 350 on the E-W chain and 439 rotated on the N-S chain.",
+      "previousValue": "twin_bed lines 278-287: dimensions {4.39, 3.5}, floorPolygon [v(10.8,0), v(15.19,0), v(15.19,3.5), v(10.8,3.5)].",
+      "correction": "floorPolygon [[11.20,0],[15.00,0],[15.00,4.60],[10.57,4.60],[10.57,3.40],[11.20,3.40]] (L-shape including the entry throat under the MAMAD's SE corner); dimensions {3.5, 4.39}. Re-author twin_n/e/s/w on the new edges; move door_hallsouth_twin to a corridor door at [10.57, 4.15] width 0.77; move window_twin_2 from x=15.19 to the new east wall x=15.00 and window_twin_1 to the north wall (the room's two windows are on ADJACENT walls, north and east, per video t=52.8-57.5)."
+    },
+    {
+      "id": "C05",
+      "severity": "high",
+      "summary": "F05 — Parents' bedroom is transposed the same way AND the east-facade step is inverted: the model pushes its east wall 0.54 m further EAST than the twin's, whereas the facade steps IN.",
+      "previousValue": "parents_bed lines 426-429: dimensions {3.83, 3.5}, floorPolygon [v(11.9,6.35), v(15.73,6.35), v(15.73,9.85), v(11.9,9.85)] — east wall at 15.73 vs twin's 15.19.",
+      "correction": "floorPolygon [[10.57,4.60],[14.32,4.60],[14.32,8.72],[10.57,8.72]]; dimensions {3.5, 3.83}. The step is 0.68 m WEST of the twin's east facade, not 0.54 m east — measured by anchoring on the corridor/parents wall at plan y=940 rather than on absolute pixel x (which the paper lean corrupts). Move window_parents_1/2 from x=15.73 to the new east wall x=14.32; move door_hallsouth_parents to [10.57, 5.62] as a corridor door; add the en-suite door at [10.57, 7.27]."
+    },
+    {
+      "id": "C06",
+      "severity": "high",
+      "summary": "F06 — The MAMAD's protected door is in the wrong wall. The model puts it in the west wall opening off the entry hall; the plan draws exactly one MAMAD door, in the SOUTH wall at its west end, swinging out into a protected RC recess.",
+      "previousValue": "Line 459: door_entry_mamad at v(7.3, 1.5), roomA 'entry_hall', roomB 'mamad'. mamad.connectedRoomIds line 266 = ['entry_hall'].",
+      "correction": "Confirmed by direct crop: the MAMAD's blue south wall runs plan px x 1146-1487 with a clean 115 px gap at x 1031-1146 at its west end, and its west wall is unbroken blue from the north facade down to the recess. Replace with door_recess_mamad at [8.05, 3.40], widthM 0.90, roomA 'mamad_recess', roomB 'mamad', isProtected true. Add the mamad_recess room [[7.50,3.40],[8.60,3.40],[8.60,4.60],[7.50,4.60]], RC walls west and south, open east onto the corridor. Set mamad.connectedRoomIds = ['mamad_recess']. Keep isProtected on the room, door and window."
+    },
+    {
+      "id": "C07",
+      "severity": "high",
+      "summary": "F07 — hall_south is a fabricated L-shaped corridor whose 1.1 x 6.35 m north-south leg occupies floor the plan gives to the twin and parents' bedrooms, and whose southern ~1.6 m falls outside the envelope entirely.",
+      "previousValue": "hall_south lines 306-318: dimensions {5.9, 6.85}, dimensionSource 'assumption', polygon including v(11.9,3.5) .. v(11.9,9.85) .. v(10.8,4.0).",
+      "correction": "Delete hall_south. Add 'corridor' [[8.60,3.40],[10.57,3.40],[10.57,6.12],[7.50,6.12],[7.50,4.60],[8.60,4.60]] — a stepped east-west band, 1.37 m clear deep against the recess stub and 3.07 m long, whose east wall carries both bedroom doors. Fold the remaining area into entry_hall and dining. Re-point every hall_south opening and every connectedRoomIds entry that names it (twin_bed, parents_bed, bathroom_main, bathroom_ensuite, wc_guest, entry_hall)."
+    },
+    {
+      "id": "C08",
+      "severity": "high",
+      "summary": "F08 — The parents' en-suite is modelled at an invented 1.1 x 1.5 m with corridor-only access. The plan prints 150 x 235 and puts its ONLY door in its EAST wall, off the parents' bedroom.",
+      "previousValue": "bathroom_ensuite lines 374-388: dimensions {1.1, 1.5}, dimensionSource 'assumption — adjacency-based', connectedRoomIds ['hall_south']; opening line 463 door_hallsouth_bathensuite at v(9.35, 4.0).",
+      "correction": "floorPolygon [[8.97,6.12],[10.57,6.12],[10.57,8.72],[8.97,8.72]]; dimensions {1.5, 2.35}; connectedRoomIds ['bedroom_parents']. Its north wall is solid (verified: continuous red from plan px 1192 to 1382). Delete door_hallsouth_bathensuite; add door_parents_ensuite at [10.57, 7.27], widthM 0.75. Re-author bathensuite_e / bathensuite_s onto the new polygon edges — if the stale wall coordinates are left in place the new door projects >0.05 m off the wall centreline, wallPanels.ts silently discards it, and the room seals shut."
+    },
+    {
+      "id": "C09",
+      "severity": "medium",
+      "summary": "F09 — The family shower room has been given the en-suite's width: it is 170 cm, not 150.",
+      "previousValue": "bathroom_main lines 347-350: dimensions {1.5, 2.35}, floorPolygon x 7.3 -> 8.8.",
+      "correction": "floorPolygon [[7.17,6.12],[8.97,6.12],[8.97,8.72],[7.17,8.72]]; dimensions {1.7, 2.35}; dimensionSource 'plan labels 170 / 235 (cm)'. Door ~0.74 m in its NORTH wall at [8.09, 6.12] off the corridor. Note the plan's true west-to-east order in the wet block is WC (100) | shower 170 | shower 150 (en-suite), which the current model has reversed."
+    },
+    {
+      "id": "C10",
+      "severity": "medium",
+      "summary": "F10 — The guest WC is modelled at 0.9 x 1.2 m; it scales to ~1.00 x ~1.55 m and its door opens onto the dining end of the open plan, not onto a corridor.",
+      "previousValue": "wc_guest lines 400-403: dimensions {0.9, 1.2}, dimensionSource 'assumption — adjacency-based', connectedRoomIds ['hall_south'].",
+      "correction": "floorPolygon [[6.07,6.92],[7.17,6.92],[7.17,8.72],[6.07,8.72]]; dimensions {1.0, 1.55}; dimensionSource 'scaled from plan — the one compartment with no printed dimension in the lower chain (232|10|blank|10|170|10|150|10); 134 px centre-to-centre against the adjacent printed 170 and 150 at 1.222 px/cm gives 99.6 cm clear; depth from a north wall set 0.75 m south of the shower block'. connectedRoomIds ['dining']; door ~0.86 m in its north wall at [6.62, 6.92]."
+    },
+    {
+      "id": "C11",
+      "severity": "medium",
+      "summary": "F11 — The living room's 1.3 m chamfered 'curved' north-west facade corner is invented; the west facade is straight and orthogonal and the apparent bow is paper curl.",
+      "previousValue": "Line 30 LIVING_CHAMFER_M = 1.3; line 140 floorPolygon starts [v(0,1.3), v(1.3,0), ...]; line 142 wall('living_chamfer', ...); line 155 visibleFeatures 'curved/angled exterior facade corner'; line 160 unresolvedQuestions.",
+      "correction": "Delete LIVING_CHAMFER_M and the living_chamfer wall; floorPolygon becomes the rectangle [[0,1.14],[4.92,1.14],[4.92,5.35],[0,5.35]]; extend living_n to span the full north edge and living_w the full west edge so the perimeter closes; drop the chamfer entry from visibleFeatures and the curve-radius unresolvedQuestion. Also update analysis/house-evidence.json (lines 83-84 and the 'facade-curve' entry at line 252) and ASSUMPTIONS.md lines 43-44."
+    },
+    {
+      "id": "C12",
+      "severity": "medium",
+      "summary": "F12 — Kitchen and dining dimensions contradict their own cited plan labels: the kitchen is 300 wide (not 310) and the dining bay is 232 wide (not 180); the dining's cited '300' depth does not exist on the sheet.",
+      "previousValue": "kitchen line 170: {3.1, 3.22} with source 'plan labels 322 / 300'. dining line 196: {1.8, 3.3} with source 'plan labels 232 / 300 (cm) near the oval table'.",
+      "correction": "kitchen {3.0, 3.22}, polygon [[0.50,5.35],[3.70,5.35],[3.70,8.72],[0.50,8.72]] (its west outer face steps 50 cm east of the living room's). dining {2.32, 2.82}, polygon as given in correctedRooms, dimensionSource 'plan label 232 (E-W); depth inferred 282 — the dining bay's glazed south wall sits ~40 cm north of the kitchen's south wall'. Keep opening_living_kitchen / opening_kitchen_dining / opening_living_dining as open thresholds and re-fit their positions to the new shared edges."
+    },
+    {
+      "id": "C13",
+      "severity": "medium",
+      "summary": "Structural columns are almost entirely missing: the model declares one column at v(2.3, 2.0), which sits in the middle of the living-room floor with no support on the plan.",
+      "previousValue": "structuralFeatures line 482: a single column_living at v(2.3, 2.0), radiusM 0.22.",
+      "correction": "Delete column_living and replace it with the eleven RC piers listed in `columns` above, each traced to a discrete blue blob on the plan. The four along the living room's west facade (z = 1.35, 2.42, 4.35, 5.30) are the rhythm the walkthrough shows between the three tall windows at t=12.6-19.4; the terrace corner column at (0.22, -0.83) is the rendered pier the camera stands beside at t=21.3-24.3."
+    },
+    {
+      "id": "C14",
+      "severity": "medium",
+      "summary": "The walkthrough's two bedrooms are swapped relative to the current model's implied order: the room filmed at t=43-46.8 must be the PARENTS' bedroom, because the camera enters the en-suite from it at t=47.3 and the en-suite has no corridor door.",
+      "previousValue": "twin_bed visibleFeatures line 295 cites 'walkthrough 00:42-00:47'; parents_bed line 443 cites '00:51-00:57'.",
+      "correction": "Reassign: bedroom_parents = t 43-46.8 (plus 52.8 re-entry), bath_ensuite = 47.3-49.6, corridor = 50.4-51.9, bedroom_twin = 52.8-57.5. Both rooms are corner rooms with windows on adjacent walls, so the video framing alone does not disambiguate them — the en-suite adjacency does."
+    }
+  ],
+  "openQuestions": [
+    "Coordinate convention: room polygons tile at INTERIOR WALL CENTRELINES and at EXTERIOR WALL OUTER FACES, so every polygon is slightly larger than its printed clear dimension (by 0.05 m per partition, 0.20 m per exterior wall). This is deliberate — wallPanels.ts centres wall boxes on the authored segment, so this convention reproduces the true 15.00 x 8.72 m silhouette while guaranteeing shared edges. Every clear dimension in sourceOfDimensions was checked to reduce back to the printed centimetres; the largest residual anywhere is 4 cm (both bedrooms' depths).",
+    "The south terrace is the weakest room in the model. It is never entered in the video, its depth is ambiguous between the printed 270, a nearby printed 300 and one reader's ~55 cm parapet measurement, and its width is inferred by making it co-extensive with the dining bay's glazed wall. Treat the 2.37 x 2.70 polygon as a placeholder and mark it low confidence.",
+    "The corridor's east-west length (3.07 m) is not dimensioned anywhere on the plan. It is derived from two dimensioned ends (MAMAD west wall centreline 7.50, ensuite/parents wall centreline 10.57) rather than measured, so it inherits the accumulated error of the whole lower chain.",
+    "The east-facade step is 0.68 m by chain arithmetic but measures 0.84 m by naive pixel differencing. I trust 0.68 because it is the value at which the lower chain closes, but the drawing itself carries roughly 5% internal inconsistency here and a site measurement would settle it.",
+    "The wet block's north wall measures ~15 cm north of where the central vertical chain (30|300|20|100|20|137|10|235|20 = 872) places it. I kept the chain, since it is the only reading that closes against the independently-verified 872 total depth.",
+    "The 2 cm difference between the NW terrace's printed 207 depth and the stair landing's printed 205 leaves their north edges at z = -0.93 and -0.91. The two rooms are not connected, so the offset is cosmetic, but it is a genuine unresolved discrepancy in the drawing.",
+    "Which bedroom is filmed at t=43-46.8 rests entirely on the en-suite adjacency, not on the imagery: both rooms are corner rooms with windows on adjacent walls and all east-wall windows are blown out in the video. If the en-suite were ever shown to have a second door, the twin/parents timestamp assignment would flip.",
+    "The stair landing's 517 closes to 5.18 in this frame only because its east boundary is taken at the MAMAD west-wall centreline. If the landing in fact stops at the MAMAD's west OUTER face (7.40) the strip is 5.08 and the printed 517 is 2% optimistic. Either reading leaves the room in the same place; only its east 10 cm moves.",
+    "The eleven columns are traced from blue RC blobs on the plan, which draws them as rectangular piers and blades; the video reads several of them as rounded rendered columns. The radii given are a rendering choice (0.18-0.22 m), not a measurement — only their plan positions are evidence-backed.",
+    "Ceiling height remains unmeasurable in both sources. CEILING_HEIGHT_M should stay a configurable placeholder, not become a claimed dimension."
   ],
   "constraints": [
-    { "id": "mamad-protected", "type": "regulatory", "description": "The mamad room is an Israeli protected room (MAMAD). Its door, window, ventilation, and required clearances must never be altered, obstructed, concealed, or relocated by any material variant, lighting mode, or AI-generated concept.", "enforcedBy": ["src/data/house.ts (mamad room + its door/window carry protected: true)", "src/lib/validation/houseValidation.ts:assertMamadProtected", "tests/unit/house-validation.test.ts"] },
-    { "id": "structural-columns", "type": "structural", "description": "A structural column is visible in the open social zone in the walkthrough (00:12-00:20 and 00:57-01:01). Represented as a fixed procedural column proxy in the living/kitchen/dining volume; not to be removed by furniture layout.", "enforcedBy": ["src/data/house.ts:structuralFeatures"] },
-    { "id": "wetroom-locations", "type": "layout", "description": "Wet rooms (bathroom_main, bathroom_ensuite, wc_guest) are kept clustered in their evidenced location between the private corridor and the parents' bedroom; plumbing fixtures are not relocated outside these rooms.", "enforcedBy": ["src/data/house.ts"] },
-    { "id": "circulation-preserved", "type": "layout", "description": "The entry hall / private corridor circulation spine connecting all rooms to the entry is preserved; furniture layouts must not block it.", "enforcedBy": ["src/data/house.ts (adjacency graph)", "src/lib/validation/houseValidation.ts:assertReachableFromEntry"] }
-  ]
+    "The MAMAD room, its single protected door and its single blast window are regulated. Never alter, obstruct, or restyle them.",
+    "The MAMAD has exactly one door, in its SOUTH wall, opening into a reinforced recess. It has no opening onto the entry hall.",
+    "Ceiling height is unmeasurable in both sources; CEILING_HEIGHT_M stays a configurable placeholder, not a claimed dimension.",
+    "True north is unconfirmed: there is no unambiguous north arrow on the sheet. All compass language here means up/down on the drawing."
+  ],
+  "ownerCorrections": [
+    {
+      "id": "O01",
+      "summary": "The south terrace does not exist.",
+      "action": "Deleted terrace_south. The dining bay's south wall is now an exterior glazed wall."
+    },
+    {
+      "id": "O02",
+      "summary": "There is no MAMAD entry recess.",
+      "action": "Deleted mamad_recess and folded its area into the corridor, which is now a plain 3.07 x 2.72 m rectangle. The protected door opens straight onto the corridor."
+    },
+    {
+      "id": "O03",
+      "summary": "There is only one shower room, not two.",
+      "action": "Deleted bath_ensuite and merged its footprint into bath_family (now 3.30 x 2.35 m clear). Its single door opens off the parents' bedroom."
+    },
+    {
+      "id": "O04",
+      "summary": "The living room is open to the kitchen, separated only by a ~0.5 m wall stub.",
+      "action": "living_s_stub (0.50 m) is the only solid element on that boundary; the rest is an open threshold."
+    },
+    {
+      "id": "O05",
+      "summary": "The dining bay is part of the kitchen — one continuous open space, no dividing wall.",
+      "action": "kitchen and dining share a full-width open threshold; dining lost its separate nub, which now belongs to the entry hall."
+    },
+    {
+      "id": "O06",
+      "summary": "The guest WC needs a door, reachable from the entry hall and from the dining bay.",
+      "action": "Added door_entry_wc in its north wall and door_dining_wc in its west wall."
+    }
+  ],
+  "deletedRooms": {
+    "ids": [
+      "terrace_south",
+      "mamad_recess",
+      "bath_ensuite"
+    ],
+    "reason": "Confirmed by the owner on site as not existing in the built house."
+  },
+  "interiorConcepts": {
+    "generatedBy": "Nano Banana (Gemini native image generation)",
+    "method": "Each room's sharpest real walkthrough frame supplied as a hard architectural reference, so camera, walls, openings and the view out are preserved and only the design is applied.",
+    "output": "public/generated/interiors/<roomId>.png",
+    "constraint": "The MAMAD blast door, blast window and filtration penetration are held fixed in the prompt and must not be altered in construction."
+  }
 }

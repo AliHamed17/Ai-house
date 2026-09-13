@@ -16,19 +16,17 @@ interface RoomPromptSpec {
 
 const roomPromptSpecs: RoomPromptSpec[] = [
   { roomId: 'stair_landing', furniturePlan: 'slip-resistant pale stone stair treads, a slim dark-bronze handrail, and integrated warm step lighting' },
-  { roomId: 'balcony_service', furniturePlan: 'compact weather-resistant seating and restrained planters, or ventilated utility cabinetry if used for service' },
+  { roomId: 'terrace_nw', furniturePlan: 'compact weather-resistant seating and restrained planters, or ventilated utility cabinetry if used for service' },
   { roomId: 'entry_hall', furniturePlan: 'a shallow natural-oak console, a full-height mirror, and concealed shoe storage without blocking circulation' },
   { roomId: 'living', furniturePlan: 'a low curved warm-beige modular sofa, two sculptural lounge chairs, a textured wool rug, nested stone/oak coffee tables, and one calm textured-plaster media wall with concealed storage' },
   { roomId: 'kitchen', furniturePlan: 'full-height oak and taupe cabinetry on the solid wall, integrated appliances, a light quartzite-look worktop and backsplash, and discreet under-cabinet task lighting, preserving the drawn L-shaped counter layout' },
   { roomId: 'dining', furniturePlan: 'a 6-seat oak or stone-top oval table, upholstered dining chairs, and one centered sculptural warm pendant light' },
-  { roomId: 'terrace_social', furniturePlan: 'compact weather-resistant outdoor seating, restrained planters, and one warm wall light under the covered recess' },
   { roomId: 'mamad', furniturePlan: 'a sofa bed or bed, a compact desk, and closed storage that leaves the protected door, window, and required clearances completely unobstructed' },
-  { roomId: 'twin_bed', furniturePlan: 'two equivalent single beds, balanced closed storage, and a long shared study surface, keeping the central floor area open' },
-  { roomId: 'hall_south', furniturePlan: 'a slim runner rug and a single discreet console or linen closet that does not narrow the circulation path' },
-  { roomId: 'bathroom_main', furniturePlan: 'continuous warm stone-look porcelain, a floating oak/taupe vanity, a recessed niche, frameless glass, and face lighting at the mirror' },
-  { roomId: 'bathroom_ensuite', furniturePlan: 'a compact floating vanity, frameless glass shower screen, and warm face lighting at the mirror' },
-  { roomId: 'wc_guest', furniturePlan: 'a compact sculptural basin, a richer restrained stone texture, and one warm wall light' },
-  { roomId: 'parents_bed', furniturePlan: 'a broad upholstered headboard wall, oak bedside tables, integrated wardrobes, and layered linen curtains' },
+  { roomId: 'bedroom_twin', furniturePlan: 'two equivalent single beds, balanced closed storage, and a long shared study surface, keeping the central floor area open' },
+  { roomId: 'corridor', furniturePlan: 'a slim runner rug and a single discreet console or linen closet that does not narrow the circulation path' },
+  { roomId: 'bath_family', furniturePlan: 'continuous warm stone-look porcelain, a floating oak/taupe vanity, a recessed niche, frameless glass, and face lighting at the mirror' },
+  { roomId: 'wc', furniturePlan: 'a compact sculptural basin, a richer restrained stone texture, and one warm wall light' },
+  { roomId: 'bedroom_parents', furniturePlan: 'a broad upholstered headboard wall, oak bedside tables, integrated wardrobes, and layered linen curtains' },
 ];
 
 export const roomPromptById = new Map(roomPromptSpecs.map((r) => [r.roomId, r]));

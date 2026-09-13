@@ -6,6 +6,7 @@ import { houseModel } from '@/data/house';
 import type { BuiltWall, WallVoid } from '@/lib/geometry/wallPanels';
 import { builtWalls } from '@/lib/geometry/builtHouse';
 import { resolveFloorColor, resolveWallColor } from '@/data/materials';
+import { useMaterialTexture } from '@/lib/textures';
 import type { RoomDef } from '@/lib/types';
 
 function polygonShape(polygon: { x: number; z: number }[]): THREE.Shape {
@@ -18,12 +19,22 @@ function polygonShape(polygon: { x: number; z: number }[]): THREE.Shape {
   return shape;
 }
 
+/** Bounding-box footprint of a polygon, used only to scale texture repeat
+ * to the surface's real size — never affects the rendered geometry. */
+function polygonBounds(polygon: { x: number; z: number }[]): { widthM: number; depthM: number } {
+  const xs = polygon.map((p) => p.x);
+  const zs = polygon.map((p) => p.z);
+  return { widthM: Math.max(...xs) - Math.min(...xs), depthM: Math.max(...zs) - Math.min(...zs) };
+}
+
 function Floor({ room, variantId }: { room: RoomDef; variantId: string }) {
   const geometry = useMemo(() => new THREE.ShapeGeometry(polygonShape(room.floorPolygon)), [room.floorPolygon]);
   const color = resolveFloorColor(room.floorMaterialId, variantId);
+  const { widthM, depthM } = polygonBounds(room.floorPolygon);
+  const map = useMaterialTexture(room.floorMaterialId, widthM, depthM);
   return (
     <mesh geometry={geometry} rotation={[Math.PI / 2, 0, 0]} receiveShadow position={[0, 0, 0]}>
-      <meshStandardMaterial color={color} roughness={0.6} metalness={0.02} side={THREE.DoubleSide} />
+      <meshStandardMaterial map={map ?? undefined} color={color} roughness={0.6} metalness={0.02} side={THREE.DoubleSide} />
     </mesh>
   );
 }
@@ -36,14 +47,19 @@ function Ceiling({ room, variantId }: { room: RoomDef; variantId: string }) {
   // regardless of any wall-height override.
   const height = room.ceilingHeightM;
   const geometry = useMemo(() => new THREE.ShapeGeometry(polygonShape(room.floorPolygon)), [room.floorPolygon]);
+  const color = resolveWallColor(room.wallMaterialId, variantId);
+  const { widthM, depthM } = polygonBounds(room.floorPolygon);
+  const map = useMaterialTexture(room.wallMaterialId, widthM, depthM);
   // A genuinely open-air exterior space (the entry approach, a balcony) has
   // no ceiling at all; a covered one (a terrace/loggia) does, and opts back
-  // in via hasCeiling.
+  // in via hasCeiling. This check runs after the hooks above so every
+  // Ceiling instance calls the same hooks in the same order regardless of
+  // which room it's for (conditionally skipping hooks would violate the
+  // rules of hooks and desync texture loading across re-renders).
   if (room.isExterior && !room.hasCeiling) return null;
-  const color = resolveWallColor(room.wallMaterialId, variantId);
   return (
     <mesh geometry={geometry} rotation={[Math.PI / 2, 0, 0]} position={[0, height, 0]}>
-      <meshStandardMaterial color={color} roughness={0.95} metalness={0} side={THREE.DoubleSide} />
+      <meshStandardMaterial map={map ?? undefined} color={color} roughness={0.95} metalness={0} side={THREE.DoubleSide} />
     </mesh>
   );
 }
@@ -86,6 +102,7 @@ function WallMesh({ wall, variantId, isProtected }: { wall: BuiltWall; variantId
   const room = houseModel.rooms.find((r) => r.id === wall.roomId)!;
   const baseMaterialId = wall.exterior ? 'exterior-render' : room.wallMaterialId;
   const color = resolveWallColor(baseMaterialId, variantId);
+  const map = useMaterialTexture(baseMaterialId, wall.length, wall.heightM);
   const windows = wall.voids.filter((v) => v.kind === 'window');
   return (
     <group>
@@ -93,6 +110,7 @@ function WallMesh({ wall, variantId, isProtected }: { wall: BuiltWall; variantId
         <mesh key={i} position={[panel.center.x, panel.center.y, panel.center.z]} rotation={[0, panel.rotationYRad, 0]} castShadow receiveShadow>
           <boxGeometry args={[panel.widthM, panel.heightM, panel.depthM]} />
           <meshStandardMaterial
+            map={map ?? undefined}
             color={isProtected ? '#8a6a4a' : color}
             roughness={wall.exterior ? 0.85 : 0.9}
             metalness={0}

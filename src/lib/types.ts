@@ -112,6 +112,43 @@ export interface HouseModel {
 }
 
 // ---------------------------------------------------------------------------
+// Furniture: procedural in-scene placements, each traceable to a real,
+// purchasable product so a visitor can shop the room they're standing in.
+// ---------------------------------------------------------------------------
+
+export type FurnitureKind =
+  | 'sofa'
+  | 'lounge-chair'
+  | 'coffee-table'
+  | 'rug'
+  | 'counter-stool'
+  | 'dining-table'
+  | 'bed'
+  | 'nightstand'
+  | 'desk'
+  | 'wardrobe'
+  | 'vanity';
+
+export interface FurnitureItem {
+  id: string;
+  roomId: RoomId;
+  kind: FurnitureKind;
+  /** World-space meters, same frame as floorPolygon/cameraSpawn. */
+  position: Vec2;
+  /** Radians, 0 = local width axis along world +x (matches wall convention). */
+  rotationYRad: number;
+  footprintM: { widthM: number; depthM: number };
+  heightM: number;
+  colorHex: string;
+  /** Short label shown in the shop panel, e.g. "Modular sofa". */
+  shopLabel: string;
+  category: string;
+  retailer: string;
+  /** Real, verified URL to a product or category page where this can be bought. */
+  productUrl: string;
+}
+
+// ---------------------------------------------------------------------------
 // AI generation provider abstraction (Nano Banana / Higgsfield / mock)
 // ---------------------------------------------------------------------------
 

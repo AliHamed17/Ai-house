@@ -5,6 +5,7 @@ import { Lighting } from './Lighting';
 import { FirstPersonControls } from './FirstPersonControls';
 import { OrbitDollhouseControls } from './OrbitDollhouseControls';
 import { DoorHotspots, RoomLabelHotspots } from './RoomHotspots';
+import { FurnitureHotspots } from './FurnitureHotspots';
 import { useViewerStore } from '@/lib/store/viewerStore';
 
 export function Scene() {
@@ -21,6 +22,7 @@ export function Scene() {
       <HouseGeometry variantId={materialVariantId} hideCeilings={mode === 'orbit'} />
       <DoorHotspots />
       <RoomLabelHotspots />
+      <FurnitureHotspots />
       <FirstPersonControls />
       {mode === 'orbit' && <OrbitDollhouseControls />}
     </>

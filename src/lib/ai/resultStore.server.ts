@@ -1,5 +1,6 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
+import type { RoomId } from '@/lib/types';
 
 /**
  * A small bounded, in-memory store for generated image bytes. The generated
@@ -22,6 +23,15 @@ interface StoredResult {
   mimeType: string;
   base64: string;
   createdAt: number;
+  /**
+   * Room this result was generated FOR. Persisted because a stored id is the
+   * only thing a live video submission is allowed to animate, and validating
+   * the id's URL shape alone cannot tell one room's image from another's — a
+   * caller could otherwise pass a living-room result while naming the
+   * kitchen and have a billed job animate the wrong image against the wrong
+   * prompt. See assertStoredResultRoom below.
+   */
+  roomId: RoomId;
 }
 
 // Must be at least as long as the longest window a client might still
@@ -99,11 +109,39 @@ export function _clearStoreForTests(): void {
  * 1st). reserveResultSlot above is what keeps the store bounded in the
  * ordinary case, by claiming capacity before a paid call even starts.
  */
-export function putStoredResult(mimeType: string, base64: string): string {
+export function putStoredResult(mimeType: string, base64: string, roomId: RoomId): string {
   prune();
   const id = randomUUID();
-  store.set(id, { mimeType, base64, createdAt: Date.now() });
+  store.set(id, { mimeType, base64, createdAt: Date.now(), roomId });
   return id;
+}
+
+export const SOURCE_ROOM_MISMATCH_MESSAGE =
+  'That source image was generated for a different room, so it cannot be used for this one.';
+
+export function isSourceRoomMismatchError(error: unknown): boolean {
+  return error instanceof Error && error.message === SOURCE_ROOM_MISMATCH_MESSAGE;
+}
+
+/**
+ * Throw unless a stored source belongs to the room the request names.
+ *
+ * A path that merely LOOKS like a stored result is not enough for a billed
+ * image-to-video submission: the generate routes are directly reachable, so
+ * without this a caller could animate one room's approved image under
+ * another room's prompt and spend real credits doing it. A path resolving to
+ * no stored id (a static public asset) is not this function's concern —
+ * callers gate that separately.
+ */
+export function assertStoredResultRoom(id: string | undefined, roomId: RoomId): void {
+  if (!id) return;
+  const entry = getStoredResult(id);
+  // A missing/expired entry is the source-expired case, reported by the
+  // caller's own availability preflight rather than mislabelled here.
+  if (!entry) return;
+  if (entry.roomId !== roomId) {
+    throw new Error(SOURCE_ROOM_MISMATCH_MESSAGE);
+  }
 }
 
 export function getStoredResult(id: string | undefined): StoredResult | undefined {

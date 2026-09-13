@@ -14,7 +14,7 @@ import {
 
 describe('in-memory generation result store', () => {
   it('round-trips stored bytes by id', () => {
-    const id = putStoredResult('image/png', 'aGVsbG8=');
+    const id = putStoredResult('image/png', 'aGVsbG8=', 'living');
     const got = getStoredResult(id);
     expect(got?.mimeType).toBe('image/png');
     expect(got?.base64).toBe('aGVsbG8=');
@@ -26,7 +26,7 @@ describe('in-memory generation result store', () => {
   });
 
   it('extracts the id only from a result URL path', () => {
-    const id = putStoredResult('image/png', 'aGVsbG8=');
+    const id = putStoredResult('image/png', 'aGVsbG8=', 'living');
     expect(resultIdFromPath(`${RESULT_URL_PREFIX}${id}`)).toBe(id);
     expect(resultIdFromPath(`${RESULT_URL_PREFIX}${id}?x=1`)).toBe(id);
     expect(resultIdFromPath('/generated/concepts/living.svg')).toBeUndefined();
@@ -38,7 +38,7 @@ describe('in-memory generation result store', () => {
     // still passes every "is this a real stored result?" gate, while the
     // FULL sourceAssetPath (not just the id) is what actually gets fetched
     // by a provider — which would 404 after a paid job already started.
-    const id = putStoredResult('image/png', 'aGVsbG8=');
+    const id = putStoredResult('image/png', 'aGVsbG8=', 'living');
     expect(resultIdFromPath(`${RESULT_URL_PREFIX}${id}/missing`)).toBeUndefined();
     expect(resultIdFromPath(`${RESULT_URL_PREFIX}${id}/`)).toBeUndefined();
   });
@@ -47,7 +47,7 @@ describe('in-memory generation result store', () => {
     it('refreshes the TTL clock so the entry survives past its original expiry', () => {
       vi.useFakeTimers();
       try {
-        const id = putStoredResult('image/png', 'aGVsbG8=');
+        const id = putStoredResult('image/png', 'aGVsbG8=', 'living');
         vi.advanceTimersByTime(59 * 60_000); // close to, but not past, the 60-minute TTL
         expect(touchStoredResult(id)).toBe(true);
         // Without the touch above, this would be 118 minutes total — well
@@ -66,7 +66,7 @@ describe('in-memory generation result store', () => {
         expect(touchStoredResult(undefined)).toBe(false);
         expect(touchStoredResult('not-a-real-id')).toBe(false);
 
-        const id = putStoredResult('image/png', 'aGVsbG8=');
+        const id = putStoredResult('image/png', 'aGVsbG8=', 'living');
         vi.advanceTimersByTime(61 * 60_000); // past the 60-minute TTL
         expect(touchStoredResult(id)).toBe(false);
       } finally {
@@ -82,13 +82,13 @@ describe('in-memory generation result store', () => {
       // starts, not enforced by discarding an unpolled result afterward), so
       // the entry this touch used to displace into eviction must now
       // survive right alongside it.
-      const touchedId = putStoredResult('image/png', 'first');
-      const otherId = putStoredResult('image/png', 'second');
-      for (let i = 2; i < 100; i++) putStoredResult('image/png', `entry-${i}`);
+      const touchedId = putStoredResult('image/png', 'first', 'living');
+      const otherId = putStoredResult('image/png', 'second', 'living');
+      for (let i = 2; i < 100; i++) putStoredResult('image/png', `entry-${i}`, 'living');
 
       expect(touchStoredResult(touchedId)).toBe(true);
 
-      putStoredResult('image/png', 'one-past-capacity');
+      putStoredResult('image/png', 'one-past-capacity', 'living');
 
       expect(getStoredResult(touchedId)).toBeDefined();
       expect(getStoredResult(otherId)).toBeDefined();
@@ -133,7 +133,7 @@ describe('in-memory generation result store', () => {
     it('does not count an already-expired stored entry toward capacity', () => {
       vi.useFakeTimers();
       try {
-        for (let i = 0; i < 100; i++) putStoredResult('image/png', `entry-${i}`);
+        for (let i = 0; i < 100; i++) putStoredResult('image/png', `entry-${i}`, 'living');
         expect(reserveResultSlot()).toBe(false);
         vi.advanceTimersByTime(61 * 60_000); // past the 60-minute TTL
         expect(reserveResultSlot()).toBe(true);

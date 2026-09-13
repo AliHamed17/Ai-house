@@ -31,7 +31,7 @@ describe('nanoBananaProvider.submit refuses a paid call once the result store is
     // permanent, unrecoverable failure for whichever client was still
     // waiting on it).
     const unpolledIds: string[] = [];
-    for (let i = 0; i < 100; i++) unpolledIds.push(putStoredResult('image/png', `entry-${i}`));
+    for (let i = 0; i < 100; i++) unpolledIds.push(putStoredResult('image/png', `entry-${i}`, 'living'));
 
     await expect(
       nanoBananaProvider.submit({
@@ -80,7 +80,7 @@ describe('nanoBananaProvider.submit refuses a paid call once the result store is
     });
 
     // One slot free: 99 already-stored (unpolled) results.
-    for (let i = 0; i < 99; i++) putStoredResult('image/png', `entry-${i}`);
+    for (let i = 0; i < 99; i++) putStoredResult('image/png', `entry-${i}`, 'living');
 
     const input = {
       provider: 'nano-banana' as const,

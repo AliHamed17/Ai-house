@@ -161,7 +161,7 @@ export const nanoBananaProvider: MediaGenerationProvider = {
           }
 
           const mimeType = imagePart.inlineData.mimeType || 'image/png';
-          const resultKey = putStoredResult(mimeType, imagePart.inlineData.data);
+          const resultKey = putStoredResult(mimeType, imagePart.inlineData.data, input.roomId);
           return encodeJobId({
             provider: 'nano-banana',
             roomId: input.roomId,

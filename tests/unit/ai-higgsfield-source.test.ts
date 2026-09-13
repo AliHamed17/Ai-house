@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { assertSourceStillAvailable } from '@/lib/ai/higgsfield.server';
-import { getStoredResult, isSourceExpiredError, putStoredResult, RESULT_URL_PREFIX } from '@/lib/ai/resultStore.server';
+import {
+  assertStoredResultRoom,
+  getStoredResult,
+  isSourceExpiredError,
+  isSourceRoomMismatchError,
+  putStoredResult,
+  RESULT_URL_PREFIX,
+} from '@/lib/ai/resultStore.server';
 
 describe('assertSourceStillAvailable (reject an expired/missing stored source before a paid Higgsfield call)', () => {
   it('allows a static public asset path (never expires, no stored id)', () => {
@@ -10,7 +17,7 @@ describe('assertSourceStillAvailable (reject an expired/missing stored source be
   });
 
   it('allows a stored result that still exists', () => {
-    const id = putStoredResult('image/png', 'aGVsbG8=');
+    const id = putStoredResult('image/png', 'aGVsbG8=', 'living');
     expect(() => assertSourceStillAvailable(`${RESULT_URL_PREFIX}${id}`)).not.toThrow();
   });
 
@@ -34,7 +41,7 @@ describe('assertSourceStillAvailable (reject an expired/missing stored source be
     // actually fetch the URL. This must also EXTEND the TTL, not just check it.
     vi.useFakeTimers();
     try {
-      const id = putStoredResult('image/png', 'aGVsbG8=');
+      const id = putStoredResult('image/png', 'aGVsbG8=', 'living');
       vi.advanceTimersByTime(59 * 60_000); // close to, but not past, the 60-minute TTL
       expect(() => assertSourceStillAvailable(`${RESULT_URL_PREFIX}${id}`)).not.toThrow();
 
@@ -46,5 +53,34 @@ describe('assertSourceStillAvailable (reject an expired/missing stored source be
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('assertStoredResultRoom (a billed clip may only animate ITS OWN room\'s image)', () => {
+  it('allows a stored result generated for the same room', () => {
+    const id = putStoredResult('image/png', 'aGVsbG8=', 'kitchen');
+    expect(() => assertStoredResultRoom(id, 'kitchen')).not.toThrow();
+  });
+
+  it('rejects a stored result generated for a different room', () => {
+    // The attack this closes: a directly-reachable route accepting a valid
+    // living-room result while naming the kitchen, so a real billed job
+    // animates the wrong image against the wrong prompt. Validating the
+    // path's URL shape alone cannot tell these apart.
+    const id = putStoredResult('image/png', 'aGVsbG8=', 'living');
+    expect(() => assertStoredResultRoom(id, 'kitchen')).toThrow();
+    try {
+      assertStoredResultRoom(id, 'kitchen');
+    } catch (error) {
+      expect(isSourceRoomMismatchError(error)).toBe(true);
+    }
+  });
+
+  it('defers to the availability preflight for a missing or absent id', () => {
+    // Not this function's job to report expiry — assertSourceStillAvailable
+    // owns that, and mislabelling it here would give the caller the wrong
+    // error for a source that simply aged out.
+    expect(() => assertStoredResultRoom(undefined, 'kitchen')).not.toThrow();
+    expect(() => assertStoredResultRoom('not-a-real-id', 'kitchen')).not.toThrow();
   });
 });

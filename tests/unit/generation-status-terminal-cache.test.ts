@@ -97,7 +97,7 @@ describe('GET /api/generation/status/[id] caches a TERMINAL status, never re-spe
 
     vi.useFakeTimers();
     try {
-      const resultKey = putStoredResult('image/png', 'aGVsbG8=');
+      const resultKey = putStoredResult('image/png', 'aGVsbG8=', 'living');
       const jobId = encodeJobId({
         provider: 'nano-banana',
         roomId: 'living',
@@ -146,7 +146,7 @@ describe('GET /api/generation/status/[id] caches a TERMINAL status, never re-spe
 
     vi.useFakeTimers();
     try {
-      const resultKey = putStoredResult('image/png', 'aGVsbG8=');
+      const resultKey = putStoredResult('image/png', 'aGVsbG8=', 'living');
       const jobId = encodeJobId({
         provider: 'nano-banana',
         roomId: 'living',

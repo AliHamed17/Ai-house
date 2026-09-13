@@ -105,7 +105,7 @@ describe("nanoBananaProvider.submit (never aborts on timeout, so OrphanedTimeout
 
     // 99 already-stored (unpolled) results — submit()'s own reserveResultSlot
     // call below claims the 100th (last) slot.
-    for (let i = 0; i < 99; i++) putStoredResult('image/png', `entry-${i}`);
+    for (let i = 0; i < 99; i++) putStoredResult('image/png', `entry-${i}`, 'living');
 
     vi.useFakeTimers();
     const pending = nanoBananaProvider

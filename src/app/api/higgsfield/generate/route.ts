@@ -3,7 +3,12 @@ import { LIVE_RUN_NOT_CONFIRMED_MESSAGE, resolveProviderForSubmit } from '@/lib/
 import { hasStableJobIdSigningSecret, JOB_ID_SIGNING_SECRET_REQUIRED_MESSAGE } from '@/lib/ai/jobId';
 import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.server';
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
-import { isSourceExpiredError, resultIdFromPath } from '@/lib/ai/resultStore.server';
+import {
+  assertStoredResultRoom,
+  isSourceExpiredError,
+  isSourceRoomMismatchError,
+  resultIdFromPath,
+} from '@/lib/ai/resultStore.server';
 import { isSubmitTimeout } from '@/lib/ai/higgsfield.server';
 import { isIdempotencyKeyMismatchError, reserveIdempotentSubmission } from '@/lib/ai/idempotency.server';
 import { buildHiggsfieldPrompt } from '@/data/roomPrompts';
@@ -52,11 +57,27 @@ export async function POST(request: NextRequest) {
   // job. A live submission must name a genuine stored Nano Banana result;
   // demo mode has no such requirement, since animating a static concept still
   // is the whole point of the mock provider's demo experience.
-  if (!demoMode && !resultIdFromPath(validated.data.sourceAssetPath)) {
+  const liveSourceId = resultIdFromPath(validated.data.sourceAssetPath);
+  if (!demoMode && !liveSourceId) {
     return NextResponse.json(
       { error: 'A live cinematic clip requires an approved, previously generated concept image as its source.' },
       { status: 400 },
     );
+  }
+
+  // Naming a real stored id is still not enough: the id's URL shape says
+  // nothing about WHICH room the image was generated for, so without this a
+  // caller could pair one room's approved image with another room's roomId
+  // and prompt, and spend a real billed job animating the wrong image.
+  if (!demoMode) {
+    try {
+      assertStoredResultRoom(liveSourceId, validated.data.roomId);
+    } catch (error) {
+      if (isSourceRoomMismatchError(error)) {
+        return NextResponse.json({ error: (error as Error).message }, { status: 400 });
+      }
+      throw error;
+    }
   }
 
   const prompt = buildHiggsfieldPrompt(validated.data.roomId);

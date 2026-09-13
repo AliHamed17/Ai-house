@@ -85,7 +85,7 @@ describe('mock generation provider', () => {
   it('animates a genuinely live-generated (stored) source for a video job instead of the generic placeholder (regression)', async () => {
     vi.useFakeTimers();
     const start = Date.now();
-    const storedId = putStoredResult('image/png', 'aGVsbG8=');
+    const storedId = putStoredResult('image/png', 'aGVsbG8=', 'living');
     const storedPath = `${RESULT_URL_PREFIX}${storedId}`;
     const { jobId } = await mockProvider.submit({
       provider: 'higgsfield',
@@ -109,7 +109,7 @@ describe('mock generation provider', () => {
     // "completed" with a resultUrl that 404s.
     vi.useFakeTimers();
     const start = Date.now();
-    const storedId = putStoredResult('image/png', 'aGVsbG8=');
+    const storedId = putStoredResult('image/png', 'aGVsbG8=', 'living');
     const storedPath = `${RESULT_URL_PREFIX}${storedId}`;
     vi.setSystemTime(start + 61 * 60_000); // past resultStore's 60-minute TTL
     const { jobId } = await mockProvider.submit({
@@ -136,7 +136,7 @@ describe('mock generation provider', () => {
     // successful. submit() must refresh the source's TTL, not just check it.
     vi.useFakeTimers();
     const start = Date.now();
-    const storedId = putStoredResult('image/png', 'aGVsbG8=');
+    const storedId = putStoredResult('image/png', 'aGVsbG8=', 'living');
     const storedPath = `${RESULT_URL_PREFIX}${storedId}`;
     // 1 second short of resultStore's 60-minute TTL — still valid now, but
     // would expire well before the mock job's own 2.6s completion delay
@@ -168,7 +168,7 @@ describe('mock generation provider', () => {
     // time and reporting "completed" with a since-expired, broken URL.
     vi.useFakeTimers();
     const start = Date.now();
-    const storedId = putStoredResult('image/png', 'aGVsbG8=');
+    const storedId = putStoredResult('image/png', 'aGVsbG8=', 'living');
     const storedPath = `${RESULT_URL_PREFIX}${storedId}`;
     const { jobId } = await mockProvider.submit({
       provider: 'higgsfield',
@@ -188,7 +188,7 @@ describe('mock generation provider', () => {
   it('does not reuse a stored source for an IMAGE job (the placeholder concept art is the intended demo result there)', async () => {
     vi.useFakeTimers();
     const start = Date.now();
-    const storedId = putStoredResult('image/png', 'aGVsbG8=');
+    const storedId = putStoredResult('image/png', 'aGVsbG8=', 'living');
     const storedPath = `${RESULT_URL_PREFIX}${storedId}`;
     const { jobId } = await mockProvider.submit({
       provider: 'nano-banana',

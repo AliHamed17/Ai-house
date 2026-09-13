@@ -99,5 +99,6 @@
     "webm": "/transformation/kitchen-transformation.webm",
     "poster": "/transformation/kitchen-transformation-poster.jpg"
   },
-  "provenance": "Composed deterministically from locked-camera 3D renders of the real house model; no generative video was used for geometry."
+  "stagesFromGeneratedClips": [],
+  "provenance": "Composed deterministically from locked-camera 3D renders of the real house model. Stages listed in stagesFromGeneratedClips used an approved Higgsfield clip for their motion; all edit timing, exposure and hand compositing remain compositor-controlled."
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  LIGHTING_ENVELOPE,
   TRANSFORMATION_CAMERA,
   TRANSFORMATION_DURATION_SEC,
   TRANSFORMATION_OUTPUT,
@@ -155,6 +156,34 @@ describe('lighting envelope', () => {
     expect(firstLightingChange).toBeDefined();
     const furnishedByThen = visibleFurnitureIdsAtStage(firstLightingChange!.id);
     expect(furnishedByThen.sort()).toEqual(kitchen.map((i) => i.id).sort());
+  });
+});
+
+describe('the envelope is not duplicated outside the manifest', () => {
+  it('exports control points the compositor can consume instead of hard-coding its own', () => {
+    // The compositor reads these from /api/transformation/manifest. If the
+    // envelope stopped being exported, it would silently fall back to a stale
+    // local copy and the rendered lighting arc would drift away from playback
+    // metadata and these tests.
+    expect(LIGHTING_ENVELOPE.length).toBeGreaterThan(2);
+    for (const point of LIGHTING_ENVELOPE) {
+      expect(Number.isFinite(point.t)).toBe(true);
+      expect(point.exposure).toBeGreaterThan(0);
+    }
+  });
+
+  it('is monotonic in time and spans the whole sequence', () => {
+    for (let i = 1; i < LIGHTING_ENVELOPE.length; i += 1) {
+      expect(LIGHTING_ENVELOPE[i].t).toBeGreaterThanOrEqual(LIGHTING_ENVELOPE[i - 1].t);
+    }
+    expect(LIGHTING_ENVELOPE[0].t).toBe(0);
+    expect(LIGHTING_ENVELOPE[LIGHTING_ENVELOPE.length - 1].t).toBe(TRANSFORMATION_DURATION_SEC);
+  });
+
+  it('agrees with exposureAtTime at every control point', () => {
+    for (const point of LIGHTING_ENVELOPE) {
+      expect(exposureAtTime(point.t)).toBeCloseTo(point.exposure, 6);
+    }
   });
 });
 

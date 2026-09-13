@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
+  LIGHTING_ENVELOPE,
   TRANSFORMATION_CAMERA,
   TRANSFORMATION_DURATION_SEC,
   TRANSFORMATION_OUTPUT,
@@ -33,6 +34,12 @@ export async function GET() {
     durationSec: TRANSFORMATION_DURATION_SEC,
     output: TRANSFORMATION_OUTPUT,
     camera: TRANSFORMATION_CAMERA,
+    // Exported so the compositor applies the SAME control points the app and
+    // the tests use. It previously kept its own hard-coded copy, which meant
+    // editing the envelope here changed playback metadata and tests but not
+    // the rendered video — exactly the drift a single source of truth is
+    // supposed to make impossible.
+    lightingEnvelope: LIGHTING_ENVELOPE,
     valid: problems.length === 0,
     problems,
     stages: TRANSFORMATION_STAGES.map((stage) => ({

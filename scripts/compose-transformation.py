@@ -9,8 +9,11 @@ Nothing here is generative. Every frame is composed from:
     numerically without double-counting the lighting already baked into the
     render,
   - the procedural hand layer (scripts/hand_layer.py),
-  - optional Higgsfield micro-clips, when a clip has been generated and
-    approved for a stage (see src/lib/ai/transformationClips.server.ts).
+  - approved Higgsfield micro-clips, when public/transformation/clips.json
+    lists one for a stage and marks it approved (see
+    src/lib/ai/transformationClips.server.ts). A clip supplies only that
+    stage's motion; exposure, hand compositing and every cut point stay
+    compositor-controlled.
 
 That is the point: edit timing, cut points, hand masking and total duration
 are facts the compositor controls exactly, and no model gets a vote on them.
@@ -114,13 +117,51 @@ def main() -> int:
         return 1
     stills_index = json.loads(index_path.read_text())
 
-    # Measured reference envelope, normalised so 1.0 is the finished daylight
-    # hold. Mirrors LIGHTING_ENVELOPE in src/data/kitchenTransformation.ts.
-    envelope = [
-        (0.0, 1.0), (10.1, 1.0), (10.15, 0.947), (10.55, 0.838), (10.65, 0.793),
-        (11.15, 0.661), (11.6, 0.663), (11.65, 0.693), (11.95, 0.76),
-        (12.0, 1.026), (12.5, 1.068), (13.25, 1.23), (duration, 1.23),
-    ]
+    # The measured exposure envelope comes from the manifest endpoint, which
+    # serves LIGHTING_ENVELOPE straight out of the same TypeScript module the
+    # app and the tests read. A local copy here would mean editing the
+    # envelope changed playback metadata and tests but not the rendered video.
+    raw_envelope = manifest.get("lightingEnvelope")
+    if not raw_envelope:
+        print("Manifest served no lightingEnvelope; refusing to fall back to a local copy.", file=sys.stderr)
+        return 1
+    envelope = [(float(p["t"]), float(p["exposure"])) for p in raw_envelope]
+
+    # --- approved Higgsfield micro-clips ------------------------------------
+    # A generated clip is only used once it is listed AND marked approved, so a
+    # billed-but-rejected generation never silently reaches the master.
+    clips_index = Path("public/transformation/clips.json")
+    clip_frames: dict[str, list[Path]] = {}
+    if clips_index.exists():
+        import imageio_ffmpeg as _iio
+
+        ffmpeg_bin = _iio.get_ffmpeg_exe()
+        clip_meta = json.loads(clips_index.read_text())
+        clip_work = Path(args.work).parent / "clip-frames"
+        clip_work.mkdir(parents=True, exist_ok=True)
+        for clip in clip_meta.get("clips", []):
+            if not clip.get("approved"):
+                continue
+            src = Path(str(clip.get("file", "")).lstrip("/"))
+            src = src if src.exists() else Path("public") / str(clip.get("file", "")).lstrip("/")
+            if not src.exists():
+                print(f"  clip for stage {clip.get('stageId')} listed but missing at {src}, skipping")
+                continue
+            out = clip_work / str(clip["stageId"])
+            out.mkdir(parents=True, exist_ok=True)
+            for old in out.glob("*.png"):
+                old.unlink()
+            subprocess.run(
+                [ffmpeg_bin, "-v", "error", "-i", str(src), "-vf",
+                 f"fps={fps},scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}",
+                 str(out / "c_%05d.png")],
+                check=True,
+                capture_output=True,
+            )
+            frames = sorted(out.glob("c_*.png"))
+            if frames:
+                clip_frames[clip["stageId"]] = frames
+                print(f"  using approved clip for stage {clip['stageId']} ({len(frames)} frames)")
 
     base_images: dict[str, Image.Image] = {}
     for entry in stills_index["stills"]:
@@ -165,7 +206,20 @@ def main() -> int:
         norm = stage_norm[stage["id"]]
         rel = exposure_at(envelope, t) / norm if norm > 0 else 1.0
 
-        frame = apply_exposure(arrays[stage["id"]], rel)
+        # An approved clip supplies this stage's motion; the still is the
+        # fallback. Either way the same exposure envelope and hand layer are
+        # applied on top, so the edit timing stays the compositor's to control.
+        stage_clip = clip_frames.get(stage["id"])
+        if stage_clip:
+            offset = int(round((t - stage["start"]) * fps))
+            source = np.asarray(
+                Image.open(stage_clip[min(offset, len(stage_clip) - 1)]).convert("RGB"),
+                dtype=np.uint8,
+            )
+        else:
+            source = arrays[stage["id"]]
+
+        frame = apply_exposure(source, rel)
         img = Image.fromarray(frame)
 
         # Hand layer: peak pinned to the stage boundary so the gesture and the
@@ -239,7 +293,12 @@ def main() -> int:
             "webm": f"/transformation/{webm.name}",
             "poster": f"/transformation/{poster.name}",
         },
-        "provenance": "Composed deterministically from locked-camera 3D renders of the real house model; no generative video was used for geometry.",
+        "stagesFromGeneratedClips": sorted(clip_frames.keys()),
+        "provenance": (
+            "Composed deterministically from locked-camera 3D renders of the real house model. "
+            "Stages listed in stagesFromGeneratedClips used an approved Higgsfield clip for their motion; "
+            "all edit timing, exposure and hand compositing remain compositor-controlled."
+        ),
     }
     (out_dir / "manifest.json").write_text(json.dumps(meta, indent=2) + "\n")
 

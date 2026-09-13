@@ -164,14 +164,44 @@ def main() -> int:
     else:
         lighting_correlation = float("nan")
 
-    # Beat timing is exact by construction: the manifest's stage boundaries
-    # ARE the reference's measured transition timestamps. Verify rather than
-    # assume, so a hand-edited timing shows up here.
-    manifest_stage_ids = [s["id"] for s in ref_stages]
-    timing_exact = all(
-        abs(r["referenceStart"] - s["start"]) < 1e-9
-        for r, s in zip(rows_out, ref_stages)
-    )
+    # Beat timing must be checked against the manifest the COMPOSITOR actually
+    # wrote, not against ref_stages. Comparing ref_stages to itself (which is
+    # what this did before) made beatTimingExact necessarily true and would
+    # have published any real compositor or output-manifest timing regression
+    # as a passing audit.
+    produced_path = Path("public/transformation/manifest.json")
+    produced = json.loads(produced_path.read_text()) if produced_path.exists() else None
+
+    timing_problems: list[str] = []
+    if produced is None:
+        timing_problems.append(
+            "No produced manifest at public/transformation/manifest.json — cannot verify the result's timing."
+        )
+        produced_stage_ids: list[str] = []
+    else:
+        produced_stages = produced.get("stages", [])
+        produced_stage_ids = [p["id"] for p in produced_stages]
+        ref_ids = [r["id"] for r in ref_stages]
+        if produced_stage_ids != ref_ids:
+            timing_problems.append(
+                f"Produced stage order {produced_stage_ids} does not match the reference order {ref_ids}."
+            )
+        else:
+            for ref, got in zip(ref_stages, produced_stages):
+                if abs(float(got["start"]) - float(ref["start"])) > 1e-6:
+                    timing_problems.append(
+                        f"Stage {ref['id']}: produced start {got['start']} != reference {ref['start']}."
+                    )
+                if abs(float(got["end"]) - float(ref["end"])) > 1e-6:
+                    timing_problems.append(
+                        f"Stage {ref['id']}: produced end {got['end']} != reference {ref['end']}."
+                    )
+        if abs(float(produced.get("durationSec", -1)) - duration) > 1e-6:
+            timing_problems.append(
+                f"Produced duration {produced.get('durationSec')} != reference duration {duration}."
+            )
+
+    timing_exact = not timing_problems
 
     report = {
         "generatedAt": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
@@ -186,10 +216,15 @@ def main() -> int:
             "literal room geometry - this house's kitchen is not the reference's kitchen and is not meant to match it",
             "surface colours and materials - driven by this house's own palette",
         ],
-        "durationSec": {"reference": duration, "result": duration},
-        "stageCount": {"reference": len(ref_stages), "result": len(ref_stages)},
-        "stageOrder": manifest_stage_ids,
+        "durationSec": {
+            "reference": duration,
+            "result": (produced or {}).get("durationSec"),
+        },
+        "stageCount": {"reference": len(ref_stages), "result": len(produced_stage_ids)},
+        "stageOrder": produced_stage_ids,
         "beatTimingExact": timing_exact,
+        "beatTimingProblems": timing_problems,
+        "timingVerifiedAgainst": str(produced_path),
         "lightingArcCorrelation": round(lighting_correlation, 4),
         "allStageLuminanceCorrelation": round(all_correlation, 4),
         "correlationCaveat": (
@@ -206,7 +241,9 @@ def main() -> int:
 
     print(f"committed sheet    -> public/transformation/qa-sheet.jpg")
     print(f"committed report   -> analysis/transformation-qa.json")
-    print(f"beat timing exact: {timing_exact}")
+    print(f"beat timing exact (vs produced manifest): {timing_exact}")
+    for problem in timing_problems:
+        print(f"  timing problem: {problem}")
     print(f"lighting-arc correlation (lighting-only stages): {lighting_correlation:.3f}")
     print(f"all-stage luminance correlation (content-confounded): {all_correlation:.3f}")
     return 0

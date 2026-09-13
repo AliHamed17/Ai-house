@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   TRANSFORMATION_DURATION_SEC,
   TRANSFORMATION_ROOM_ID,
@@ -13,6 +13,26 @@ import {
 } from '@/lib/transformation';
 import { useViewerStore } from '@/lib/store/viewerStore';
 import type { RoomId, TransformationStageId } from '@/lib/types';
+
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+
+function subscribeToReducedMotion(onChange: () => void): () => void {
+  if (typeof window === 'undefined' || !window.matchMedia) return () => {};
+  const query = window.matchMedia(REDUCED_MOTION_QUERY);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+function getReducedMotionSnapshot(): boolean {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+  return window.matchMedia(REDUCED_MOTION_QUERY).matches;
+}
+
+/** No media queries exist during SSR, so the server renders the motion-safe
+ *  markup and the client corrects it on hydration. */
+function getReducedMotionServerSnapshot(): boolean {
+  return false;
+}
 
 const ASSETS = {
   mp4: '/transformation/kitchen-transformation.mp4',
@@ -39,7 +59,22 @@ export function RoomTransformation({ onEnterRoom }: { onEnterRoom: (roomId: Room
   const [inView, setInView] = useState(false);
   const [loadVideo, setLoadVideo] = useState(false);
 
-  const reducedMotion = useViewerStore((s) => s.reducedMotion);
+  // Read the preference here rather than from the viewer store. The store's
+  // reducedMotion flag is only ever set by Explorer3D's media-query listener,
+  // and the explorer is not mounted until the visitor opens it — so on a
+  // normal first visit this component saw the default `false` and autoplayed
+  // even for a visitor who had asked for reduced motion. The CSS rule does
+  // not pause video, so nothing else would have caught it.
+  //
+  // Subscribed rather than read into state in an effect, so the very first
+  // client render already has the real value and autoplay is never started
+  // and then retracted.
+  const reducedMotion = useSyncExternalStore(
+    subscribeToReducedMotion,
+    getReducedMotionSnapshot,
+    getReducedMotionServerSnapshot,
+  );
+
   const setTransformationStage = useViewerStore((s) => s.setTransformationStage);
   const setLightingMode = useViewerStore((s) => s.setLightingMode);
 

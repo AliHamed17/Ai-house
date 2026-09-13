@@ -111,7 +111,7 @@ describe('mock generation provider', () => {
     const start = Date.now();
     const storedId = putStoredResult('image/png', 'aGVsbG8=');
     const storedPath = `${RESULT_URL_PREFIX}${storedId}`;
-    vi.setSystemTime(start + 11 * 60_000); // past resultStore's 10-minute TTL
+    vi.setSystemTime(start + 61 * 60_000); // past resultStore's 60-minute TTL
     const { jobId } = await mockProvider.submit({
       provider: 'higgsfield',
       outputType: 'video',
@@ -120,7 +120,7 @@ describe('mock generation provider', () => {
       prompt: 'p',
       sourceAssetPath: storedPath,
     });
-    vi.setSystemTime(start + 11 * 60_000 + 3000);
+    vi.setSystemTime(start + 61 * 60_000 + 3000);
     const completed = await mockProvider.status(jobId);
     expect(completed.resultUrl).toBe('/generated/concepts/living.svg');
     vi.useRealTimers();
@@ -138,10 +138,10 @@ describe('mock generation provider', () => {
     const start = Date.now();
     const storedId = putStoredResult('image/png', 'aGVsbG8=');
     const storedPath = `${RESULT_URL_PREFIX}${storedId}`;
-    // 1 second short of resultStore's 10-minute TTL — still valid now, but
+    // 1 second short of resultStore's 60-minute TTL — still valid now, but
     // would expire well before the mock job's own 2.6s completion delay
     // elapses, if submit() only checked existence instead of refreshing it.
-    vi.setSystemTime(start + 9 * 60_000 + 59_000);
+    vi.setSystemTime(start + 59 * 60_000 + 59_000);
     const { jobId } = await mockProvider.submit({
       provider: 'higgsfield',
       outputType: 'video',
@@ -150,7 +150,7 @@ describe('mock generation provider', () => {
       prompt: 'p',
       sourceAssetPath: storedPath,
     });
-    vi.setSystemTime(start + 9 * 60_000 + 59_000 + 3000);
+    vi.setSystemTime(start + 59 * 60_000 + 59_000 + 3000);
     const completed = await mockProvider.status(jobId);
     expect(completed.resultUrl).toBe(storedPath);
     vi.useRealTimers();
@@ -162,7 +162,7 @@ describe('mock generation provider', () => {
     // says nothing about a status check delayed or resumed much later, e.g.
     // via "Resume checking status" after a page reload (whose own recovery
     // ceiling allows up to 24h — RECOVERY_MAX_AGE_MS.job in AIStudioPanel).
-    // By then the source has almost certainly fallen out of the 10-minute
+    // By then the source has almost certainly fallen out of the 60-minute
     // TTL store; status() must re-check existence at THAT moment too,
     // instead of blindly trusting the path baked into the job id at submit
     // time and reporting "completed" with a since-expired, broken URL.
@@ -178,8 +178,8 @@ describe('mock generation provider', () => {
       prompt: 'p',
       sourceAssetPath: storedPath,
     });
-    // Past even touchStoredResult's freshly-refreshed 10-minute TTL.
-    vi.setSystemTime(start + 11 * 60_000);
+    // Past even touchStoredResult's freshly-refreshed 60-minute TTL.
+    vi.setSystemTime(start + 61 * 60_000);
     const completed = await mockProvider.status(jobId);
     expect(completed.resultUrl).toBe('/generated/concepts/living.svg');
     vi.useRealTimers();

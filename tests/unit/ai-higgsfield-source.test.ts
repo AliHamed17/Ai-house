@@ -35,12 +35,12 @@ describe('assertSourceStillAvailable (reject an expired/missing stored source be
     vi.useFakeTimers();
     try {
       const id = putStoredResult('image/png', 'aGVsbG8=');
-      vi.advanceTimersByTime(9 * 60_000); // close to, but not past, the 10-minute TTL
+      vi.advanceTimersByTime(59 * 60_000); // close to, but not past, the 60-minute TTL
       expect(() => assertSourceStillAvailable(`${RESULT_URL_PREFIX}${id}`)).not.toThrow();
 
-      // Past the ORIGINAL 10-minute TTL (19 min total) — still alive only if
+      // Past the ORIGINAL 60-minute TTL (118 min total) — still alive only if
       // the check above actually refreshed the clock rather than just reading it.
-      vi.advanceTimersByTime(9 * 60_000);
+      vi.advanceTimersByTime(59 * 60_000);
       expect(getStoredResult(id)).toBeDefined();
       expect(() => assertSourceStillAvailable(`${RESULT_URL_PREFIX}${id}`)).not.toThrow();
     } finally {

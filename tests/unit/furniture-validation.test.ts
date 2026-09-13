@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { houseModel } from '@/data/house';
 import { allFurnitureItems, furnitureByRoom } from '@/data/furniture';
 import {
+  findFurnitureBlockingCameraSpawn,
   findFurnitureMissingShopLink,
   findFurnitureOutsidePolygon,
   findMamadFurnitureObstructions,
@@ -22,6 +23,51 @@ describe('furniture placement validation', () => {
 
   it('keeps every MAMAD furniture item clear of the protected door/window clearance', () => {
     expect(findMamadFurnitureObstructions(houseModel, allFurnitureItems)).toEqual([]);
+  });
+
+  it('never places furniture directly on its own room\'s camera spawn point (regression)', () => {
+    // Furniture isn't included in resolveCollision (collision.ts), so a
+    // piece placed on the spawn point would spawn the visitor standing
+    // inside it with nothing to correct that on entry.
+    expect(findFurnitureBlockingCameraSpawn(houseModel, allFurnitureItems)).toEqual([]);
+  });
+
+  it('flags an item deliberately placed on top of its room\'s camera spawn', () => {
+    const room = houseModel.rooms.find((r) => r.id === 'parents_bed')!;
+    const intruder = {
+      id: 'test-spawn-blocker',
+      roomId: 'parents_bed' as const,
+      kind: 'desk' as const,
+      position: { x: room.cameraSpawn.x, z: room.cameraSpawn.z },
+      rotationYRad: 0,
+      footprintM: { widthM: 0.6, depthM: 0.4 },
+      heightM: 0.5,
+      colorHex: '#000000',
+      shopLabel: 'test',
+      category: 'test',
+      retailer: 'test',
+      productUrl: 'https://example.com',
+    };
+    expect(findFurnitureBlockingCameraSpawn(houseModel, [intruder])).toEqual(['test-spawn-blocker']);
+  });
+
+  it('does not flag a rug under the camera spawn — standing on a rug is normal', () => {
+    const room = houseModel.rooms.find((r) => r.id === 'parents_bed')!;
+    const rugUnderSpawn = {
+      id: 'test-rug-under-spawn',
+      roomId: 'parents_bed' as const,
+      kind: 'rug' as const,
+      position: { x: room.cameraSpawn.x, z: room.cameraSpawn.z },
+      rotationYRad: 0,
+      footprintM: { widthM: 2.0, depthM: 2.0 },
+      heightM: 0.02,
+      colorHex: '#000000',
+      shopLabel: 'test',
+      category: 'test',
+      retailer: 'test',
+      productUrl: 'https://example.com',
+    };
+    expect(findFurnitureBlockingCameraSpawn(houseModel, [rugUnderSpawn])).toEqual([]);
   });
 
   it('gives every furniture item a real, non-empty shop link', () => {

@@ -85,7 +85,7 @@ describe('GET /api/generation/status/[id] caches a TERMINAL status, never re-spe
 
   it("revalidates a cached 'completed' Nano Banana status once its cache TTL passes, so an expired result-store entry is correctly reported as failed instead of serving a stale, permanently-404ing resultUrl (regression)", async () => {
     // Nano Banana's 'completed' resultUrl points into resultStore.server's
-    // own short-lived store (TTL_MS, 10 min) — a job that was genuinely
+    // own short-lived store (TTL_MS, 60 min) — a job that was genuinely
     // completed can still stop being fetchable once those bytes expire, even
     // though the terminal VERDICT itself never changes. A cache with no TTL
     // of its own would keep serving that first 'completed' snapshot forever,
@@ -116,7 +116,7 @@ describe('GET /api/generation/status/[id] caches a TERMINAL status, never re-spe
       // Past both resultStore's own TTL_MS and the status cache's matching
       // CACHE_TTL_MS (they're deliberately kept equal — see
       // statusCache.server's own doc comment).
-      vi.advanceTimersByTime(11 * 60_000);
+      vi.advanceTimersByTime(61 * 60_000);
 
       const second = await GET(makeRequest(jobId), { params: Promise.resolve({ id: jobId }) });
       const secondBody = await second.json();
@@ -157,16 +157,16 @@ describe('GET /api/generation/status/[id] caches a TERMINAL status, never re-spe
         nanoBananaResultKey: resultKey,
       });
 
-      // The FIRST poll is itself delayed by 9 minutes — well within
-      // resultStore's own 10-minute TTL (measured from the same createdAt
+      // The FIRST poll is itself delayed by 59 minutes — well within
+      // resultStore's own 60-minute TTL (measured from the same createdAt
       // above), so this still genuinely observes 'completed'.
-      vi.advanceTimersByTime(9 * 60_000);
+      vi.advanceTimersByTime(59 * 60_000);
       const first = await GET(makeRequest(jobId), { params: Promise.resolve({ id: jobId }) });
       const firstBody = await first.json();
       expect(firstBody.status).toBe('completed');
 
       // Only 2 more minutes pass — comfortably under CACHE_TTL_MS measured
-      // from this first observation, but 11 minutes past the job's real
+      // from this first observation, but 61 minutes past the job's real
       // createdAt, past both resultStore's TTL_MS and the status cache's own
       // matching CACHE_TTL_MS measured correctly from THAT origin.
       vi.advanceTimersByTime(2 * 60_000);
@@ -187,7 +187,7 @@ describe('GET /api/generation/status/[id] caches a TERMINAL status, never re-spe
     // unset), exactly the same non-ephemeral shape Higgsfield's own hosted
     // resultUrl has. Applying that same TTL unconditionally to every job
     // (an earlier version of this fix did) would evict this cache entry the
-    // moment it turns ten minutes old regardless of what its resultUrl
+    // moment it turns sixty minutes old regardless of what its resultUrl
     // actually depends on, falling through to the rate limiter on every
     // later replay and defeating this cache's entire quota-protection
     // purpose for precisely the old, long-since-finished jobs a replay
@@ -203,8 +203,8 @@ describe('GET /api/generation/status/[id] caches a TERMINAL status, never re-spe
       outputType: 'image',
       styleVariant: 'warm-oak',
       prompt: 'p-non-ephemeral-old',
-      // Already well past CACHE_TTL_MS (10 min) at the very first poll.
-      createdAt: Date.now() - 20 * 60_000,
+      // Already well past CACHE_TTL_MS (60 min) at the very first poll.
+      createdAt: Date.now() - 70 * 60_000,
       simulate: 'success',
     });
 

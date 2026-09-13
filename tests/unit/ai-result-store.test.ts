@@ -48,12 +48,12 @@ describe('in-memory generation result store', () => {
       vi.useFakeTimers();
       try {
         const id = putStoredResult('image/png', 'aGVsbG8=');
-        vi.advanceTimersByTime(9 * 60_000); // close to, but not past, the 10-minute TTL
+        vi.advanceTimersByTime(59 * 60_000); // close to, but not past, the 60-minute TTL
         expect(touchStoredResult(id)).toBe(true);
-        // Without the touch above, this would be 18 minutes total — well
-        // past the ORIGINAL TTL. The touch reset the clock 9 minutes ago,
+        // Without the touch above, this would be 118 minutes total — well
+        // past the ORIGINAL TTL. The touch reset the clock 59 minutes ago,
         // so the entry should still be alive.
-        vi.advanceTimersByTime(9 * 60_000);
+        vi.advanceTimersByTime(59 * 60_000);
         expect(getStoredResult(id)).toBeDefined();
       } finally {
         vi.useRealTimers();
@@ -67,7 +67,7 @@ describe('in-memory generation result store', () => {
         expect(touchStoredResult('not-a-real-id')).toBe(false);
 
         const id = putStoredResult('image/png', 'aGVsbG8=');
-        vi.advanceTimersByTime(11 * 60_000); // past the 10-minute TTL
+        vi.advanceTimersByTime(61 * 60_000); // past the 60-minute TTL
         expect(touchStoredResult(id)).toBe(false);
       } finally {
         vi.useRealTimers();
@@ -135,7 +135,7 @@ describe('in-memory generation result store', () => {
       try {
         for (let i = 0; i < 100; i++) putStoredResult('image/png', `entry-${i}`);
         expect(reserveResultSlot()).toBe(false);
-        vi.advanceTimersByTime(11 * 60_000); // past the 10-minute TTL
+        vi.advanceTimersByTime(61 * 60_000); // past the 60-minute TTL
         expect(reserveResultSlot()).toBe(true);
       } finally {
         vi.useRealTimers();

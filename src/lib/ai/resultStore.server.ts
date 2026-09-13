@@ -24,7 +24,16 @@ interface StoredResult {
   createdAt: number;
 }
 
-const TTL_MS = 10 * 60_000;
+// Must be at least as long as the longest window a client might still
+// legitimately resume into and expect the image to still be here. A Nano
+// Banana submission that times out client-side but actually completed
+// (isSubmitTimeout's ambiguous case) stays recoverable for up to
+// idempotency.server.ts's AMBIGUOUS_TTL_MS (60 min) / AIStudioPanel.tsx's
+// RECOVERY_MAX_AGE_MS.submissionAmbiguous (55 min) — a shorter TTL here would
+// let that recovery path report "job completed" while the actual generated
+// (already billed) bytes had already been pruned out from under it. If
+// AMBIGUOUS_TTL_MS changes, this must change with it.
+const TTL_MS = 60 * 60_000;
 const MAX_ENTRIES = 100;
 const store = new Map<string, StoredResult>();
 // Slots claimed by a generation that is currently paying for a result but

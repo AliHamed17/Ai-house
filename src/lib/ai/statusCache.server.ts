@@ -40,7 +40,7 @@ import type { GenerationJob, GenerationStatus } from '@/lib/types';
  * dependency and must NOT be forced through CACHE_TTL_MS regardless of the
  * job's own age (regression: an earlier version applied CACHE_TTL_MS to
  * EVERY job unconditionally, measured from the job's own createdAt — so any
- * terminal job older than ten minutes, Higgsfield's included, was evicted on
+ * terminal job older than CACHE_TTL_MS, Higgsfield's included, was evicted on
  * its very next poll and fell straight back to a real provider call,
  * defeating this cache's entire quota-protection purpose for exactly the
  * old, long-since-finished jobs a replay attack would actually target).
@@ -60,7 +60,7 @@ export function isTerminalStatus(status: GenerationStatus): boolean {
 
 // See needsRevalidation below for why only some completed jobs are ever
 // subject to this at all.
-const CACHE_TTL_MS = 10 * 60_000;
+const CACHE_TTL_MS = 60 * 60_000;
 const MAX_ENTRIES = 500;
 // Map preserves insertion order, so the first key is always the
 // longest-cached entry — evicting it on overflow is a simple, correct FIFO

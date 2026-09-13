@@ -175,6 +175,33 @@ interface KeepOutBox {
   maxZ: number;
 }
 
+function boundingBox(corners: Vec2[]): KeepOutBox {
+  const xs = corners.map((c) => c.x);
+  const zs = corners.map((c) => c.z);
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
+}
+
+/** Furniture is not included in collision resolution (see resolveCollision in
+ * collision.ts), so a standing piece placed directly on a room's authored
+ * cameraSpawn would spawn the visitor looking like they're standing inside
+ * it, with nothing to correct that on entry. A floor covering ('rug') is
+ * explicitly exempt — the camera's fixed EYE_HEIGHT_M sits well above a
+ * rug's near-zero height, and standing on a rug is the entire point of one,
+ * unlike a bed, desk, or wardrobe. */
+export function findFurnitureBlockingCameraSpawn(house: HouseModel, items: FurnitureItem[]): string[] {
+  const roomsById = new Map(house.rooms.map((r) => [r.id, r]));
+  const bad: string[] = [];
+  for (const item of items) {
+    if (item.kind === 'rug') continue;
+    const room = roomsById.get(item.roomId);
+    if (!room) continue;
+    const box = boundingBox(furnitureWorldCorners(item));
+    const { x, z } = room.cameraSpawn;
+    if (x >= box.minX && x <= box.maxX && z >= box.minZ && z <= box.maxZ) bad.push(item.id);
+  }
+  return bad;
+}
+
 function aabbOverlaps(a: KeepOutBox, b: KeepOutBox): boolean {
   return !(a.maxX <= b.minX || b.maxX <= a.minX || a.maxZ <= b.minZ || b.maxZ <= a.minZ);
 }

@@ -112,11 +112,17 @@ export const furnitureByRoom: Partial<Record<RoomId, FurnitureItem[]>> = {
   parents_bed: [
     {
       id: 'parents-bed',
+      // Shifted off the room's authored cameraSpawn (13.8, 8.1) — a queen
+      // bed centered in the room would otherwise spawn the visitor standing
+      // inside it (Codex finding: furniture isn't in resolveCollision, so
+      // nothing else corrects this). Real queen dimensions (60x80in ≈
+      // 1.52x2.03m, rounded up slightly for frame overhang) shifted toward
+      // the east wall, still headboard-against-north.
       roomId: 'parents_bed',
       kind: 'bed',
-      position: { x: 13.8, z: 7.55 },
+      position: { x: 14.85, z: 7.48 },
       rotationYRad: 0,
-      footprintM: { widthM: 1.8, depthM: 2.1 },
+      footprintM: { widthM: 1.6, depthM: 2.05 },
       heightM: 0.55,
       colorHex: PALETTE.ivory,
       shopLabel: 'Upholstered queen bed',
@@ -128,7 +134,7 @@ export const furnitureByRoom: Partial<Record<RoomId, FurnitureItem[]>> = {
       id: 'parents-nightstand',
       roomId: 'parents_bed',
       kind: 'nightstand',
-      position: { x: 12.8, z: 6.7 },
+      position: { x: 13.75, z: 6.7 },
       rotationYRad: 0,
       footprintM: { widthM: 0.45, depthM: 0.4 },
       heightM: 0.5,

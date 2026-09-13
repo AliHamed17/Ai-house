@@ -83,7 +83,7 @@ export const mockProvider: MediaGenerationProvider = {
       // 2.6s) — it says nothing about a job whose status check is delayed or
       // resumed much later (recoverableJobId's own ceiling allows up to 24h;
       // see RECOVERY_MAX_AGE_MS.job in AIStudioPanel). By then the source has
-      // almost certainly fallen out of the 10-minute TTL store, and baking
+      // almost certainly fallen out of the 60-minute TTL store, and baking
       // its path into a job reported as "completed" would render a broken
       // preview. Re-validating existence here, on every completed check
       // (not just once at submit), is what catches that.

@@ -127,7 +127,16 @@ export type FurnitureKind =
   | 'nightstand'
   | 'desk'
   | 'wardrobe'
-  | 'vanity';
+  | 'vanity'
+  // Fitted kitchen joinery, introduced by the transformation sequence.
+  | 'wall-cabinet'
+  | 'tall-cabinet'
+  | 'base-run'
+  | 'backsplash'
+  | 'suspended-shelf'
+  | 'island'
+  | 'worktop-accessory'
+  | 'pendant';
 
 export interface FurnitureItem {
   id: string;
@@ -146,6 +155,68 @@ export interface FurnitureItem {
   retailer: string;
   /** Real, verified URL to a product or category page where this can be bought. */
   productUrl: string;
+  /**
+   * Height of the item's underside above the floor, in meters. Absent means
+   * floor-standing (0). Used by wall-hung joinery (upper cabinets, the
+   * suspended shelf) and by ceiling-hung pendants, whose footprint sits over
+   * open floor that a visitor still walks through — which is also why these
+   * are excluded from the camera-spawn blocking check.
+   */
+  mountYM?: number;
+  /**
+   * Transformation stage at which this item first appears. Items without a
+   * stage are always present. Drives BOTH the rendered video and the
+   * real-time 3D scene from this one field — see src/lib/transformation.ts.
+   */
+  transformationStage?: TransformationStageId;
+}
+
+// ---------------------------------------------------------------------------
+// Reference-matched room transformation (video <-> 3D shared state)
+// ---------------------------------------------------------------------------
+
+export type TransformationStageId =
+  | 'empty'
+  | 'upper-cabinets'
+  | 'backsplash'
+  | 'cabinet-wall'
+  | 'counter-details'
+  | 'suspended-feature'
+  | 'island'
+  | 'stools'
+  | 'decor'
+  | 'daylight-hold'
+  | 'dusk'
+  | 'warm-reveal';
+
+/** Lighting state a stage renders under. */
+export type TransformationLighting = 'daylight' | 'daylight-dimming' | 'dusk' | 'warm-evening';
+
+export type TransformationGesture =
+  | 'none'
+  | 'open-hand-sweep'
+  | 'pinch-drag'
+  | 'horizontal-sweep'
+  | 'two-sided-placement'
+  | 'repeated-pinch'
+  | 'pinch-from-ceiling'
+  | 'two-finger-place';
+
+export interface TransformationStage {
+  id: TransformationStageId;
+  index: number;
+  /** Seconds from the start of the sequence. Measured from the reference. */
+  start: number;
+  end: number;
+  label: string;
+  /** What the visitor is told is happening, for captions/accessibility. */
+  caption: string;
+  gesture: TransformationGesture;
+  /** Where the gesture enters from, used by the deterministic hand compositor. */
+  gestureFrom: 'top' | 'right' | 'left' | 'bottom' | null;
+  lighting: TransformationLighting;
+  /** Furniture ids that become visible at this stage (cumulative thereafter). */
+  furnitureIds: string[];
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { Html } from '@react-three/drei';
 import { allFurnitureItems } from '@/data/furniture';
+import { useViewerStore } from '@/lib/store/viewerStore';
+import { isFurnitureVisibleAtStage } from '@/lib/transformation';
 import { FurnitureMesh } from './FurnitureMesh';
 
 /**
@@ -11,15 +13,22 @@ import { FurnitureMesh } from './FurnitureMesh';
  * opens a small panel with a real "Shop this" link. Anchor height for both
  * uses a sensible floor so a low/floating item (e.g. a wall-mounted vanity)
  * still gets a legible marker instead of one buried near the floor.
+ *
+ * When a transformation stage is active the kitchen shows only the objects
+ * that exist at that stage — the same filter the video is assembled from
+ * (src/lib/transformation.ts), so the two can never disagree. Every other
+ * room is unaffected.
  */
 export function FurnitureHotspots() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const transformationStage = useViewerStore((s) => s.transformationStage);
 
   return (
     <group>
       {allFurnitureItems.map((item) => {
-        const anchorY = Math.max(item.heightM + 0.2, 0.9);
+        if (!isFurnitureVisibleAtStage(item, transformationStage)) return null;
+        const anchorY = Math.max((item.mountYM ?? 0) + item.heightM + 0.2, 0.9);
         return (
           <group
             key={item.id}

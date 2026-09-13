@@ -115,7 +115,12 @@ test.describe('AI Design Studio (demo mode)', () => {
     // A mock job's resultUrl is never a real video, regardless of its shape
     // (see isPlayableVideo) — it must always get the Ken-Burns-pan <Image>
     // treatment, never mount a <video> tag pointed at a non-video URL.
-    await expect(page.locator('video')).toHaveCount(0);
+    //
+    // Scoped to the studio section rather than the whole page: the landing
+    // page now legitimately contains a <video> of its own (the kitchen
+    // transformation sequence), and a page-wide selector would fail on that
+    // instead of on what this regression is actually about.
+    await expect(page.locator('#ai-studio video')).toHaveCount(0);
     await expect(page.getByText(/Demo mode simulates the cinematic move/i)).toBeVisible();
   });
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import type { RoomId } from '@/lib/types';
+import type { RoomId, TransformationStageId } from '@/lib/types';
 import { ENTRY_ROOM_ID } from '@/data/house';
 
 export type ViewMode = 'first-person' | 'orbit' | 'floorplan';
@@ -61,6 +61,16 @@ interface ViewerState {
 
   mobileMove: { x: number; z: number };
   setMobileMove: (v: { x: number; z: number }) => void;
+
+  /**
+   * Which stage of the kitchen transformation the 3D room is showing.
+   * null = show the finished house (every room fully furnished), which is
+   * the normal explorer state. Setting a stage id makes the kitchen show
+   * exactly the objects the transformation video shows at that stage, so a
+   * visitor can step out of the film and into the same moment in 3D.
+   */
+  transformationStage: TransformationStageId | null;
+  setTransformationStage: (stage: TransformationStageId | null) => void;
 }
 
 export const useViewerStore = create<ViewerState>((set) => ({
@@ -107,4 +117,7 @@ export const useViewerStore = create<ViewerState>((set) => ({
 
   mobileMove: { x: 0, z: 0 },
   setMobileMove: (v) => set({ mobileMove: v }),
+
+  transformationStage: null,
+  setTransformationStage: (stage) => set({ transformationStage: stage }),
 }));

@@ -12,7 +12,10 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "generate:placeholders": "node scripts/generate-placeholders.mjs",
-    "generate:concepts": "uv run scripts/generate-concepts.py"
+    "generate:concepts": "uv run scripts/generate-concepts.py",
+    "transformation:stills": "node scripts/render-stage-stills.mjs",
+    "transformation:compose": "python3 scripts/compose-transformation.py",
+    "transformation:qa": "python3 scripts/qa-contact-sheet.py"
   },
   "dependencies": {
     "@google/genai": "^2.21.0",

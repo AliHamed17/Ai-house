@@ -136,6 +136,82 @@ scripts/smoke.mjs               Manual visual smoke script (screenshots every ma
 .claude/skills/nano-banana/     Nano Banana (Gemini image) skill used by scripts/generate-concepts.py
 ```
 
+## Kitchen transformation sequence
+
+A reference-matched, 13.37 s vertical film in which the kitchen builds itself
+under a locked camera — and which shares one design state with the walkable 3D
+room, so you can step out of the film and into the same moment in 3D.
+
+**The whole point is that nothing generative touches the geometry.** Every
+frame is rendered from the same house model the explorer walks through, from a
+camera whose position, target and FOV are constants, so the architecture
+cannot drift, morph or breathe between stages. Objects only ever accumulate.
+
+- `analysis/reference-transformation-video.json` — frame-level forensic
+  analysis of the supplied reference (measured, not estimated: stage
+  boundaries, gesture windows, a 0 px camera-drift measurement, and the
+  luminance arc). Reference imagery is **not** redistributed; only numbers
+  survive into the pipeline.
+- `src/data/kitchenTransformation.ts` — **the manifest, and the single source
+  of truth.** Stage timings here are the reference's measured transition
+  timestamps. It drives the stills, the clip prompts, the compositor, the
+  player and the 3D room's stage state. There is no second copy of the timing.
+- `src/data/furniture.ts` — the finished kitchen, dimensioned against this
+  kitchen's real geometry, each piece tagged with the stage it appears at.
+  The video and the 3D room read the same list, so they cannot disagree.
+- `src/lib/transformation.ts` — the pure mapping layer:
+  `getTransformationStageAtTime(t)`, `visibleFurnitureAtStage(id)`,
+  `isFurnitureVisibleAtStage(item, id)`, `exposureAtTime(t)`.
+
+### Regenerating it
+
+```bash
+pip install pillow numpy imageio-ffmpeg      # one-time, for the compositor
+npm run build && npm run start &             # the renderer reads the live app
+
+npm run transformation:stills                # 12 locked-camera stage stills
+npm run transformation:compose               # assemble the master MP4/WebM/poster
+npm run transformation:qa                    # reference-vs-result QA report
+```
+
+Outputs land in `public/transformation/` (master `.mp4`, `.webm`, poster,
+published stage stills, `manifest.json`) and `analysis/transformation-qa.json`.
+
+### Where Higgsfield fits
+
+Higgsfield is wired for **motion between two already-approved stills** and
+nothing else — it is never asked to invent geometry, choose a camera, decide
+what furniture exists, or control edit timing. A model that cannot change the
+room cannot make the room drift.
+
+- `src/lib/ai/transformationClips.server.ts` — the clip plan and the
+  differential, preservation-first prompts (each names only what its stage
+  adds, then spends its budget forbidding change).
+- `POST /api/transformation/clip` — submits one clip. It inherits every guard
+  the other generate routes use (rate limit, the `AI_ALLOW_LIVE` master
+  switch, cost confirmation, signed job ids, idempotent reservation), and
+  **derives the source image path itself from the stage id** rather than
+  accepting one from the caller, so it cannot be used to point Higgsfield's
+  credentialed fetch at an arbitrary URL.
+- `GET /api/transformation/clip` — describes the plan without submitting
+  anything. Nothing bills on page load; generation needs an explicit POST.
+
+**Without Higgsfield credentials the sequence is unaffected** — the committed
+master video is assembled entirely from the deterministic 3D renders, and
+clips are an optional enhancement layer on top.
+
+### The hand layer
+
+`scripts/hand_layer.py` draws the gesture hands procedurally rather than
+generating them. Hands are exactly where video models fail worst (six fingers,
+melting wrists, a hand that occludes the geometry that must stay stable), and a
+deterministic hand that is merely stylised beats a photoreal one that is
+sometimes malformed. Every hand is built from one anatomically-proportioned rig
+— palm, four fingers at real relative lengths, an opposed thumb — so it can be
+posed but cannot come out wrong. Gesture semantics (pinch = discrete object,
+sweep = continuous surface) mirror the grammar measured off the reference, and
+each gesture peaks on exactly the frame its object appears.
+
 ## Manual visual QA checklist
 
 Automated tests cover data integrity, geometry, and interaction flows: run

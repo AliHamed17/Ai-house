@@ -25,6 +25,8 @@ export function ViewerHud({ onExit }: { onExit: () => void }) {
   const requestTeleport = useViewerStore((s) => s.requestTeleport);
   const requestOrbitReset = useViewerStore((s) => s.requestOrbitReset);
   const isPointerLocked = useViewerStore((s) => s.isPointerLocked);
+  const transformationStage = useViewerStore((s) => s.transformationStage);
+  const setTransformationStage = useViewerStore((s) => s.setTransformationStage);
   const [variantMenuOpen, setVariantMenuOpen] = useState(false);
 
   // Reset means different things per mode: in dollhouse it restores the
@@ -43,6 +45,26 @@ export function ViewerHud({ onExit }: { onExit: () => void }) {
 
   return (
     <>
+      {/* Entering from the transformation film drops the visitor into a
+          part-built kitchen on purpose. Without a visible way back to the
+          finished room that reads as missing furniture rather than a chosen
+          moment, so the state is always announced and always reversible. */}
+      {transformationStage && (
+        <div className="pointer-events-none absolute inset-x-0 top-20 z-30 flex justify-center px-4">
+          <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-bronze/50 bg-ivory/95 px-4 py-2 text-xs shadow-lg backdrop-blur-sm">
+            <span className="text-charcoal/75">
+              Showing the kitchen mid-build — stage &ldquo;{transformationStage}&rdquo;
+            </span>
+            <button
+              type="button"
+              onClick={() => setTransformationStage(null)}
+              className="rounded-full bg-bronze px-3 py-1 font-medium text-ivory hover:bg-charcoal"
+            >
+              Show finished kitchen
+            </button>
+          </div>
+        </div>
+      )}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-start justify-between gap-2 p-4">
         <div className="pointer-events-auto flex flex-wrap items-center gap-2">
           <button

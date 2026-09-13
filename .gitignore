@@ -47,3 +47,6 @@ next-env.d.ts
 /playwright/.cache/
 /blob-report/
 /smoke-output/
+.transformation-work/
+.refwork/
+__pycache__/

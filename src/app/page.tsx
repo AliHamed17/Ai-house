@@ -9,6 +9,7 @@ import { FloorPlanSection } from '@/components/landing/FloorPlanSection';
 import { RoomStories } from '@/components/landing/RoomStories';
 import { MaterialsBoard } from '@/components/landing/MaterialsBoard';
 import { BeforeConceptSection } from '@/components/landing/BeforeConceptSection';
+import { RoomTransformation } from '@/components/landing/RoomTransformation';
 import { AIStudioSection } from '@/components/landing/AIStudioSection';
 import { TechnicalNote } from '@/components/landing/TechnicalNote';
 import { useViewerStore } from '@/lib/store/viewerStore';
@@ -48,6 +49,7 @@ export default function Home() {
         <FloorPlanSection onEnterRoom={openExplorerAt} />
         <RoomStories onEnterRoom={openExplorerAt} />
         <MaterialsBoard />
+        <RoomTransformation onEnterRoom={openExplorerAt} />
         <BeforeConceptSection />
         <AIStudioSection />
         <TechnicalNote />

@@ -89,11 +89,24 @@ function WindowGlazing({ wall, voidDef }: { wall: BuiltWall; voidDef: WallVoid }
           side={THREE.DoubleSide}
         />
       </mesh>
-      {/* Frame */}
-      <mesh>
-        <boxGeometry args={[width, height, 0.05]} />
-        <meshStandardMaterial color="#4B4037" wireframe />
-      </mesh>
+      {/* Slim four-sided frame. This was previously a single `wireframe` box,
+          which three.js draws as the box's triangulated edges — including the
+          diagonals across each face, so every window read as a white-crossed
+          placeholder rather than a window. Four thin bars is both correct and
+          cheaper than the wireframe pass. */}
+      {(
+        [
+          [0, height / 2 - 0.03, width, 0.06],
+          [0, -height / 2 + 0.03, width, 0.06],
+          [-width / 2 + 0.03, 0, 0.06, height],
+          [width / 2 - 0.03, 0, 0.06, height],
+        ] as const
+      ).map(([fx, fy, fw, fh], i) => (
+        <mesh key={i} position={[fx, fy, 0]}>
+          <boxGeometry args={[fw, fh, 0.06]} />
+          <meshStandardMaterial color="#4B4037" roughness={0.6} metalness={0.1} />
+        </mesh>
+      ))}
     </group>
   );
 }

@@ -6,6 +6,7 @@
 
 import type { FurnitureItem, HouseModel, RoomId, Vec2 } from '@/lib/types';
 import { buildAllWalls } from '@/lib/geometry/wallPanels';
+import { EYE_HEIGHT_M } from '@/data/house';
 
 export function findDuplicateRoomIds(house: HouseModel): RoomId[] {
   const seen = new Set<RoomId>();
@@ -181,18 +182,32 @@ function boundingBox(corners: Vec2[]): KeepOutBox {
   return { minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
 }
 
+/** Height below which a visitor simply steps over something (a rug, a
+ *  threshold strip) rather than being blocked by it. */
+const STEP_OVER_M = 0.1;
+
+/** Vertical span a standing visitor actually occupies: from step-over height
+ *  up to eye level. An item entirely below it is walked over; an item
+ *  entirely above it is walked under. Only items overlapping this band can
+ *  trap the camera. */
+function occupiesWalkingVolume(item: FurnitureItem): boolean {
+  const bottom = item.mountYM ?? 0;
+  const top = bottom + item.heightM;
+  return top > STEP_OVER_M && bottom < EYE_HEIGHT_M;
+}
+
 /** Furniture is not included in collision resolution (see resolveCollision in
  * collision.ts), so a standing piece placed directly on a room's authored
  * cameraSpawn would spawn the visitor looking like they're standing inside
- * it, with nothing to correct that on entry. A floor covering ('rug') is
- * explicitly exempt — the camera's fixed EYE_HEIGHT_M sits well above a
- * rug's near-zero height, and standing on a rug is the entire point of one,
- * unlike a bed, desk, or wardrobe. */
+ * it, with nothing to correct that on entry. Only items that actually
+ * occupy the standing visitor's vertical band count: a floor covering is
+ * stepped over and wall- or ceiling-hung joinery is walked under, so
+ * neither can trap a camera fixed at EYE_HEIGHT_M. */
 export function findFurnitureBlockingCameraSpawn(house: HouseModel, items: FurnitureItem[]): string[] {
   const roomsById = new Map(house.rooms.map((r) => [r.id, r]));
   const bad: string[] = [];
   for (const item of items) {
-    if (item.kind === 'rug') continue;
+    if (!occupiesWalkingVolume(item)) continue;
     const room = roomsById.get(item.roomId);
     if (!room) continue;
     const box = boundingBox(furnitureWorldCorners(item));

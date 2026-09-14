@@ -149,8 +149,11 @@ export function RoomTransformation({
 
   /** Step out of the film and into the same design state in the 3D explorer. */
   const enterAtThisStage = useCallback(() => {
-    // The evening beats should open the room lit the way the film just showed
-    // it, or the handoff lands in a visibly different room.
+    // The stage's OWN authored rig lights the explorer now (see Scene.tsx),
+    // so this no longer drives the handoff itself. It sets the mode the
+    // visitor falls back to the moment they clear the stage with "Show
+    // finished kitchen", so leaving an evening beat does not snap the room to
+    // midday.
     setLightingMode(stage.lighting === 'warm-evening' || stage.lighting === 'dusk' ? 'evening' : 'day');
     // The page owns whether the explorer is mounted (see page.tsx), same as
     // the floor plan and room-story sections — the store's isExplorerOpen is

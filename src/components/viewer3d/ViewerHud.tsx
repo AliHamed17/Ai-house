@@ -99,12 +99,26 @@ export function ViewerHud({ onExit }: { onExit: () => void }) {
         </div>
 
         <div className="pointer-events-auto flex flex-wrap items-center gap-2">
-          <div className="flex overflow-hidden rounded-full border border-limestone/60 bg-ivory/90 shadow-lg backdrop-blur-sm">
+          {/* While a transformation stage is showing, the room is lit by that
+              moment's own authored rig (see StageLighting), so this toggle
+              cannot take effect. Disabled and explained rather than left live
+              and silently overridden — and rather than clearing the stage on
+              click, which would throw away the mid-build view the visitor
+              deliberately entered. "Show finished kitchen" is the way out. */}
+          <div
+            className="flex overflow-hidden rounded-full border border-limestone/60 bg-ivory/90 shadow-lg backdrop-blur-sm"
+            title={
+              transformationStage
+                ? 'Lighting follows the transformation moment you entered. Choose "Show finished kitchen" to control it yourself.'
+                : undefined
+            }
+          >
             <button
               type="button"
               onClick={() => setLightingMode('day')}
               aria-pressed={lightingMode === 'day'}
-              className={`px-3 py-2 text-xs font-semibold tracking-wide ${lightingMode === 'day' ? 'bg-bronze text-ivory' : 'text-charcoal hover:bg-limestone/50'}`}
+              disabled={transformationStage !== null}
+              className={`px-3 py-2 text-xs font-semibold tracking-wide disabled:cursor-not-allowed disabled:opacity-45 ${lightingMode === 'day' ? 'bg-bronze text-ivory' : 'text-charcoal hover:bg-limestone/50'}`}
             >
               ☀ Day
             </button>
@@ -112,7 +126,8 @@ export function ViewerHud({ onExit }: { onExit: () => void }) {
               type="button"
               onClick={() => setLightingMode('evening')}
               aria-pressed={lightingMode === 'evening'}
-              className={`px-3 py-2 text-xs font-semibold tracking-wide ${lightingMode === 'evening' ? 'bg-bronze text-ivory' : 'text-charcoal hover:bg-limestone/50'}`}
+              disabled={transformationStage !== null}
+              className={`px-3 py-2 text-xs font-semibold tracking-wide disabled:cursor-not-allowed disabled:opacity-45 ${lightingMode === 'evening' ? 'bg-bronze text-ivory' : 'text-charcoal hover:bg-limestone/50'}`}
             >
               ☾ Evening
             </button>

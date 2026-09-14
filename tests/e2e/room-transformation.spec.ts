@@ -59,6 +59,28 @@ test.describe('room transformation section', () => {
     await expect(page.getByText(/Showing the kitchen mid-build/i)).toHaveCount(0);
   });
 
+  test('the stage drives the room lighting, so the day/evening toggle is not silently overridden', async ({ page }) => {
+    // The handoff preserves the whole moment, lighting included: the explorer
+    // renders the film's own authored rig (StageLighting) rather than
+    // collapsing four states into the viewer's day/evening presets. The
+    // toggle therefore cannot take effect while a stage is showing, so it is
+    // disabled and explained instead of left live and ignored.
+    await page.goto('/');
+    const section = page.locator('#transformation');
+    await section.scrollIntoViewIfNeeded();
+    await section.getByRole('button', { name: /Warm reveal/ }).click();
+    await section.getByRole('button', { name: /Enter this moment in 3D/i }).click();
+
+    await expect(page.getByText(/Showing the kitchen mid-build/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: /☀ Day/ })).toBeDisabled();
+    await expect(page.getByRole('button', { name: /☾ Evening/ })).toBeDisabled();
+
+    // Clearing the stage hands lighting back to the visitor.
+    await page.getByRole('button', { name: /Show finished kitchen/i }).click();
+    await expect(page.getByRole('button', { name: /☀ Day/ })).toBeEnabled();
+    await expect(page.getByRole('button', { name: /☾ Evening/ })).toBeEnabled();
+  });
+
   test('an ordinary explorer entry afterwards opens the FINISHED kitchen, not the mid-build one (regression)', async ({ page }) => {
     // The stage lives in a module-level store that outlives the explorer's
     // unmount, so entering through the film and closing left it set. A later

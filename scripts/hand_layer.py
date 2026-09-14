@@ -20,7 +20,13 @@ Gesture vocabulary matches analysis/reference-transformation-video.json's
 from __future__ import annotations
 
 import math
+import sys
+from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFilter
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gesture_timing import travel_for_progress  # noqa: E402
 
 # Warm neutral skin tone, kept deliberately desaturated so the hand reads as a
 # silhouette-with-form rather than competing with the room's palette.
@@ -162,8 +168,9 @@ def gesture_pose(gesture: str, progress: float) -> dict:
     object appears), 1 = fully withdrawn.
     """
     # Ease so the hand decelerates into the action and accelerates away,
-    # which is what makes the cause->effect read as deliberate.
-    e = 1 - (1 - progress) ** 2 if progress < 0.5 else progress**2
+    # which is what makes the cause->effect read as deliberate. Monotonic and
+    # centred on 0.5 — see scripts/gesture_timing.py for why both matter.
+    e = travel_for_progress(progress)
     near = 1.0 - abs(progress - 0.5) * 2.0  # 0 at the edges, 1 at the action
 
     if gesture == "open-hand-sweep":

@@ -41,6 +41,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clip_schedule import build_clip_schedule, build_clip_windows  # noqa: E402
+from gesture_timing import gesture_progress  # noqa: E402
 from hand_layer import render_gesture  # noqa: E402
 
 # The hand arrives shortly before the object lands and leaves shortly after.
@@ -252,7 +253,11 @@ def main() -> int:
             g_start = s["start"] - HAND_LEAD_SEC
             g_end = s["start"] + HAND_TRAIL_SEC
             if g_start <= t <= g_end:
-                progress = (t - g_start) / (g_end - g_start)
+                # Not a plain ramp across the window: the lead and trail are
+                # deliberately unequal, so that would put the action instant
+                # 50 ms before the boundary instead of on it. See
+                # scripts/gesture_timing.py.
+                progress = gesture_progress(t, s["start"], HAND_LEAD_SEC, HAND_TRAIL_SEC)
                 hand = render_gesture((width, height), s["gesture"], s["gestureFrom"], progress)
                 if hand is not None:
                     img = Image.alpha_composite(img.convert("RGBA"), hand).convert("RGB")

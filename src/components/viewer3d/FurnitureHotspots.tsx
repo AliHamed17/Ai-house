@@ -5,6 +5,7 @@ import { Html } from '@react-three/drei';
 import { allFurnitureItems } from '@/data/furniture';
 import { useViewerStore } from '@/lib/store/viewerStore';
 import { getStage, isFurnitureVisibleAtStage } from '@/lib/transformation';
+import { stageLightingGlows } from './StageLighting';
 import { FurnitureMesh } from './FurnitureMesh';
 
 /**
@@ -29,13 +30,11 @@ export function FurnitureHotspots() {
   // in the transformation's dusk/warm-reveal beats, and in ordinary evening
   // mode. Without this the "enter this exact moment in 3D" handoff dropped
   // into an unlit version of a stage the video had just shown glowing.
+  // Which objects glow comes from the SAME rig table that lights the scene
+  // (see StageLighting), not a second hardcoded list of lighting states that
+  // could drift from it. Outside a stage, the viewer's own mode decides.
   const stageLighting = transformationStage ? getStage(transformationStage).lighting : null;
-  const warmLight =
-    stageLighting === 'dusk' || stageLighting === 'warm-evening'
-      ? true
-      : stageLighting !== null
-        ? false
-        : lightingMode === 'evening';
+  const warmLight = stageLighting !== null ? stageLightingGlows(stageLighting) : lightingMode === 'evening';
 
   return (
     <group>

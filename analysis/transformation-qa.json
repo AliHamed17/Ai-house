@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-13T22:51:35.112805+00:00",
+  "generatedAt": "2026-09-14T12:02:41.596749+00:00",
   "method": "Stage-by-stage comparison of the measured reference against the assembled result; luminance sampled at each stage midpoint from a 4 fps extraction.",
   "whatIsCompared": [
     "stage order",
@@ -37,7 +37,7 @@
   "beatTimingProblems": [],
   "timingVerifiedAgainst": "public/transformation/manifest.json",
   "lightingArcCorrelation": 0.9969,
-  "allStageLuminanceCorrelation": 0.6068,
+  "allStageLuminanceCorrelation": 0.6113,
   "correlationCaveat": "allStageLuminanceCorrelation is expected to be weak and is reported only for completeness: most of the reference's early luminance movement is content entering frame (dark joinery), not a lighting change, and two different kitchens cannot agree on that. lightingArcCorrelation covers the stages where lighting is the only variable.",
   "stages": [
     {
@@ -45,7 +45,7 @@
       "referenceStart": 0.0,
       "referenceEnd": 0.75,
       "referenceLuminance": 154.6,
-      "resultLuminance": 115.0,
+      "resultLuminance": 115.3,
       "lighting": "daylight",
       "gesture": "open-hand sweep along the ceiling/wall junction, fingers spread, entering from the top of frame"
     },
@@ -99,7 +99,7 @@
       "referenceStart": 6.9,
       "referenceEnd": 7.7,
       "referenceLuminance": 108.7,
-      "resultLuminance": 114.5,
+      "resultLuminance": 113.3,
       "lighting": "daylight",
       "gesture": "two-finger placement in the foreground, then drag right to extend the mass"
     },
@@ -108,7 +108,7 @@
       "referenceStart": 7.7,
       "referenceEnd": 8.7,
       "referenceLuminance": 95.0,
-      "resultLuminance": 116.3,
+      "resultLuminance": 116.2,
       "lighting": "daylight",
       "gesture": "successive pinch-placements along the island face, one per seat"
     },
@@ -117,7 +117,7 @@
       "referenceStart": 8.7,
       "referenceEnd": 10.15,
       "referenceLuminance": 101.8,
-      "resultLuminance": 112.5,
+      "resultLuminance": 112.6,
       "lighting": "daylight",
       "gesture": "final delicate pinch-placements at worktop and island centre, then hands exit frame"
     },

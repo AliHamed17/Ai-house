@@ -59,6 +59,29 @@ test.describe('room transformation section', () => {
     await expect(page.getByText(/Showing the kitchen mid-build/i)).toHaveCount(0);
   });
 
+  test('an ordinary explorer entry afterwards opens the FINISHED kitchen, not the mid-build one (regression)', async ({ page }) => {
+    // The stage lives in a module-level store that outlives the explorer's
+    // unmount, so entering through the film and closing left it set. A later
+    // entry through the header/hero/floor plan then reopened the kitchen
+    // partially built, mid-build banner and all, from a click that never
+    // asked for that handoff.
+    await page.goto('/');
+    const section = page.locator('#transformation');
+    await section.scrollIntoViewIfNeeded();
+    await section.getByRole('button', { name: /Suspended shelf/ }).click();
+    await section.getByRole('button', { name: /Enter this moment in 3D/i }).click();
+    await expect(page.getByText(/Showing the kitchen mid-build/i)).toBeVisible();
+
+    // Leave, then come back the ordinary way — through the floor plan, which
+    // never asks for a stage.
+    await page.getByRole('button', { name: /Exit 3D/i }).click();
+    await expect(page.getByRole('dialog', { name: /Interactive 3D house explorer/i })).toHaveCount(0);
+
+    await page.locator('#floor-plan svg polygon').first().click();
+    await expect(page.getByRole('dialog', { name: /Interactive 3D house explorer/i })).toBeVisible();
+    await expect(page.getByText(/Showing the kitchen mid-build/i)).toHaveCount(0);
+  });
+
   test('never autoplays for a visitor who asked for reduced motion (regression)', async ({ browser }) => {
     // This has been wrong twice: first because the preference was read from a
     // store only the 3D explorer populates (and the explorer is not mounted on

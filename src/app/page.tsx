@@ -14,7 +14,7 @@ import { AIStudioSection } from '@/components/landing/AIStudioSection';
 import { TechnicalNote } from '@/components/landing/TechnicalNote';
 import { useViewerStore } from '@/lib/store/viewerStore';
 import { houseModel, ENTRY_ROOM_ID } from '@/data/house';
-import type { RoomId } from '@/lib/types';
+import type { RoomId, TransformationStageId } from '@/lib/types';
 
 const Explorer3D = dynamic(() => import('@/components/viewer3d/Explorer3D').then((m) => m.Explorer3D), {
   ssr: false,
@@ -28,15 +28,25 @@ const Explorer3D = dynamic(() => import('@/components/viewer3d/Explorer3D').then
 export default function Home() {
   const [explorerOpen, setExplorerOpen] = useState(false);
 
-  const openExplorerAt = useCallback((roomId: RoomId) => {
-    const room = houseModel.rooms.find((r) => r.id === roomId);
-    if (room) {
-      useViewerStore.getState().setPlayerPose({ x: room.cameraSpawn.x, z: room.cameraSpawn.z, yaw: room.cameraSpawnYaw });
-      useViewerStore.getState().setActiveRoomId(room.id);
-      useViewerStore.getState().setMode('first-person');
-    }
-    setExplorerOpen(true);
-  }, []);
+  const openExplorerAt = useCallback(
+    (roomId: RoomId, options?: { transformationStage?: TransformationStageId }) => {
+      const room = houseModel.rooms.find((r) => r.id === roomId);
+      if (room) {
+        useViewerStore.getState().setPlayerPose({ x: room.cameraSpawn.x, z: room.cameraSpawn.z, yaw: room.cameraSpawnYaw });
+        useViewerStore.getState().setActiveRoomId(room.id);
+        useViewerStore.getState().setMode('first-person');
+      }
+      // The store outlives the explorer's unmount, so a stage left behind by
+      // an earlier "Enter this moment in 3D" would otherwise be inherited by
+      // the next ordinary entry: the kitchen would reopen partially built,
+      // mid-build banner and all, from a click that never asked for it.
+      // Every entry point states its intent here rather than relying on
+      // whoever opened the explorer last to have cleaned up.
+      useViewerStore.getState().setTransformationStage(options?.transformationStage ?? null);
+      setExplorerOpen(true);
+    },
+    [],
+  );
 
   const openExplorer = useCallback(() => openExplorerAt(ENTRY_ROOM_ID), [openExplorerAt]);
 

@@ -50,7 +50,11 @@ const ASSETS = {
  * 3D" is a genuine handoff rather than a coincidence of two separately
  * authored things looking similar.
  */
-export function RoomTransformation({ onEnterRoom }: { onEnterRoom: (roomId: RoomId) => void }) {
+export function RoomTransformation({
+  onEnterRoom,
+}: {
+  onEnterRoom: (roomId: RoomId, options?: { transformationStage?: TransformationStageId }) => void;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
   const [stageId, setStageId] = useState<TransformationStageId>(TRANSFORMATION_STAGES[0].id);
@@ -75,7 +79,6 @@ export function RoomTransformation({ onEnterRoom }: { onEnterRoom: (roomId: Room
     getReducedMotionServerSnapshot,
   );
 
-  const setTransformationStage = useViewerStore((s) => s.setTransformationStage);
   const setLightingMode = useViewerStore((s) => s.setLightingMode);
 
   const stage = useMemo(() => TRANSFORMATION_STAGES.find((s) => s.id === stageId)!, [stageId]);
@@ -146,15 +149,17 @@ export function RoomTransformation({ onEnterRoom }: { onEnterRoom: (roomId: Room
 
   /** Step out of the film and into the same design state in the 3D explorer. */
   const enterAtThisStage = useCallback(() => {
-    setTransformationStage(stageId);
     // The evening beats should open the room lit the way the film just showed
     // it, or the handoff lands in a visibly different room.
     setLightingMode(stage.lighting === 'warm-evening' || stage.lighting === 'dusk' ? 'evening' : 'day');
     // The page owns whether the explorer is mounted (see page.tsx), same as
     // the floor plan and room-story sections — the store's isExplorerOpen is
-    // not what actually renders it.
-    onEnterRoom(TRANSFORMATION_ROOM_ID);
-  }, [stageId, stage.lighting, setTransformationStage, setLightingMode, onEnterRoom]);
+    // not what actually renders it. The stage travels WITH the request rather
+    // than being written to the store first: openExplorerAt resets it on
+    // every entry, so setting it here beforehand would be clobbered, and an
+    // ordinary entry would otherwise inherit whatever this one left behind.
+    onEnterRoom(TRANSFORMATION_ROOM_ID, { transformationStage: stageId });
+  }, [stageId, stage.lighting, setLightingMode, onEnterRoom]);
 
   return (
     <section

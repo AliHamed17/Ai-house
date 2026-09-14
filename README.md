@@ -197,9 +197,12 @@ room cannot make the room drift.
   is fenced into the interval immediately before it. That fence is what makes
   the windows disjoint: without it a longer clip reached back over its
   predecessor's frames and silently replaced an earlier paid generation. The
-  plan quotes each clip's duration as that window's own frame count, so a clip
-  generated to spec is used whole, with nothing trimmed and nothing paid for
-  unseen.
+  plan quotes that span as `windowSec` — deliberately not a "duration", since
+  the DoP image-to-video endpoint takes no duration parameter and returns a
+  clip at the model's own length. A longer result is **resampled** across its
+  window rather than truncated, so the whole placement motion survives and no
+  billed second is discarded; a clip that already fits is used frame for
+  frame.
 - `POST /api/transformation/clip` — submits one clip. It inherits every guard
   the other generate routes use (rate limit, the `AI_ALLOW_LIVE` master
   switch, cost confirmation, signed job ids, idempotent reservation), and

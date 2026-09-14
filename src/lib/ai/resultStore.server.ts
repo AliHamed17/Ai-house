@@ -1,5 +1,6 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
+import { roomEvidenceFrame } from '@/data/evidenceFrames';
 import type { RoomId } from '@/lib/types';
 
 /**
@@ -140,6 +141,36 @@ export function assertStoredResultRoom(id: string | undefined, roomId: RoomId): 
   // caller's own availability preflight rather than mislabelled here.
   if (!entry) return;
   if (entry.roomId !== roomId) {
+    throw new Error(SOURCE_ROOM_MISMATCH_MESSAGE);
+  }
+}
+
+/**
+ * Throw unless a source that is NOT a stored result is the requested room's
+ * own public evidence frame.
+ *
+ * assertStoredResultRoom above only binds paths that resolve to a stored id.
+ * A public path resolves to none, so it skipped the room check entirely: a
+ * direct request could pair `roomId: "mamad"` with another room's
+ * `/evidence/frames/….jpg`, and readSourceImage would load those bytes while
+ * the generated result was stored and signed AS mamad — manufacturing a
+ * falsely room-tagged source that later refinements and billed Higgsfield
+ * jobs then treat as authoritative.
+ *
+ * The room's own evidence frame is the only legitimate non-stored source: it
+ * is exactly what the studio sends for a first-ever generation. Rooms may
+ * share a frame (living/kitchen/dining are one open zone photographed once),
+ * which is fine — the check is against that room's OWN canonical path,
+ * wherever it points.
+ */
+export function assertPublicSourceRoom(
+  sourceAssetPath: string | undefined,
+  roomId: RoomId,
+): void {
+  if (!sourceAssetPath) return;
+  // A stored result is assertStoredResultRoom's business, not this one's.
+  if (resultIdFromPath(sourceAssetPath)) return;
+  if (sourceAssetPath !== roomEvidenceFrame[roomId]?.path) {
     throw new Error(SOURCE_ROOM_MISMATCH_MESSAGE);
   }
 }

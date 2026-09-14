@@ -54,13 +54,13 @@ def build_clip_windows(
             continue
         end_frame = frame_at(stage["start"], fps)
         # Clamping the head to the PREVIOUS stage's start rather than to frame
-        # 0 is what keeps the windows disjoint. A clip is as long as its own
-        # stage (durationSec = end - start in transformationClips.server.ts),
-        # which can easily exceed the interval before it: backsplash's 1.6 s
-        # clip reached back past upper-cabinets' 0.75 s window entirely, and
-        # the later stage — written into the same map — erased the earlier
-        # one, so an approved, billed clip never appeared in a single frame
-        # while the master still credited it.
+        # 0 is what keeps the windows disjoint. A clip's length is whatever the
+        # provider chose to return, which can easily exceed the interval before
+        # it — and once exceeded it by construction, back when the plan asked
+        # for a clip as long as its own stage: backsplash's 1.6 s clip reached
+        # past upper-cabinets' 0.75 s window entirely and, written into the
+        # same map, erased it. An approved, billed clip then never appeared in
+        # a single frame while the master still credited it.
         floor_frame = frame_at(stages[index - 1]["start"], fps) if index > 0 else 0
         start_frame = max(floor_frame, end_frame - length)
         if start_frame >= end_frame:
@@ -77,6 +77,17 @@ def build_clip_schedule(
     """
     Map master frame index -> (stage id, index of the clip frame to draw).
 
+    A clip longer than its window is RESAMPLED across the window, never
+    truncated. The endpoint the provider actually exposes
+    (/v1/image2video/dop) takes no duration parameter at all, so a live clip
+    comes back at the model's own default length regardless of what the plan
+    asked for. Keeping only the window's worth of tail frames would then throw
+    away the placement motion itself — the object entering and settling, which
+    is the entire reason the clip was generated and paid for — and leave a
+    near-static shot of the already-arrived object. Sampling the whole clip
+    into the window keeps every beat of that motion, just played at the
+    window's pace.
+
     Raises if two clips ever claim the same frame. Construction above makes
     that impossible; the check is here so a future change to the floor rule
     fails loudly instead of silently dropping someone's paid generation again.
@@ -84,13 +95,21 @@ def build_clip_schedule(
     schedule: dict[int, tuple[str, int]] = {}
     for stage_id, (start_frame, end_frame) in build_clip_windows(stages, fps, clip_lengths).items():
         length = clip_lengths[stage_id]
-        for frame_index in range(start_frame, end_frame):
+        window = end_frame - start_frame
+        for offset, frame_index in enumerate(range(start_frame, end_frame)):
             if frame_index in schedule:
                 raise ValueError(
                     f"clip windows overlap at frame {frame_index}: "
                     f"{schedule[frame_index][0]} and {stage_id}"
                 )
-            # Trim from the HEAD when the clip is longer than the room before
-            # the boundary — the tail is the part that must land on it.
-            schedule[frame_index] = (stage_id, length - (end_frame - frame_index))
+            # Endpoint-inclusive linear resample: offset 0 takes the clip's
+            # first frame (the previous stage's state) and the last offset
+            # takes its last (the settled new state), which is the frame that
+            # has to land on the boundary. When window == length this is the
+            # identity map, so a clip generated at the planned size is used
+            # exactly as delivered.
+            clip_index = (
+                round(offset * (length - 1) / (window - 1)) if window > 1 else length - 1
+            )
+            schedule[frame_index] = (stage_id, clip_index)
     return schedule

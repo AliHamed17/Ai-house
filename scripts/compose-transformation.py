@@ -198,8 +198,9 @@ def main() -> int:
             print(f"  clip for stage {stage_id} has no room before its boundary; NOT used", file=sys.stderr)
         elif window[1] - window[0] < clip_lengths[stage_id]:
             print(
-                f"  clip for stage {stage_id} trimmed to {window[1] - window[0]}"
-                f"/{clip_lengths[stage_id]} frames to fit the interval before its boundary"
+                f"  clip for stage {stage_id} is {clip_lengths[stage_id]} frames for a "
+                f"{window[1] - window[0]}-frame window; resampling the whole clip into it "
+                f"(no frames discarded)"
             )
 
     # Each stage still already carries its own baked lighting state, so the

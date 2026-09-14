@@ -5,6 +5,7 @@ import { validateGenerationRequest } from '@/lib/ai/validateGenerationInput.serv
 import { checkRateLimit, clientKeyFromRequest } from '@/lib/ai/rateLimit.server';
 import { buildNanoBananaEditPrompt, buildNanoBananaPrompt } from '@/data/roomPrompts';
 import {
+  assertPublicSourceRoom,
   assertStoredResultRoom,
   isSourceExpiredError,
   isSourceRoomMismatchError,
@@ -63,8 +64,16 @@ export async function POST(request: NextRequest) {
   // room's architecture, and then store and sign the result under the
   // REQUESTED room — manufacturing a falsely room-tagged source that later
   // billed jobs would treat as authoritative.
+  //
+  // A public path resolves to no stored id, so the check above skips it
+  // entirely — which left the same hole open through the other door: a direct
+  // request naming roomId "mamad" alongside another room's evidence frame
+  // would generate from those bytes and then store and sign the result as
+  // MAMAD. assertPublicSourceRoom closes that by requiring a non-stored
+  // source to be the requested room's own evidence frame.
   try {
     assertStoredResultRoom(approvedSourceId, validated.data.roomId);
+    assertPublicSourceRoom(validated.data.sourceAssetPath, validated.data.roomId);
   } catch (error) {
     if (isSourceRoomMismatchError(error)) {
       return NextResponse.json({ error: (error as Error).message }, { status: 400 });

@@ -92,7 +92,19 @@ export interface TransformationClipPlanEntry {
   sourceStageId: TransformationStageId;
   sourceAssetPath: string;
   prompt: string;
-  durationSec: number;
+  /**
+   * The exact span the compositor will fit this clip into, NOT a parameter
+   * sent to the provider: `/v1/image2video/dop` exposes no duration control
+   * at all (see `DoPImage2VideoInput` in @higgsfield/client), so a live clip
+   * returns at the model's own default length whatever is asked for.
+   *
+   * That is safe because a longer result is resampled across this window
+   * rather than truncated (scripts/clip_schedule.py), so the whole placement
+   * motion is kept and no billed second goes unused — it just plays at the
+   * window's pace. Named for what it is so an operator reading the plan is
+   * not told a duration the provider will silently ignore.
+   */
+  windowSec: number;
 }
 
 /**
@@ -129,7 +141,7 @@ export function transformationClipPlan(): TransformationClipPlanEntry[] {
       // difference, so the number an operator generates against is exactly
       // the number of frames the compositor will keep — a boundary landing on
       // a half frame (0.75 s x 30 = 22.5) otherwise leaves the two off by one.
-      durationSec: clipWindowFrames(previous.start, stage.start) / TRANSFORMATION_OUTPUT.fps,
+      windowSec: clipWindowFrames(previous.start, stage.start) / TRANSFORMATION_OUTPUT.fps,
     });
   }
   return plan;

@@ -25,12 +25,12 @@ describe('transformation clip plan durations', () => {
       // The window the compositor gives it: [previous.start, stage.start).
       const windowFrames = clipWindowFrames(previous.start, stage.start);
       expect(windowFrames).toBeGreaterThan(0);
-      expect(entry.durationSec).toBeCloseTo(windowFrames / TRANSFORMATION_OUTPUT.fps, 10);
+      expect(entry.windowSec).toBeCloseTo(windowFrames / TRANSFORMATION_OUTPUT.fps, 10);
     }
   });
 
   it('never requests a clip longer than its window, at frame resolution', () => {
-    // Regression: durationSec used to be the TARGET stage's own length, so
+    // Regression: the plan used to quote the TARGET stage's own length, so
     // counter-details (2.0 s) was generated against cabinet-wall's 0.65 s
     // window and 68% of it was trimmed off unseen.
     //
@@ -43,7 +43,7 @@ describe('transformation clip plan durations', () => {
       const stage = stageById[entry.stageId];
       const previous = stageById[entry.sourceStageId];
       const windowFrames = clipWindowFrames(previous.start, stage.start);
-      expect(Math.round(entry.durationSec * fps), `${entry.stageId} overruns its window`).toBe(
+      expect(Math.round(entry.windowSec * fps), `${entry.stageId} overruns its window`).toBe(
         windowFrames,
       );
     }
@@ -52,8 +52,8 @@ describe('transformation clip plan durations', () => {
   it('quotes a duration a generator can actually honour', () => {
     // A sub-frame or zero-length request would be meaningless to send.
     for (const entry of transformationClipPlan()) {
-      expect(entry.durationSec).toBeGreaterThan(1 / TRANSFORMATION_OUTPUT.fps);
-      expect(Number.isFinite(entry.durationSec)).toBe(true);
+      expect(entry.windowSec).toBeGreaterThan(1 / TRANSFORMATION_OUTPUT.fps);
+      expect(Number.isFinite(entry.windowSec)).toBe(true);
     }
   });
 

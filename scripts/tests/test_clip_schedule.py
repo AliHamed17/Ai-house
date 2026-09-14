@@ -32,7 +32,7 @@ STAGES = [
 
 def clip_lengths_from_stage_durations(stage_ids: list[str]) -> dict[str, int]:
     """
-Models the OLD, wrong request: a clip as long as its own STAGE, which is
+    Models the OLD, wrong request: a clip as long as its own STAGE, which is
     what transformationClips.server.ts used to ask Higgsfield for. It is kept
     because it is exactly the scenario that broke — a clip overrunning the
     interval it is allowed to play across.
@@ -110,21 +110,46 @@ class TestClipWindows(unittest.TestCase):
         windows = build_clip_windows(STAGES, FPS, lengths)
         self.assertEqual(len(schedule), sum(end - start for start, end in windows.values()))
 
-    def test_an_overlong_clip_is_trimmed_from_the_head_not_the_tail(self):
-        # counter-details' interval before it (cabinet-wall, 3.1->3.75) is
-        # 0.65 s, far shorter than its own 2.0 s clip: the frames that survive
-        # must be the clip's LAST ones, so its final frame lands on 3.75.
+    def test_an_overlong_clip_is_resampled_across_the_window_not_truncated(self):
+        # /v1/image2video/dop takes no duration parameter, so a live clip comes
+        # back at the model's default length however short a window the plan
+        # asked for. counter-details' interval before it (cabinet-wall,
+        # 3.1->3.75) is 0.65 s against a 2.0 s clip. Keeping only the last
+        # 0.65 s would discard the placement motion — the object entering and
+        # settling — and leave a near-static shot of the arrived object.
         lengths = {"counter-details": 2 * FPS}  # 2.0 s at 30 fps
         schedule = build_clip_schedule(STAGES, FPS, lengths)
         start, end = build_clip_windows(STAGES, FPS, lengths)["counter-details"]
 
         self.assertEqual(start, frame_at(3.1, FPS))
         self.assertEqual(end, frame_at(3.75, FPS))
+
+        # Both endpoints are kept: the clip's first frame (previous state) and
+        # its last (settled new state, landing on the boundary).
+        self.assertEqual(schedule[start], ("counter-details", 0))
         self.assertEqual(schedule[end - 1], ("counter-details", lengths["counter-details"] - 1))
-        self.assertEqual(schedule[start], ("counter-details", lengths["counter-details"] - (end - start)))
-        # Never a negative index into the clip's frame list.
-        for frame in range(start, end):
-            self.assertGreaterEqual(schedule[frame][1], 0)
+
+        indices = [schedule[f][1] for f in range(start, end)]
+        # Monotonic, in range, and actually spanning the clip — never running
+        # backwards and never indexing past its last frame.
+        self.assertEqual(indices, sorted(indices))
+        self.assertGreaterEqual(min(indices), 0)
+        self.assertLess(max(indices), lengths["counter-details"])
+        # It genuinely samples the whole clip rather than clustering at one
+        # end: a 60-frame clip in a 20-frame window advances ~3 frames a step.
+        self.assertGreater(max(indices) - min(indices), lengths["counter-details"] * 0.9)
+
+    def test_a_clip_generated_at_the_planned_size_is_used_frame_for_frame(self):
+        # Resampling must be the identity when the clip already fits, so a
+        # correctly-sized generation is never resampled at all.
+        window = frame_at(3.75, FPS) - frame_at(3.1, FPS)
+        lengths = {"counter-details": window}
+        schedule = build_clip_schedule(STAGES, FPS, lengths)
+        start, end = build_clip_windows(STAGES, FPS, lengths)["counter-details"]
+        self.assertEqual(
+            [schedule[f][1] for f in range(start, end)],
+            list(range(window)),
+        )
 
     def test_a_clip_with_no_room_before_its_boundary_is_dropped_not_mis_scheduled(self):
         # The first stage starts at frame 0, so a clip transitioning INTO it
@@ -134,7 +159,7 @@ class TestClipWindows(unittest.TestCase):
         self.assertNotIn("empty", windows)
 
     def test_clips_sized_the_way_the_plan_now_asks_fit_with_nothing_trimmed(self):
-        # transformationClips.server.ts quotes durationSec as the window's own
+        # transformationClips.server.ts quotes windowSec as the window's own
         # frame count. Generating against that number must waste nothing: no
         # clip trimmed, no frame of a paid generation discarded.
         lengths = {}

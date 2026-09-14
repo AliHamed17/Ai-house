@@ -236,6 +236,21 @@ export const higgsfieldProvider: MediaGenerationProvider = {
     // later Resume makes against it.
     const jobId = await withTimeout(
       async () => {
+        // No clip length is sent, deliberately. The documented input schema
+        // for this endpoint (DoPImage2VideoInput in @higgsfield/client:
+        // model, prompt, input_images, motions, seed, enhance_prompt) has no
+        // duration parameter at all, and the one endpoint that does take one
+        // (/v1/speak/higgsfield) constrains it to 5 | 10 | 15 seconds — an
+        // order of magnitude longer than a transformation window. Passing an
+        // undocumented field to a billed endpoint we cannot exercise live
+        // would be a guess, not a fix.
+        //
+        // So the returned clip's length is the model's to choose, and fitting
+        // it is the compositor's job: scripts/clip_schedule.py resamples a
+        // longer result across its window instead of truncating it, which
+        // keeps the whole placement motion and wastes none of what was paid
+        // for. GET /api/transformation/clip advertises that span as windowSec
+        // rather than a duration, so nobody is told otherwise.
         const jobSet = (await higgsfield.subscribe(HF_ENDPOINT, {
           input: {
             model: HF_MODEL,

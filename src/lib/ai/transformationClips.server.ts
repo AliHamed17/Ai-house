@@ -1,5 +1,9 @@
 import 'server-only';
-import { TRANSFORMATION_CAMERA, TRANSFORMATION_STAGES } from '@/data/kitchenTransformation';
+import {
+  TRANSFORMATION_CAMERA,
+  TRANSFORMATION_OUTPUT,
+  TRANSFORMATION_STAGES,
+} from '@/data/kitchenTransformation';
 import { furnitureAddedAtStage } from '@/lib/transformation';
 import type { TransformationStageId } from '@/lib/types';
 
@@ -68,6 +72,20 @@ export function buildStageClipPrompt(stageId: TransformationStageId): string {
   ].join(' ');
 }
 
+/**
+ * Whole frames available to a clip that must finish on `boundarySec`, having
+ * started no earlier than `fromSec`.
+ *
+ * Boundaries are rounded to a frame FIRST and then differenced — the same
+ * order scripts/clip_schedule.py uses — because differencing the seconds and
+ * rounding afterwards can disagree by a frame when a boundary lands on a half
+ * frame, and that frame is the one the clip is supposed to land on.
+ */
+export function clipWindowFrames(fromSec: number, boundarySec: number): number {
+  const fps = TRANSFORMATION_OUTPUT.fps;
+  return Math.round(boundarySec * fps) - Math.round(fromSec * fps);
+}
+
 export interface TransformationClipPlanEntry {
   stageId: TransformationStageId;
   /** Still this clip animates FROM — the previous stage's approved state. */
@@ -98,7 +116,20 @@ export function transformationClipPlan(): TransformationClipPlanEntry[] {
       // at an arbitrary URL the way a free-form sourceAssetPath could.
       sourceAssetPath: stageStillPath(previous.id),
       prompt: buildStageClipPrompt(stage.id),
-      durationSec: Number((stage.end - stage.start).toFixed(2)),
+      // The clip is the transition INTO this stage, so it plays across the
+      // interval immediately BEFORE the boundary and is scheduled to finish
+      // exactly on it (scripts/clip_schedule.py). Its usable length is
+      // therefore the PREVIOUS stage's span, not this one's. Asking for a
+      // clip as long as the target stage bought seconds that could never be
+      // shown: counter-details runs 2.0 s but has only cabinet-wall's 0.65 s
+      // to play in, so two thirds of that paid generation was trimmed away
+      // unseen before it ever reached the master.
+      //
+      // Quoted as the window's whole-frame count rather than the raw
+      // difference, so the number an operator generates against is exactly
+      // the number of frames the compositor will keep — a boundary landing on
+      // a half frame (0.75 s x 30 = 22.5) otherwise leaves the two off by one.
+      durationSec: clipWindowFrames(previous.start, stage.start) / TRANSFORMATION_OUTPUT.fps,
     });
   }
   return plan;

@@ -40,6 +40,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from clip_schedule import build_clip_schedule, build_clip_windows  # noqa: E402
 from hand_layer import render_gesture  # noqa: E402
 
 # The hand arrives shortly before the object lands and leaves shortly after.
@@ -184,28 +185,22 @@ def main() -> int:
     arrays = {k: np.asarray(v, dtype=np.uint8) for k, v in base_images.items()}
 
     # A clip animates FROM the previous stage's still INTO this stage's state,
-    # so it is a transition, not the stage itself. Playing it from offset zero
-    # once stage_at had already switched meant the opening frames of the target
-    # interval showed the OLD furniture while the manifest, the hand timing and
-    # the 3D handoff all reported the new stage — the video and the stage id
-    # disagreeing at exactly the boundary they are supposed to share.
-    #
-    # Scheduling it to FINISH at stage.start fixes that: the transition plays
-    # out across the tail of the previous stage, and from stage.start onward
-    # the target still already shows the completed state everything else
-    # claims. Frame index -> the clip frame to draw.
-    clip_schedule: dict[int, Path] = {}
-    for stage in stages:
-        frames = clip_frames.get(stage["id"])
-        if not frames:
-            continue
-        end_frame = int(round(stage["start"] * fps))
-        start_frame = max(0, end_frame - len(frames))
-        for frame_index in range(start_frame, end_frame):
-            # When the clip is longer than the room before the boundary, drop
-            # its head rather than its tail — the tail is the part that has to
-            # land exactly on stage.start.
-            clip_schedule[frame_index] = frames[len(frames) - (end_frame - frame_index)]
+    # so it is a transition, not the stage itself: it is scheduled to FINISH on
+    # stage.start, playing across the tail of the interval before it. See
+    # scripts/clip_schedule.py for the window rule and why each clip is fenced
+    # into that one interval. Frame index -> (stage id, clip frame index).
+    clip_lengths = {stage_id: len(frames) for stage_id, frames in clip_frames.items()}
+    clip_windows = build_clip_windows(stages, fps, clip_lengths)
+    clip_schedule = build_clip_schedule(stages, fps, clip_lengths)
+    for stage_id in sorted(clip_frames):
+        window = clip_windows.get(stage_id)
+        if window is None:
+            print(f"  clip for stage {stage_id} has no room before its boundary; NOT used", file=sys.stderr)
+        elif window[1] - window[0] < clip_lengths[stage_id]:
+            print(
+                f"  clip for stage {stage_id} trimmed to {window[1] - window[0]}"
+                f"/{clip_lengths[stage_id]} frames to fit the interval before its boundary"
+            )
 
     # Each stage still already carries its own baked lighting state, so the
     # absolute envelope must not be applied on top of it or the arc is counted
@@ -237,7 +232,11 @@ def main() -> int:
         # stays the compositor's to control.
         scheduled = clip_schedule.get(f)
         if scheduled is not None:
-            source = np.asarray(Image.open(scheduled).convert("RGB"), dtype=np.uint8)
+            clip_stage_id, clip_frame_index = scheduled
+            source = np.asarray(
+                Image.open(clip_frames[clip_stage_id][clip_frame_index]).convert("RGB"),
+                dtype=np.uint8,
+            )
         else:
             source = arrays[stage["id"]]
 
@@ -315,10 +314,19 @@ def main() -> int:
             "webm": f"/transformation/{webm.name}",
             "poster": f"/transformation/{poster.name}",
         },
-        "stagesFromGeneratedClips": sorted(clip_frames.keys()),
+        # Only stages whose clip actually reached the master — a clip that was
+        # listed and approved but scheduled out of the film must not be
+        # credited here. The window makes the claim checkable: those exact
+        # frames came from that clip.
+        "stagesFromGeneratedClips": sorted(clip_windows.keys()),
+        "generatedClipWindows": {
+            stage_id: {"startFrame": start, "endFrame": end, "frames": end - start}
+            for stage_id, (start, end) in sorted(clip_windows.items())
+        },
         "provenance": (
             "Composed deterministically from locked-camera 3D renders of the real house model. "
-            "Stages listed in stagesFromGeneratedClips used an approved Higgsfield clip for their motion; "
+            "Stages listed in stagesFromGeneratedClips used an approved Higgsfield clip for their motion, "
+            "over the frame range given in generatedClipWindows; "
             "all edit timing, exposure and hand compositing remain compositor-controlled."
         ),
     }

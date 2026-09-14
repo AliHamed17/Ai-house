@@ -39,6 +39,12 @@ jobs:
       - name: Unit tests (Vitest)
         run: npm run test
 
+      # Stdlib-only, so this needs no pip install: it covers the video
+      # compositor's clip scheduling, where each approved clip is a paid
+      # generation and a scheduling bug silently drops one.
+      - name: Compositor unit tests (Python)
+        run: npm run test:compositor
+
       - name: Production build
         run: npm run build
 

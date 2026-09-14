@@ -100,5 +100,6 @@
     "poster": "/transformation/kitchen-transformation-poster.jpg"
   },
   "stagesFromGeneratedClips": [],
-  "provenance": "Composed deterministically from locked-camera 3D renders of the real house model. Stages listed in stagesFromGeneratedClips used an approved Higgsfield clip for their motion; all edit timing, exposure and hand compositing remain compositor-controlled."
+  "generatedClipWindows": {},
+  "provenance": "Composed deterministically from locked-camera 3D renders of the real house model. Stages listed in stagesFromGeneratedClips used an approved Higgsfield clip for their motion, over the frame range given in generatedClipWindows; all edit timing, exposure and hand compositing remain compositor-controlled."
 }

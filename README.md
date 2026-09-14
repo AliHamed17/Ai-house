@@ -57,8 +57,13 @@ npm run start         # serve the production build
 npm run lint          # ESLint
 npx tsc --noEmit       # type-check
 npm run test           # Vitest unit tests
+npm run test:compositor # Python unit tests for the video compositor's clip scheduling
 npm run test:e2e       # Playwright end-to-end tests (builds + starts the app first)
 ```
+
+`test:compositor` needs only `python3` — it covers
+[`scripts/clip_schedule.py`](./scripts/clip_schedule.py), which is kept free
+of numpy/pillow precisely so this can run anywhere.
 
 If your environment doesn't have Chromium pre-installed for Playwright, run
 `npx playwright install chromium` once first. If it's pre-installed at a
@@ -187,6 +192,14 @@ room cannot make the room drift.
 - `src/lib/ai/transformationClips.server.ts` — the clip plan and the
   differential, preservation-first prompts (each names only what its stage
   adds, then spends its budget forbidding change).
+- `scripts/clip_schedule.py` — where each clip is allowed to play. A clip is
+  the transition *into* its stage, so it finishes exactly on that boundary and
+  is fenced into the interval immediately before it. That fence is what makes
+  the windows disjoint: without it a longer clip reached back over its
+  predecessor's frames and silently replaced an earlier paid generation. The
+  plan quotes each clip's duration as that window's own frame count, so a clip
+  generated to spec is used whole, with nothing trimmed and nothing paid for
+  unseen.
 - `POST /api/transformation/clip` — submits one clip. It inherits every guard
   the other generate routes use (rate limit, the `AI_ALLOW_LIVE` master
   switch, cost confirmation, signed job ids, idempotent reservation), and
@@ -215,7 +228,8 @@ each gesture peaks on exactly the frame its object appears.
 ## Manual visual QA checklist
 
 Automated tests cover data integrity, geometry, and interaction flows: run
-`npm run test` (Vitest) and `npm run test:e2e` (Playwright) — both must pass.
+`npm run test` (Vitest), `npm run test:compositor` (Python) and
+`npm run test:e2e` (Playwright) — all must pass.
 Additionally, spot-check by eye at least once per change to the 3D geometry
 or camera code:
 

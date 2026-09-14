@@ -129,6 +129,36 @@ type RecoveryEntry =
       createdAt: number;
     };
 
+// Every fetch in this panel is bounded. `fetch` has no timeout of its own, so
+// a connection that neither resolves nor rejects — the usual shape of a
+// dropped mobile network — leaves its await pending forever, and each of these
+// three requests sits in front of a state machine that only advances when the
+// request settles. Unbounded, a stall wedges the panel with no way out but a
+// reload, in one case on a job that may already be billed.
+//
+// The values are not interchangeable:
+const FETCH_TIMEOUT_MS = {
+  // A trivial same-origin read of this deployment's own configuration. Its
+  // failure path just retries and eventually falls back, so it can be tight.
+  // Unbounded, liveStatus stays null and the studio sits on "Checking
+  // provider status…" with generation disabled, permanently.
+  mode: 10_000,
+  // A status read normally returns in milliseconds; generous enough that a
+  // merely slow network still gets its answer instead of being retried.
+  // POLL_STUCK_AFTER_MS catches a JOB that never settles; this catches a
+  // REQUEST that never settles, which that ceiling cannot see because it is
+  // only ever evaluated on a response that actually arrived.
+  status: 20_000,
+  // Deliberately the longest, and deliberately longer than the SERVER's own
+  // submit ceilings (nanoBanana.server 45s, higgsfield.server 30s). A shorter
+  // deadline here would abort submissions that were about to succeed, turning
+  // live billed generations into ambiguous recoveries — strictly worse than
+  // the stall it set out to fix. This only ever fires on a connection that
+  // has genuinely stopped, and then lands in submitOnce's existing catch,
+  // which is already the ambiguous-submission recovery path.
+  submit: 60_000,
+} as const;
+
 const VALID_RECOVERY_ROOM_IDS = new Set<string>(houseModel.rooms.map((r) => r.id));
 
 // JSON.parse only proves the stored text was syntactically valid JSON — a
@@ -378,7 +408,15 @@ export function AIStudioPanel() {
   const [confirmingLiveRun, setConfirmingLiveRun] = useState(false);
   const [job, setJob] = useState<GenerationJob | null>(null);
   const [approved, setApproved] = useState(false);
-  const [approvedSource, setApprovedSource] = useState<{ path: string; roomId: RoomId } | null>(null);
+  // styleVariant is part of the identity, not decoration: a refinement's
+  // prompt preserves the approved design without restating materials, and a
+  // clip explicitly preserves the source's materials, so whatever variant is
+  // recorded alongside the path is the one the output will actually show.
+  // Labelling such a job with a later, unrelated selector value would record
+  // provenance the image does not match.
+  const [approvedSource, setApprovedSource] = useState<
+    { path: string; roomId: RoomId; styleVariant: string } | null
+  >(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // A job whose status-polling gave up after repeated transient failures
@@ -669,7 +707,7 @@ export function AIStudioPanel() {
     };
 
     function probe() {
-      fetch('/api/generation/mode')
+      fetch('/api/generation/mode', { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS.mode) })
         .then((res) => (res.ok ? (res.json() as Promise<LiveStatus>) : null))
         .then((data) => {
           if (cancelled) return;
@@ -830,14 +868,6 @@ export function AIStudioPanel() {
   // window plus generation time — while still catching a genuinely wedged one.
   const POLL_STUCK_AFTER_MS = 10 * 60_000;
 
-  // Ceiling on a single status request. Generous next to a status read that
-  // normally returns in milliseconds, so a merely slow network still gets its
-  // answer rather than being retried needlessly — but finite, so a stalled
-  // connection becomes a transient failure instead of a permanently pending
-  // await. POLL_STUCK_AFTER_MS above catches a job that never settles; this
-  // catches a REQUEST that never settles, which that ceiling cannot see
-  // because it is only ever evaluated on a response that actually arrived.
-  const STATUS_FETCH_TIMEOUT_MS = 20_000;
 
   // preservedCreatedAt: when resuming an EXISTING recovery entry, its original
   // timestamp is carried forward rather than reset. Renewing it would let a
@@ -886,7 +916,7 @@ export function AIStudioPanel() {
         // that may already be billed. An abort surfaces as a rejection and
         // goes down the existing transient-failure path like any other.
         const statusRes = await fetch(`/api/generation/status/${jobId}`, {
-          signal: AbortSignal.timeout(STATUS_FETCH_TIMEOUT_MS),
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS.status),
         });
         const statusData = (await statusRes.json().catch(() => ({}))) as GenerationJob & { error?: string };
         if (token !== pollTokenRef.current) return;
@@ -1134,6 +1164,7 @@ export function AIStudioPanel() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS.submit),
       });
       const data = await res.json();
       if (token !== pollTokenRef.current) return null; // a newer run superseded this one
@@ -1331,11 +1362,17 @@ export function AIStudioPanel() {
     // Once a concept for THIS room has been approved, both a refinement and a
     // cinematic clip operate on that approved image; before then, an image
     // starts from the room's evidence frame and a clip from its concept still.
-    const approvedForRoom = approvedSource && approvedSource.roomId === roomId ? approvedSource.path : undefined;
+    const approvedForThisRoom = approvedSource && approvedSource.roomId === roomId ? approvedSource : null;
+    const approvedForRoom = approvedForThisRoom?.path;
     const sourceAssetPath = approvedForRoom ?? (outputType === 'image' ? roomEvidenceFrame[roomId]?.path : conceptImagePath(roomId));
     const body = {
       roomId,
-      styleVariant,
+      // When building ON an approved source, the job is labelled with the
+      // variant that source was generated under — not whatever the selector
+      // happens to read now. Changing the selector clears the approval (see
+      // its onChange), so the two normally agree; this makes them agree by
+      // construction rather than by timing.
+      styleVariant: approvedForThisRoom?.styleVariant ?? styleVariant,
       sourceAssetPath,
       editInstruction: editInstruction || undefined,
       simulate,
@@ -1391,7 +1428,19 @@ export function AIStudioPanel() {
           <span className="font-semibold text-charcoal/80">Style variation</span>
           <select
             value={styleVariant}
-            onChange={(e) => setStyleVariant(e.target.value)}
+            onChange={(e) => {
+              setStyleVariant(e.target.value);
+              // Picking a different material is a decision to explore a
+              // different design, which cannot be reached by refining a
+              // concept generated in the old one: the refine prompt preserves
+              // the approved design and a clip preserves its materials, so
+              // the new selection would simply be ignored while still
+              // labelling the job. Dropping the approval makes the next
+              // Generate start a fresh concept in the chosen material, which
+              // is what picking it means. The control stays live rather than
+              // being disabled, so nothing here is silently overridden.
+              if (e.target.value !== styleVariant) setApprovedSource(null);
+            }}
             className="rounded-xl border border-limestone/60 bg-ivory px-3 py-2 text-charcoal"
           >
             {materialVariants.map((v) => (
@@ -1662,7 +1711,7 @@ export function AIStudioPanel() {
                     // live, this placeholder SVG would satisfy the live-video approval
                     // gate and let a real billed clip animate a fake concept.
                     if (job.outputType === 'image' && job.resultUrl && job.provider !== 'mock') {
-                      setApprovedSource({ path: job.resultUrl, roomId });
+                      setApprovedSource({ path: job.resultUrl, roomId, styleVariant });
                     }
                   }}
                   className={`rounded-full px-4 py-2 text-xs font-semibold ${approved ? 'bg-olive text-ivory' : 'border border-limestone/60 text-charcoal hover:bg-limestone/30'}`}

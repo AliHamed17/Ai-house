@@ -301,6 +301,89 @@ test.describe('AI Design Studio (demo mode)', () => {
     await expect(page.getByRole('button', { name: /Working…/ })).toBeDisabled();
   });
 
+  test('a provider-mode probe that never responds still leaves the studio usable (regression)', async ({ page }) => {
+    // The third unbounded fetch. If this same-origin probe stalls, neither
+    // promise continuation runs, scheduleRetryOrFallback is never called, and
+    // liveStatus stays null forever — the studio sits on "Checking provider
+    // status…" with generation disabled until the page is reloaded.
+    let probeAttempts = 0;
+    await page.route('**/api/generation/mode', async () => {
+      probeAttempts += 1;
+      await new Promise(() => {});
+    });
+
+    await page.goto('/#ai-studio');
+    // Bounded attempts mean the retry ladder actually advances...
+    await expect(async () => {
+      expect(probeAttempts).toBeGreaterThan(1);
+    }).toPass({ timeout: 45_000, intervals: [1000] });
+    // ...and the panel is never permanently stuck on the probing state.
+    await expect(page.getByRole('button', { name: /Checking provider status…/ })).toHaveCount(0, {
+      timeout: 60_000,
+    });
+  });
+
+  test('approving an image binds it to the material it was generated in (regression)', async ({ page }) => {
+    // approvedSource used to keep only its path and room, so changing the
+    // still-live style selector afterwards paired the OLD approved image with
+    // the NEW variant: a refinement preserves the approved design without
+    // restating materials and a clip preserves the source's materials, so the
+    // selection was ignored while still labelling the job — a live generation
+    // spent on an output that ignores the choice, with wrong provenance.
+    //
+    // Driven through a NON-mock completed job on purpose: Approve only records
+    // a source for a real provider result, so a plain demo-mode run never sets
+    // one and could not exercise this at all.
+    await page.route('**/api/generation/status/**', (route) => {
+      // Echo the REAL job id back: a fabricated one would not match the
+      // recovery entry this run wrote, so Approve would clear the wrong key,
+      // adopt its own still-present entry as a "sibling", and suppress the
+      // approval it was meant to record.
+      const jobId = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop() ?? '');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          jobId,
+          provider: 'nano-banana',
+          outputType: 'image',
+          roomId: 'living',
+          status: 'completed',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          resultUrl: '/api/generation/result/approved-source-result-id',
+          meta: { model: 'nano-banana', styleVariant: 'warm-oak', prompt: 'p', approved: false },
+        }),
+      });
+    });
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible({ timeout: 20_000 });
+    await page.getByRole('button', { name: 'Approve' }).click();
+    await expect(page.getByRole('button', { name: '✓ Approved' })).toBeVisible();
+
+    const selector = page.getByLabel('Style variation');
+    const options = await selector.locator('option').evaluateAll((els) =>
+      els.map((e) => (e as HTMLOptionElement).value),
+    );
+    expect(options.length).toBeGreaterThan(1);
+    const originalVariant = await selector.inputValue();
+    const newVariant = options.find((o) => o !== originalVariant)!;
+
+    // Switching material is a decision to explore a different design, so the
+    // approval it would contradict is dropped and the next Generate starts
+    // fresh in the chosen material — rather than refining the old approved
+    // image while labelling the job with a variant it does not show.
+    await selector.selectOption(newVariant);
+
+    const request = page.waitForRequest((r) => r.url().includes('/api/nano-banana/generate'));
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    const body = JSON.parse((await request).postData() ?? '{}');
+    expect(body.styleVariant).toBe(newVariant);
+    expect(String(body.sourceAssetPath ?? '')).not.toContain('/api/generation/result/');
+  });
+
   test('a stale JOB recovery, once resumed-and-found-expired, also adopts a remaining sibling (regression)', async ({ page }) => {
     // The job path had the same hole the submission path above closes: the
     // staleness check prunes the aged entry as a side effect of its own read,

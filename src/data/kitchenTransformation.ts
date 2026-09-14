@@ -30,6 +30,16 @@ import type {
 export const TRANSFORMATION_ROOM_ID: RoomId = 'kitchen';
 
 /**
+ * The material variant every frame of the film is rendered with.
+ *
+ * Shared rather than written twice: the locked-camera renderer uses it to
+ * produce the frames, and the explorer forces it while a stage is showing, so
+ * "enter this exact moment in 3D" cannot land in a room with different walls
+ * and floors just because the visitor had picked another variant earlier.
+ */
+export const TRANSFORMATION_VARIANT_ID = 'warm-oak';
+
+/**
  * Total sequence length, matching the reference's measured 13.37 s.
  * The compositor asserts the assembled master matches this.
  */

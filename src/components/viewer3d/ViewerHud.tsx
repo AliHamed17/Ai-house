@@ -133,11 +133,21 @@ export function ViewerHud({ onExit }: { onExit: () => void }) {
             </button>
           </div>
 
+          {/* Same reasoning as the lighting toggle: while a stage is showing,
+              the room is rendered with the film's own variant so the moment
+              really is the moment, and a variant change here could not take
+              effect. Disabled and explained rather than silently ignored. */}
           <div className="relative">
             <button
               type="button"
               onClick={() => setVariantMenuOpen((v) => !v)}
-              className="rounded-full border border-limestone/60 bg-ivory/90 px-4 py-2 text-xs font-semibold tracking-wide text-charcoal shadow-lg backdrop-blur-sm hover:bg-ivory"
+              disabled={transformationStage !== null}
+              title={
+                transformationStage
+                  ? 'Materials follow the transformation moment you entered. Choose "Show finished kitchen" to change them.'
+                  : undefined
+              }
+              className="rounded-full border border-limestone/60 bg-ivory/90 px-4 py-2 text-xs font-semibold tracking-wide text-charcoal shadow-lg backdrop-blur-sm hover:bg-ivory disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-ivory/90"
             >
               Materials ▾
             </button>

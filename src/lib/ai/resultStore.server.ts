@@ -44,6 +44,12 @@ interface StoredResult {
 // let that recovery path report "job completed" while the actual generated
 // (already billed) bytes had already been pruned out from under it. If
 // AMBIGUOUS_TTL_MS changes, this must change with it.
+//
+// The same coupling runs the other way for a COMPLETED image job, which the
+// studio keeps recoverable until the visitor approves or rejects it:
+// AIStudioPanel's RECOVERY_MAX_AGE_MS.imageJob is held 5 min under this TTL
+// so that breadcrumb can never outlive the bytes it points at. Raising this
+// TTL may raise that; lowering it MUST lower that.
 const TTL_MS = 60 * 60_000;
 const MAX_ENTRIES = 100;
 const store = new Map<string, StoredResult>();

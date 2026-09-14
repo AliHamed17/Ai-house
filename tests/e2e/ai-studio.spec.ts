@@ -250,6 +250,57 @@ test.describe('AI Design Studio (demo mode)', () => {
     expect(await recoveryEntryIds(page)).toEqual(['job:sibling-still-outstanding-job-id']);
   });
 
+  test('an IMAGE job recovery expires with the server-side bytes, not 24h later (regression)', async ({ page }) => {
+    // A completed image's bytes live in the server's in-memory result store
+    // for 60 minutes. Keeping the breadcrumb for the full 24h job window meant
+    // Resume still accepted it hours later, and the status read then reported
+    // FAILED ("expired from the server cache") for an image that had been
+    // generated and billed. The breadcrumb must expire with the bytes.
+    await writeRawRecoveryEntry(page, {
+      kind: 'job',
+      jobId: 'aged-image-job-id',
+      roomId: 'living',
+      outputType: 'image',
+      createdAt: Date.now() - 2 * 60 * 60_000, // 2h: inside 24h, past the store's 60min
+    });
+    await page.goto('/#ai-studio');
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toHaveCount(0);
+    expect(await recoveryEntryIds(page)).toEqual([]);
+  });
+
+  test('a status request that never responds still reaches recovery (regression)', async ({ page }) => {
+    // fetch has no timeout of its own: a connection that stalls without
+    // resolving or rejecting left the await pending forever, so nothing
+    // scheduled the next poll and nothing reached retryOrFail. `submitting`
+    // stayed true with neither Resume nor Abandon offered, on a job that may
+    // already be billed, and only a page reload got out of it.
+    let statusAttempts = 0;
+    await page.route('**/api/generation/status/**', async () => {
+      statusAttempts += 1;
+      // Never fulfil, never abort — the hung-connection case exactly.
+      await new Promise(() => {});
+    });
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+
+    // The precise signature of the bug: with an unbounded fetch exactly ONE
+    // request is ever issued and the loop dies there. A second attempt proves
+    // the first was abandoned on its own timeout and routed through the
+    // transient-failure path, which is what eventually reaches Resume/Abandon.
+    // Asserted here rather than waiting out the whole retry budget (5 x 20s),
+    // which would not fit this suite's per-test timeout.
+    await expect(async () => {
+      expect(statusAttempts).toBeGreaterThan(1);
+    }).toPass({ timeout: 50_000, intervals: [1000] });
+
+    // And the job is still being tracked while that happens — it is not
+    // silently dropped as if it had never been submitted. (The submit control
+    // reads "Working…" while a generation is in flight.)
+    await expect(page.getByRole('button', { name: /Working…/ })).toBeDisabled();
+  });
+
   test('a stale JOB recovery, once resumed-and-found-expired, also adopts a remaining sibling (regression)', async ({ page }) => {
     // The job path had the same hole the submission path above closes: the
     // staleness check prunes the aged entry as a side effect of its own read,
@@ -954,11 +1005,17 @@ test.describe('AI Design Studio (demo mode)', () => {
     // is safe to keep offering for much longer than a submission entry —
     // this proves the ceiling is genuinely keyed by entry kind, not a single
     // value that happens to cover both.
+    //
+    // Deliberately a VIDEO job: an image job's ceiling is additionally capped
+    // by the server result store's TTL, because past that its bytes are gone
+    // and Resume would promise a result that cannot be delivered. That second
+    // axis has its own test above ("an IMAGE job recovery expires with the
+    // server-side bytes"); this one is about entry KIND.
     const jobEntry = {
       kind: 'job',
       jobId: 'recovery-ceiling-test-job-id',
       roomId: 'living',
-      outputType: 'image',
+      outputType: 'video',
       createdAt: Date.now() - 2 * 60 * 60_000,
     };
     await writeRawRecoveryEntry(page, jobEntry);

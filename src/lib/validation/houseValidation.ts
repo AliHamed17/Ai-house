@@ -4,7 +4,7 @@
  * anywhere since it has no side effects.
  */
 
-import type { FurnitureItem, HouseModel, RoomId, Vec2 } from '@/lib/types';
+import type { FurnitureItem, HouseModel, OpeningKind, RoomId, Vec2 } from '@/lib/types';
 import { buildAllWalls } from '@/lib/geometry/wallPanels';
 import { EYE_HEIGHT_M } from '@/data/house';
 
@@ -224,18 +224,30 @@ function aabbOverlaps(a: KeepOutBox, b: KeepOutBox): boolean {
 /** World-space floor clearance boxes in front of every protected door/window
  * in a room — computed from the same void data wallPanels.ts uses to cut
  * openings, not a separately-authored approximation. */
-function protectedKeepOutBoxes(house: HouseModel, roomId: RoomId): KeepOutBox[] {
+/** Average of a polygon's vertices — enough to tell which side of a wall the
+ *  room's interior is on, which is all either caller needs it for. */
+function polygonCentroid(polygon: Vec2[]): Vec2 {
+  const n = polygon.length;
+  return polygon.reduce((acc, p) => ({ x: acc.x + p.x / n, z: acc.z + p.z / n }), { x: 0, z: 0 });
+}
+
+function openingKeepOutBoxes(
+  house: HouseModel,
+  roomId: RoomId,
+  includeVoid: (v: { isProtected?: boolean; kind: OpeningKind }) => boolean,
+  marginM: number,
+  clearanceM: number,
+): KeepOutBox[] {
   const room = house.rooms.find((r) => r.id === roomId);
   if (!room) return [];
-  const n = room.floorPolygon.length;
-  const centroid = room.floorPolygon.reduce((acc, p) => ({ x: acc.x + p.x / n, z: acc.z + p.z / n }), { x: 0, z: 0 });
+  const centroid = polygonCentroid(room.floorPolygon);
   const walls = buildAllWalls(house.rooms, house.openings).filter((w) => w.roomId === roomId);
   const boxes: KeepOutBox[] = [];
   for (const wall of walls) {
     for (const v of wall.voids) {
-      if (!v.isProtected) continue;
-      const t0 = v.t0 - MAMAD_MARGIN_M;
-      const t1 = v.t1 + MAMAD_MARGIN_M;
+      if (!includeVoid(v)) continue;
+      const t0 = v.t0 - marginM;
+      const t1 = v.t1 + marginM;
       const ax = wall.start.x + wall.ux * t0;
       const az = wall.start.z + wall.uz * t0;
       const bx = wall.start.x + wall.ux * t1;
@@ -245,8 +257,8 @@ function protectedKeepOutBoxes(house: HouseModel, roomId: RoomId): KeepOutBox[] 
       const nz = wall.ux;
       const towardCenter = (centroid.x - wall.start.x) * nx + (centroid.z - wall.start.z) * nz;
       const sign = towardCenter >= 0 ? 1 : -1;
-      const dx = nx * sign * MAMAD_CLEARANCE_M;
-      const dz = nz * sign * MAMAD_CLEARANCE_M;
+      const dx = nx * sign * clearanceM;
+      const dz = nz * sign * clearanceM;
       const xs = [ax, bx, ax + dx, bx + dx];
       const zs = [az, bz, az + dz, bz + dz];
       boxes.push({ minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) });
@@ -259,7 +271,13 @@ function protectedKeepOutBoxes(house: HouseModel, roomId: RoomId): KeepOutBox[] 
  * window's floor clearance — checked geometrically against the real
  * opening/void data, not just by authoring convention. */
 export function findMamadFurnitureObstructions(house: HouseModel, items: FurnitureItem[]): string[] {
-  const keepouts = protectedKeepOutBoxes(house, 'mamad');
+  const keepouts = openingKeepOutBoxes(
+    house,
+    'mamad',
+    (v) => Boolean(v.isProtected),
+    MAMAD_MARGIN_M,
+    MAMAD_CLEARANCE_M,
+  );
   if (keepouts.length === 0) return [];
   const bad: string[] = [];
   for (const item of items.filter((i) => i.roomId === 'mamad')) {
@@ -270,6 +288,116 @@ export function findMamadFurnitureObstructions(house: HouseModel, items: Furnitu
     if (keepouts.some((k) => aabbOverlaps(itemBox, k))) bad.push(item.id);
   }
   return bad;
+}
+
+/** How far in front of an opening furniture has to stand before it counts as
+ *  being "in" the way rather than merely beside it. */
+const DOORWAY_APPROACH_DEPTH_M = 0.55;
+/** The clear width a person needs to get through. An opening keeps its
+ *  circulation as long as SOME contiguous run of it this wide stays clear —
+ *  which is the difference between a wardrobe across a 0.9 m door (blocked)
+ *  and an island beside a 2.65 m terrace span (not blocked, and normal
+ *  open-plan design). */
+const MIN_PASSAGE_WIDTH_M = 0.75;
+
+/** Openings a person actually passes through. A window is an opening too, but
+ *  a sideboard under one blocks nothing. */
+const CIRCULATION_OPENING_KINDS = new Set<OpeningKind>(['door', 'exterior_opening', 'open_threshold']);
+
+export interface BlockedOpening {
+  openingId: string;
+  roomId: RoomId;
+  /** Widest contiguous run of the opening still clear, in metres. */
+  clearWidthM: number;
+  requiredWidthM: number;
+  blockedByItemIds: string[];
+}
+
+/**
+ * Openings whose walkable width furniture has cut below what a person needs,
+ * in ANY room.
+ *
+ * The house evidence asserts a circulation constraint — the spine stays
+ * walkable — but until this existed nothing enforced it beyond MAMAD:
+ * findUnreachableRooms only walks `connectedRoomIds`, which is pure graph
+ * adjacency and knows nothing about objects, so a console or wardrobe could
+ * sit squarely in an ordinary corridor doorway and every check still passed.
+ *
+ * Measured as remaining PASSABLE WIDTH rather than "is anything near the
+ * opening", because those differ exactly where it matters. Requiring a wide
+ * opening to be furniture-free flags the kitchen island standing beside a
+ * 2.65 m terrace span, which is ordinary open-plan design and blocks nobody;
+ * what actually matters is whether a clear run wide enough to walk through
+ * survives. Geometry comes from the same wallPanels void data the openings
+ * are cut from, and anything a walker steps over rather than around is
+ * ignored.
+ */
+export function findBlockedCirculationOpenings(house: HouseModel, items: FurnitureItem[]): BlockedOpening[] {
+  const blocked: BlockedOpening[] = [];
+  for (const room of house.rooms) {
+    const roomItems = items.filter((i) => i.roomId === room.id && occupiesWalkingVolume(i));
+    if (roomItems.length === 0) continue;
+
+    const centroid = polygonCentroid(room.floorPolygon);
+    const walls = buildAllWalls(house.rooms, house.openings).filter((w) => w.roomId === room.id);
+    for (const wall of walls) {
+      // Wall tangent, and the normal pointing into this room.
+      const nx = -wall.uz;
+      const nz = wall.ux;
+      const sign = (centroid.x - wall.start.x) * nx + (centroid.z - wall.start.z) * nz >= 0 ? 1 : -1;
+
+      for (const v of wall.voids) {
+        if (!CIRCULATION_OPENING_KINDS.has(v.kind)) continue;
+
+        // Project each candidate item into (along-wall, into-room) coordinates
+        // and record the span of the opening it stands in front of.
+        const occluded: Array<{ from: number; to: number; id: string }> = [];
+        for (const item of roomItems) {
+          let tMin = Infinity;
+          let tMax = -Infinity;
+          let nMin = Infinity;
+          let nMax = -Infinity;
+          for (const c of furnitureWorldCorners(item)) {
+            const dx = c.x - wall.start.x;
+            const dz = c.z - wall.start.z;
+            const t = dx * wall.ux + dz * wall.uz;
+            const n = (dx * nx + dz * nz) * sign;
+            tMin = Math.min(tMin, t);
+            tMax = Math.max(tMax, t);
+            nMin = Math.min(nMin, n);
+            nMax = Math.max(nMax, n);
+          }
+          // Not standing in the approach zone at all.
+          if (nMax <= 0 || nMin >= DOORWAY_APPROACH_DEPTH_M) continue;
+          const from = Math.max(v.t0, tMin);
+          const to = Math.min(v.t1, tMax);
+          if (to > from) occluded.push({ from, to, id: item.id });
+        }
+        if (occluded.length === 0) continue;
+
+        // Widest contiguous clear run left across the opening.
+        occluded.sort((a, b) => a.from - b.from);
+        let clearWidthM = 0;
+        let cursor = v.t0;
+        for (const span of occluded) {
+          if (span.from > cursor) clearWidthM = Math.max(clearWidthM, span.from - cursor);
+          cursor = Math.max(cursor, span.to);
+        }
+        clearWidthM = Math.max(clearWidthM, v.t1 - cursor);
+
+        if (clearWidthM < MIN_PASSAGE_WIDTH_M) {
+          blocked.push({
+            openingId: v.openingId,
+            roomId: room.id,
+            clearWidthM: Number(clearWidthM.toFixed(3)),
+            requiredWidthM: MIN_PASSAGE_WIDTH_M,
+            blockedByItemIds: occluded.map((o) => o.id),
+          });
+        }
+      }
+    }
+  }
+  return blocked;
 }
 
 /** Every furniture item must carry a real shop link — the entire point of the feature. */

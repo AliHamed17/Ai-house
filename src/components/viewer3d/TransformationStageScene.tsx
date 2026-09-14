@@ -10,6 +10,7 @@ import { FurnitureMesh } from './FurnitureMesh';
 import {
   TRANSFORMATION_CAMERA,
   TRANSFORMATION_STAGES,
+  TRANSFORMATION_VARIANT_ID,
 } from '@/data/kitchenTransformation';
 import { getStage, visibleFurnitureAtStage } from '@/lib/transformation';
 import { StageLighting, stageLightingGlows } from './StageLighting';
@@ -59,7 +60,7 @@ export function TransformationStageContents({ stageId }: { stageId: Transformati
     <>
       <LockedCamera />
       <StageLighting lighting={stage.lighting} />
-      <HouseGeometry variantId="warm-oak" />
+      <HouseGeometry variantId={TRANSFORMATION_VARIANT_ID} />
       {items.map((item) => (
         <group
           key={item.id}

@@ -74,11 +74,17 @@ test.describe('room transformation section', () => {
     await expect(page.getByText(/Showing the kitchen mid-build/i)).toBeVisible();
     await expect(page.getByRole('button', { name: /☀ Day/ })).toBeDisabled();
     await expect(page.getByRole('button', { name: /☾ Evening/ })).toBeDisabled();
+    // Materials are locked for the same reason: every frame of the film is
+    // rendered with the transformation's own variant, so a visitor who had
+    // picked cool-stone earlier would otherwise step into "this exact moment"
+    // and find different walls and floors.
+    await expect(page.getByRole('button', { name: /Materials/ })).toBeDisabled();
 
-    // Clearing the stage hands lighting back to the visitor.
+    // Clearing the stage hands both back to the visitor.
     await page.getByRole('button', { name: /Show finished kitchen/i }).click();
     await expect(page.getByRole('button', { name: /☀ Day/ })).toBeEnabled();
     await expect(page.getByRole('button', { name: /☾ Evening/ })).toBeEnabled();
+    await expect(page.getByRole('button', { name: /Materials/ })).toBeEnabled();
   });
 
   test('an ordinary explorer entry afterwards opens the FINISHED kitchen, not the mid-build one (regression)', async ({ page }) => {

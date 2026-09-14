@@ -5,6 +5,7 @@ import {
   findFurnitureBlockingCameraSpawn,
   findFurnitureMissingShopLink,
   findFurnitureOutsidePolygon,
+  findBlockedCirculationOpenings,
   findMamadFurnitureObstructions,
 } from '@/lib/validation/houseValidation';
 
@@ -108,6 +109,68 @@ describe('furniture placement validation', () => {
       productUrl: 'https://example.com',
     };
     expect(findMamadFurnitureObstructions(houseModel, [intruder])).toEqual(['test-intruder']);
+  });
+
+  it('leaves every doorway in the authored house walkable', () => {
+    expect(findBlockedCirculationOpenings(houseModel, allFurnitureItems)).toEqual([]);
+  });
+
+  it('flags a wardrobe parked across a real doorway (regression)', () => {
+    // The check this backs is asserted in analysis/house-evidence.json's
+    // circulation-preserved constraint. findUnreachableRooms cannot see this:
+    // it walks connectedRoomIds, which is pure graph adjacency and knows
+    // nothing about objects, so before this validator existed a wardrobe
+    // could sit squarely in a corridor doorway and every check still passed.
+    const door = houseModel.openings.find((o) => o.id === 'door_hallsouth_bathmain');
+    expect(door, 'expected a real interior door to test against').toBeDefined();
+    const wardrobe = {
+      id: 'test-doorblocker',
+      roomId: 'hall_south' as const,
+      kind: 'wardrobe' as const,
+      // Centred on the door and wide enough to leave no passable run.
+      position: { x: door!.position.x, z: door!.position.z + 0.25 },
+      rotationYRad: 0,
+      footprintM: { widthM: door!.widthM + 0.8, depthM: 0.6 },
+      heightM: 2.0,
+      colorHex: '#000000',
+      shopLabel: 'test',
+      category: 'test',
+      retailer: 'test',
+      productUrl: 'https://example.com',
+    };
+    const blocked = findBlockedCirculationOpenings(houseModel, [wardrobe]);
+    expect(blocked.map((b) => b.openingId)).toContain('door_hallsouth_bathmain');
+    expect(blocked[0].blockedByItemIds).toContain('test-doorblocker');
+    expect(blocked[0].clearWidthM).toBeLessThan(blocked[0].requiredWidthM);
+  });
+
+  it('does NOT flag furniture standing beside a wide open span', () => {
+    // The distinction that makes this validator usable rather than merely
+    // strict: a 2.65 m terrace opening with an island beside it stays
+    // perfectly walkable, and flagging it would be a false alarm on ordinary
+    // open-plan design. Measuring remaining passable width rather than mere
+    // proximity is what tells the two cases apart.
+    const kitchenItems = allFurnitureItems.filter((i) => i.roomId === 'kitchen');
+    expect(kitchenItems.length).toBeGreaterThan(0);
+    expect(findBlockedCirculationOpenings(houseModel, kitchenItems)).toEqual([]);
+  });
+
+  it('ignores anything a visitor steps over rather than walks around', () => {
+    const rug = {
+      id: 'test-doorway-rug',
+      roomId: 'hall_south' as const,
+      kind: 'rug' as const,
+      position: { x: 8.05, z: 4.6 },
+      rotationYRad: 0,
+      footprintM: { widthM: 4, depthM: 4 },
+      heightM: 0.02,
+      colorHex: '#000000',
+      shopLabel: 'test',
+      category: 'test',
+      retailer: 'test',
+      productUrl: 'https://example.com',
+    };
+    expect(findBlockedCirculationOpenings(houseModel, [rug])).toEqual([]);
   });
 
   it('flags an item placed outside its declared room polygon', () => {

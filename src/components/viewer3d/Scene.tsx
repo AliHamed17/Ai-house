@@ -9,6 +9,7 @@ import { DoorHotspots, RoomLabelHotspots } from './RoomHotspots';
 import { FurnitureHotspots } from './FurnitureHotspots';
 import { useViewerStore } from '@/lib/store/viewerStore';
 import { getStage } from '@/lib/transformation';
+import { TRANSFORMATION_VARIANT_ID } from '@/data/kitchenTransformation';
 import { lightingPresets } from '@/data/materials';
 
 export function Scene() {
@@ -48,7 +49,17 @@ export function Scene() {
       {/* Ceilings are hidden in Dollhouse mode: the elevated overview camera
           looks straight down, so an opaque ceiling plane would block the view
           into the room below it instead of showing the house's interior. */}
-      <HouseGeometry variantId={materialVariantId} hideCeilings={mode === 'orbit'} />
+      {/* The film's frames are rendered with the transformation's own
+          variant (TransformationStageScene), so a visitor who had previously
+          picked cool-stone or sand-linen would otherwise step into "this exact
+          moment" and find different walls and floors — the one thing the
+          handoff promises is that it is the same room. Locked for the same
+          reason the lighting is, and the Materials menu is disabled alongside
+          the day/evening toggle while a stage is showing. */}
+      <HouseGeometry
+        variantId={stageLighting ? TRANSFORMATION_VARIANT_ID : materialVariantId}
+        hideCeilings={mode === 'orbit'}
+      />
       <DoorHotspots />
       <RoomLabelHotspots />
       <FurnitureHotspots />

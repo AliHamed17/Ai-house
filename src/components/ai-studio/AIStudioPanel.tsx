@@ -85,6 +85,17 @@ const RECOVERY_STORAGE_PREFIX = 'ai-studio:unresolved-generation:';
 //    reservation and silently double-submit on Resume.
 const RECOVERY_MAX_AGE_MS = {
   job: 24 * 60 * 60_000,
+  // An IMAGE job's result lives in the server's in-memory result store, whose
+  // TTL is 60 min (resultStore.server.ts). A completed-but-unacknowledged job
+  // is deliberately kept recoverable so the visitor can come back and approve
+  // it — but past that TTL the bytes are gone, and nanoBanana.server's status
+  // read reports the job FAILED ("expired from the server cache") for an image
+  // that was generated and billed. The breadcrumb has to expire with the bytes
+  // rather than outlive them and promise a result that cannot be delivered.
+  // 5min margin under the store's TTL, same reasoning as submissionAmbiguous.
+  // A VIDEO job keeps the full window: its result is a provider URL, not
+  // bytes we store.
+  imageJob: 55 * 60_000,
   // 5min margin under idempotency.server's AMBIGUOUS_TTL_MS (60 min) for
   // clock/network skew between writing this entry and the server's own
   // reservation window actually starting.
@@ -210,7 +221,9 @@ function addLocallyIgnoredId(id: string): void {
 }
 
 function recoveryMaxAgeMs(entry: RecoveryEntry): number {
-  if (entry.kind === 'job') return RECOVERY_MAX_AGE_MS.job;
+  if (entry.kind === 'job') {
+    return entry.outputType === 'image' ? RECOVERY_MAX_AGE_MS.imageJob : RECOVERY_MAX_AGE_MS.job;
+  }
   return entry.ambiguous ? RECOVERY_MAX_AGE_MS.submissionAmbiguous : RECOVERY_MAX_AGE_MS.submissionOrdinary;
 }
 
@@ -817,6 +830,15 @@ export function AIStudioPanel() {
   // window plus generation time — while still catching a genuinely wedged one.
   const POLL_STUCK_AFTER_MS = 10 * 60_000;
 
+  // Ceiling on a single status request. Generous next to a status read that
+  // normally returns in milliseconds, so a merely slow network still gets its
+  // answer rather than being retried needlessly — but finite, so a stalled
+  // connection becomes a transient failure instead of a permanently pending
+  // await. POLL_STUCK_AFTER_MS above catches a job that never settles; this
+  // catches a REQUEST that never settles, which that ceiling cannot see
+  // because it is only ever evaluated on a response that actually arrived.
+  const STATUS_FETCH_TIMEOUT_MS = 20_000;
+
   // preservedCreatedAt: when resuming an EXISTING recovery entry, its original
   // timestamp is carried forward rather than reset. Renewing it would let a
   // job that is already past its server-side lifetime be re-persisted for a
@@ -855,7 +877,17 @@ export function AIStudioPanel() {
     const poll = async () => {
       if (token !== pollTokenRef.current) return;
       try {
-        const statusRes = await fetch(`/api/generation/status/${jobId}`);
+        // Bounded on purpose. `fetch` has no timeout of its own, so a
+        // connection that stalls without resolving or rejecting — the usual
+        // shape of a dropped mobile network — leaves this await pending
+        // forever. Nothing then schedules the next poll and nothing reaches
+        // retryOrFail, so `submitting` stays true with neither Resume nor
+        // Abandon offered and the only way out is a page reload, on a job
+        // that may already be billed. An abort surfaces as a rejection and
+        // goes down the existing transient-failure path like any other.
+        const statusRes = await fetch(`/api/generation/status/${jobId}`, {
+          signal: AbortSignal.timeout(STATUS_FETCH_TIMEOUT_MS),
+        });
         const statusData = (await statusRes.json().catch(() => ({}))) as GenerationJob & { error?: string };
         if (token !== pollTokenRef.current) return;
         if (!statusRes.ok) {

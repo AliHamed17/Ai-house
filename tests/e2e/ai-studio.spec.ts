@@ -250,6 +250,54 @@ test.describe('AI Design Studio (demo mode)', () => {
     expect(await recoveryEntryIds(page)).toEqual(['job:sibling-still-outstanding-job-id']);
   });
 
+  test('a stale JOB recovery, once resumed-and-found-expired, also adopts a remaining sibling (regression)', async ({ page }) => {
+    // The job path had the same hole the submission path above closes: the
+    // staleness check prunes the aged entry as a side effect of its own read,
+    // which is a same-document write and so fires no storage event here. The
+    // sibling had also been ignored the whole time recoverableJobId was set,
+    // so it stayed hidden and Generate re-enabled with a possibly-billed
+    // generation still unresolved.
+    await page.route('**/api/generation/status/**', (route) => route.abort());
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    // Status polling fails its retries, leaving this tab tracking a job it
+    // can no longer check.
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible({ timeout: 20_000 });
+
+    // A genuinely different, still-outstanding job entry, well within ITS OWN
+    // ceiling — plus ageing THIS tab's tracked job past the 24h ceiling.
+    await page.evaluate((prefix) => {
+      localStorage.setItem(
+        `${prefix}job:sibling-still-outstanding-job-id`,
+        JSON.stringify({
+          kind: 'job',
+          jobId: 'sibling-still-outstanding-job-id',
+          roomId: 'living',
+          outputType: 'image',
+          createdAt: Date.now(),
+        }),
+      );
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key?.startsWith(`${prefix}job:`)) continue;
+        if (key.endsWith('sibling-still-outstanding-job-id')) continue;
+        const entry = JSON.parse(localStorage.getItem(key)!);
+        entry.createdAt = Date.now() - 25 * 60 * 60_000;
+        localStorage.setItem(key, JSON.stringify(entry));
+      }
+    }, RECOVERY_STORAGE_PREFIX);
+
+    await page.getByRole('button', { name: 'Resume checking status' }).click();
+
+    await expect(page.getByText(/too old to check any more/i)).toBeVisible({ timeout: 10_000 });
+    // The sibling takes its place rather than being dropped: its own banner
+    // is shown and Generate stays locked.
+    await expect(page.getByRole('button', { name: 'Resume checking status' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeDisabled();
+    expect(await recoveryEntryIds(page)).toEqual(['job:sibling-still-outstanding-job-id']);
+  });
+
   test('a Higgsfield 504 (ambiguous submit timeout) also keeps the submission recoverable, not just a dropped connection (regression)', async ({ page }) => {
     // The route returns a normal, well-formed 504 response (not a dropped
     // connection) specifically when a live Higgsfield submit times out in a

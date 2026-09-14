@@ -976,6 +976,14 @@ export function AIStudioPanel() {
       setSubmitting(false);
       setRecoverableJobId(null);
       setError('That generation is too old to check any more, so it has been cleared.');
+      // Exactly the hazard handleResumeSubmission's expired branch already
+      // guards: the pruning above is a same-document localStorage write, and
+      // those never fire this tab's own storage listener. A genuinely
+      // different, still-outstanding SIBLING entry from another tab was also
+      // being ignored the whole time recoverableJobId was set, so without
+      // re-checking here it stays hidden and Generate re-enables while a
+      // possibly-billed generation is still unresolved (regression).
+      adoptRecoveryEntry();
       return;
     }
     const originatingIdempotencyKey = persisted.kind === 'job' ? persisted.originatingIdempotencyKey : undefined;

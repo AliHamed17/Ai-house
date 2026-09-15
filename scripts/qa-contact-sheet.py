@@ -269,7 +269,14 @@ def main() -> int:
         print(f"  timing problem: {problem}")
     print(f"lighting-arc correlation (lighting-only stages): {lighting_correlation:.3f}")
     print(f"all-stage luminance correlation (content-confounded): {all_correlation:.3f}")
-    return 0
+    # A failed audit has to fail the COMMAND, not just be written into the
+    # report. Recording the problem and still exiting 0 meant
+    # `npm run transformation:qa` stayed green while publishing a mismatched
+    # video, so any regeneration workflow would sail straight past it — which
+    # is precisely the case the structural checks above exist to catch. The
+    # report and sheet are written first, so a failing run still leaves the
+    # evidence behind for whoever reads it.
+    return 1 if timing_problems else 0
 
 
 if __name__ == "__main__":

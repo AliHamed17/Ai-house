@@ -384,6 +384,52 @@ test.describe('AI Design Studio (demo mode)', () => {
     expect(String(body.sourceAssetPath ?? '')).not.toContain('/api/generation/result/');
   });
 
+  test('the style selector cannot drift from the job it will be attributed to (regression)', async ({ page }) => {
+    // The scenario: start a warm-oak generation, switch the selector to
+    // cool-stone before it finishes, then Approve. Approve correctly records
+    // the JOB's variant (warm-oak), but the selector was left displaying
+    // cool-stone — and the next Generate then refines the warm-oak source, in
+    // a style the visitor can plainly see is not the one selected. Possibly a
+    // billed generation spent on an output that contradicts the UI.
+    await page.route('**/api/generation/status/**', (route) => {
+      const jobId = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop() ?? '');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          jobId,
+          provider: 'nano-banana',
+          outputType: 'image',
+          roomId: 'living',
+          status: 'completed',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          resultUrl: '/api/generation/result/style-lock-result-id',
+          meta: { model: 'nano-banana', styleVariant: 'warm-oak', prompt: 'p', approved: false },
+        }),
+      });
+    });
+
+    await page.goto('/#ai-studio');
+    const selector = page.getByLabel('Style variation');
+    await expect(selector).toBeEnabled();
+    const startingVariant = await selector.inputValue();
+
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+
+    // Locked from the moment the result lands until it is acknowledged.
+    await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible({ timeout: 20_000 });
+    await expect(selector).toBeDisabled();
+    await expect(selector).toHaveValue(startingVariant);
+
+    // Acknowledging it hands the control back.
+    await page.getByRole('button', { name: 'Approve' }).click();
+    await expect(page.getByRole('button', { name: '✓ Approved' })).toBeVisible();
+    await expect(selector).toBeEnabled();
+    // And what it displays is still what the approved source holds.
+    await expect(selector).toHaveValue(startingVariant);
+  });
+
   test('a stale JOB recovery, once resumed-and-found-expired, also adopts a remaining sibling (regression)', async ({ page }) => {
     // The job path had the same hole the submission path above closes: the
     // staleness check prunes the aged entry as a side effect of its own read,

@@ -744,6 +744,12 @@ export function AIStudioPanel() {
   // against the wrong room.
   const hasUnresolvedJob = recoverableJobId !== null || recoverableSubmission !== null;
 
+  // True while a generation is running, or while its completed result is
+  // still waiting on Approve/Reject — the exact window in which the selector
+  // moving would leave the UI and the recorded provenance disagreeing.
+  const styleLockedToPendingJob =
+    submitting || hasUnresolvedJob || (job !== null && job.status === 'completed' && !approved);
+
   // A completed-but-unacknowledged job is deliberately kept in storage until
   // Approve/Reject (see startPolling's completion branch), so a reload or
   // crash before that decision can still recover it. Every OTHER way this
@@ -1431,8 +1437,24 @@ export function AIStudioPanel() {
 
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-semibold text-charcoal/80">Style variation</span>
+          {/* Locked while a generation is in flight or its result is still
+              awaiting Approve/Reject. Approve records the JOB's own variant
+              (see its handler), so a selector free to move in that window
+              ends up displaying one material while the approved source holds
+              another — and the next Generate then refines the approved
+              source, correctly, in a style the visitor can plainly see is not
+              the one selected. Possibly a billed generation spent on an
+              output that contradicts the UI. Once the result is settled the
+              control is live again, and changing it there clears the
+              approval so a fresh concept is made in the chosen material. */}
           <select
             value={styleVariant}
+            disabled={styleLockedToPendingJob}
+            title={
+              styleLockedToPendingJob
+                ? 'This generation is still being decided. Approve or reject it first, then choose a different material.'
+                : undefined
+            }
             onChange={(e) => {
               setStyleVariant(e.target.value);
               // Picking a different material is a decision to explore a
@@ -1446,7 +1468,7 @@ export function AIStudioPanel() {
               // being disabled, so nothing here is silently overridden.
               if (e.target.value !== styleVariant) setApprovedSource(null);
             }}
-            className="rounded-xl border border-limestone/60 bg-ivory px-3 py-2 text-charcoal"
+            className="rounded-xl border border-limestone/60 bg-ivory px-3 py-2 text-charcoal disabled:cursor-not-allowed disabled:opacity-45"
           >
             {materialVariants.map((v) => (
               <option key={v.id} value={v.id}>

@@ -1330,7 +1330,12 @@ export function AIStudioPanel() {
         // startPolling writes below — clear it explicitly so it doesn't
         // linger in storage until it eventually ages out on its own.
         clearRecoveryEntry(submissionRecoveryId(idempotencyKey));
-        startPolling(jobId, token, idempotencyKey);
+        // The promoted job inherits the SUBMISSION's original timestamp, not
+        // this resume's. Stamping it now would hand a submission resumed near
+        // its own ceiling a fresh full window, during which an image's cached
+        // bytes can expire while the banner still advertises Resume for them
+        // — the exact mismatch RECOVERY_MAX_AGE_MS.imageJob exists to prevent.
+        startPolling(jobId, token, idempotencyKey, persisted.createdAt);
       }
     })();
   }
@@ -1711,7 +1716,19 @@ export function AIStudioPanel() {
                     // live, this placeholder SVG would satisfy the live-video approval
                     // gate and let a real billed clip animate a fake concept.
                     if (job.outputType === 'image' && job.resultUrl && job.provider !== 'mock') {
-                      setApprovedSource({ path: job.resultUrl, roomId, styleVariant });
+                      setApprovedSource({
+                        path: job.resultUrl,
+                        roomId,
+                        // The job's OWN variant, not the selector's current
+                        // value. The selector stays enabled while a
+                        // generation runs and after it completes, and a
+                        // recovery entry restores no style at all, so reading
+                        // it here tags the finished image with whatever
+                        // happens to be selected at click time. meta comes
+                        // back from the signed job id, so it is what the
+                        // image was actually generated with.
+                        styleVariant: job.meta.styleVariant,
+                      });
                     }
                   }}
                   className={`rounded-full px-4 py-2 text-xs font-semibold ${approved ? 'bg-olive text-ivory' : 'border border-limestone/60 text-charcoal hover:bg-limestone/30'}`}

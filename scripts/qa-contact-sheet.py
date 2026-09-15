@@ -125,6 +125,19 @@ def main() -> int:
     pub.save("public/transformation/qa-sheet.jpg", quality=86)
 
     # --- numeric comparison ---
+    # Loaded up here because BOTH the per-stage rows and the timing audit
+    # below read it: the rows report the produced lighting, and the audit
+    # compares it. (The audit's own reason for using it is that comparing
+    # ref_stages to itself made beatTimingExact necessarily true.)
+    produced_path = Path("public/transformation/manifest.json")
+    produced = json.loads(produced_path.read_text()) if produced_path.exists() else None
+
+    # What the compositor actually wrote, keyed by stage, so each row can
+    # report the produced lighting rather than echoing the reference's.
+    produced_lighting = {
+        p["id"]: p.get("lighting") for p in (produced or {}).get("stages", [])
+    }
+
     rows_out = []
     for s in ref_stages:
         mid = (s["start"] + s["end"]) / 2
@@ -136,7 +149,8 @@ def main() -> int:
                 "referenceEnd": s["end"],
                 "referenceLuminance": s["measuredLuminance"],
                 "resultLuminance": round(luminance(measure_frames[idx]), 1),
-                "lighting": s["lighting"],
+                "referenceLighting": s["lighting"],
+                "resultLighting": produced_lighting.get(s["id"]),
                 "gesture": s["gesture"],
             }
         )
@@ -156,7 +170,7 @@ def main() -> int:
     # variable -- everything after the room is fully furnished.
     all_correlation = float(np.corrcoef(ref_l, out_l)[0, 1])
 
-    lighting_rows = [r for r in rows_out if r["lighting"] != "daylight"]
+    lighting_rows = [r for r in rows_out if r["referenceLighting"] != "daylight"]
     if len(lighting_rows) >= 2:
         lr = np.array([r["referenceLuminance"] for r in lighting_rows])
         lo = np.array([r["resultLuminance"] for r in lighting_rows])
@@ -169,8 +183,6 @@ def main() -> int:
     # what this did before) made beatTimingExact necessarily true and would
     # have published any real compositor or output-manifest timing regression
     # as a passing audit.
-    produced_path = Path("public/transformation/manifest.json")
-    produced = json.loads(produced_path.read_text()) if produced_path.exists() else None
 
     timing_problems: list[str] = []
     if produced is None:
@@ -195,6 +207,17 @@ def main() -> int:
                 if abs(float(got["end"]) - float(ref["end"])) > 1e-6:
                     timing_problems.append(
                         f"Stage {ref['id']}: produced end {got['end']} != reference {ref['end']}."
+                    )
+                # whatIsCompared claims lighting state per stage, so it has to
+                # actually be compared. Without this the compositor could
+                # change a stage's lighting while keeping its id and timings
+                # and the audit would report no problem at all, while rows_out
+                # went on publishing the REFERENCE value as if it were the
+                # produced one.
+                if got.get("lighting") != ref.get("lighting"):
+                    timing_problems.append(
+                        f"Stage {ref['id']}: produced lighting {got.get('lighting')!r} "
+                        f"!= reference {ref.get('lighting')!r}."
                     )
         if abs(float(produced.get("durationSec", -1)) - duration) > 1e-6:
             timing_problems.append(

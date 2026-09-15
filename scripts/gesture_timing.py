@@ -38,6 +38,46 @@ def travel_for_progress(progress: float) -> float:
     return 0.5 + 0.5 * (2.0 * progress - 1.0) ** 2
 
 
+def gesture_windows(
+    boundaries: list[float],
+    lead_sec: float,
+    trail_sec: float,
+) -> list[tuple[float, float]]:
+    """
+    Per-gesture (lead, trail) shrunk so adjacent gestures never overlap.
+
+    The nominal window spans lead + trail = 0.8 s, but consecutive boundaries
+    can be closer than that: cabinet-wall at 3.10 s stays active to 3.45 s
+    while counter-details' own gesture begins at 3.30 s, so roughly five frames
+    composited TWO large hands at once. The reference's gestures are strictly
+    sequential — one hand places one object — so that is a visible artefact,
+    not a stylistic choice.
+
+    The gap between two boundaries is split between the earlier gesture's trail
+    and the later one's lead, in the same proportion as the nominal pair, and
+    only when the gap is too small to hold both. That keeps the two invariants
+    the sequence depends on: each gesture still plays its COMPLETE arc (0 to 1,
+    entering through to withdrawn), just a little quicker, and its action
+    instant still lands exactly on its own boundary. Clipping the window
+    instead would cut a hand off mid-fade, visibly popping it out of frame.
+    """
+    span = lead_sec + trail_sec
+    windows: list[tuple[float, float]] = []
+    for index, boundary in enumerate(boundaries):
+        lead = lead_sec
+        trail = trail_sec
+        if index > 0:
+            gap = boundary - boundaries[index - 1]
+            if gap < span:
+                lead = min(lead, gap * lead_sec / span)
+        if index + 1 < len(boundaries):
+            gap = boundaries[index + 1] - boundary
+            if gap < span:
+                trail = min(trail, gap * trail_sec / span)
+        windows.append((max(lead, 0.0), max(trail, 0.0)))
+    return windows
+
+
 def gesture_progress(t: float, stage_start: float, lead_sec: float, trail_sec: float) -> float:
     """
     Wall-clock time -> gesture progress, pinning progress 0.5 to stage_start.

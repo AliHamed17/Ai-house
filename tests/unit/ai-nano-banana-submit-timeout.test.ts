@@ -118,7 +118,11 @@ describe("nanoBananaProvider.submit (never aborts on timeout, so OrphanedTimeout
       })
       .catch(() => undefined);
 
-    await vi.runAllTimersAsync();
+    // Far enough to fire submit()'s own 45s timeout, but deliberately NOT as
+    // far as ORPHAN_SLOT_MAX_MS: runAllTimersAsync would also fire the orphan
+    // ceiling that bounds this deferral, releasing the slot and hiding the
+    // very behaviour under test here.
+    await vi.advanceTimersByTimeAsync(46_000);
     await pending;
     vi.useRealTimers();
 
@@ -136,5 +140,45 @@ describe("nanoBananaProvider.submit (never aborts on timeout, so OrphanedTimeout
 
     expect(reserveResultSlot()).toBe(true);
     releaseResultSlot();
+  });
+
+  it('releases a slot held for an orphaned call that NEVER settles, so a hung provider cannot permanently wedge the store (regression)', async () => {
+    // The deferral above is correct but was unbounded: if the orphaned promise
+    // never settles at all — a hung transport, a provider outage — the slot was
+    // held forever. Enough of those park the store permanently at MAX_ENTRIES
+    // and every later Nano generation is refused even once connectivity comes
+    // back. Note this promise is never resolved OR rejected anywhere below.
+    process.env.GEMINI_API_KEY = 'test-key-not-real';
+    generateContentMock.mockImplementation(() => new Promise(() => {}));
+
+    vi.resetModules();
+    const { nanoBananaProvider } = await import('@/lib/ai/nanoBanana.server');
+    const { putStoredResult, reserveResultSlot, ORPHAN_SLOT_MAX_MS } = await import(
+      '@/lib/ai/resultStore.server'
+    );
+
+    for (let i = 0; i < 99; i++) putStoredResult('image/png', `entry-${i}`, 'living');
+
+    vi.useFakeTimers();
+    const pending = nanoBananaProvider
+      .submit({
+        provider: 'nano-banana',
+        outputType: 'image',
+        roomId: 'living',
+        styleVariant: 'warm-oak',
+        prompt: 'a cozy reading nook',
+      })
+      .catch(() => undefined);
+
+    await vi.advanceTimersByTimeAsync(46_000);
+    await pending;
+    // Still held, as before — the ceiling has not been reached yet.
+    expect(reserveResultSlot()).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(ORPHAN_SLOT_MAX_MS + 1_000);
+    vi.useRealTimers();
+
+    // Reclaimed, even though the orphaned call never settled.
+    expect(reserveResultSlot()).toBe(true);
   });
 });

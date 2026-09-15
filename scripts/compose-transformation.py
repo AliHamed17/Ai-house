@@ -41,7 +41,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clip_schedule import build_clip_schedule, build_clip_windows  # noqa: E402
-from gesture_timing import gesture_progress  # noqa: E402
+from gesture_timing import gesture_progress, gesture_windows  # noqa: E402
 from hand_layer import render_gesture  # noqa: E402
 
 # The hand arrives shortly before the object lands and leaves shortly after.
@@ -220,6 +220,17 @@ def main() -> int:
         span = span or [exposure_at(envelope, (s["start"] + s["end"]) / 2)]
         stage_norm[s["id"]] = float(np.median(span))
 
+    # Adjacent gestures are fenced apart before any frame is drawn: two
+    # boundaries closer together than the nominal 0.8s gesture span would
+    # otherwise put two hands on screen at once (see gesture_timing).
+    gesture_stages = [s for s in stages if s["gesture"] != "none" and s["gestureFrom"]]
+    gesture_spans = dict(
+        zip(
+            (s["id"] for s in gesture_stages),
+            gesture_windows([s["start"] for s in gesture_stages], HAND_LEAD_SEC, HAND_TRAIL_SEC),
+        )
+    )
+
     for f in range(total):
         t = f / fps
         stage = stage_at(stages, t)
@@ -247,17 +258,16 @@ def main() -> int:
 
         # Hand layer: peak pinned to the stage boundary so the gesture and the
         # object's appearance land on the same frame.
-        for s in stages:
-            if s["gesture"] == "none" or not s["gestureFrom"]:
-                continue
-            g_start = s["start"] - HAND_LEAD_SEC
-            g_end = s["start"] + HAND_TRAIL_SEC
+        for s in gesture_stages:
+            lead, trail = gesture_spans[s["id"]]
+            g_start = s["start"] - lead
+            g_end = s["start"] + trail
             if g_start <= t <= g_end:
                 # Not a plain ramp across the window: the lead and trail are
                 # deliberately unequal, so that would put the action instant
                 # 50 ms before the boundary instead of on it. See
                 # scripts/gesture_timing.py.
-                progress = gesture_progress(t, s["start"], HAND_LEAD_SEC, HAND_TRAIL_SEC)
+                progress = gesture_progress(t, s["start"], lead, trail)
                 hand = render_gesture((width, height), s["gesture"], s["gestureFrom"], progress)
                 if hand is not None:
                     img = Image.alpha_composite(img.convert("RGBA"), hand).convert("RGB")

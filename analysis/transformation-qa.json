@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-14T12:02:41.596749+00:00",
+  "generatedAt": "2026-09-15T15:05:04.795913+00:00",
   "method": "Stage-by-stage comparison of the measured reference against the assembled result; luminance sampled at each stage midpoint from a 4 fps extraction.",
   "whatIsCompared": [
     "stage order",
@@ -37,7 +37,7 @@
   "beatTimingProblems": [],
   "timingVerifiedAgainst": "public/transformation/manifest.json",
   "lightingArcCorrelation": 0.9969,
-  "allStageLuminanceCorrelation": 0.6113,
+  "allStageLuminanceCorrelation": 0.6118,
   "correlationCaveat": "allStageLuminanceCorrelation is expected to be weak and is reported only for completeness: most of the reference's early luminance movement is content entering frame (dark joinery), not a lighting change, and two different kitchens cannot agree on that. lightingArcCorrelation covers the stages where lighting is the only variable.",
   "stages": [
     {
@@ -46,7 +46,8 @@
       "referenceEnd": 0.75,
       "referenceLuminance": 154.6,
       "resultLuminance": 115.3,
-      "lighting": "daylight",
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
       "gesture": "open-hand sweep along the ceiling/wall junction, fingers spread, entering from the top of frame"
     },
     {
@@ -55,7 +56,8 @@
       "referenceEnd": 1.5,
       "referenceLuminance": 140.7,
       "resultLuminance": 106.7,
-      "lighting": "daylight",
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
       "gesture": "pinch at the right edge of the new cabinet block, dragging right to extend the run"
     },
     {
@@ -64,7 +66,8 @@
       "referenceEnd": 3.1,
       "referenceLuminance": 138.6,
       "resultLuminance": 106.7,
-      "lighting": "daylight",
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
       "gesture": "horizontal sweep left-to-right beneath the upper cabinets"
     },
     {
@@ -72,8 +75,9 @@
       "referenceStart": 3.1,
       "referenceEnd": 3.75,
       "referenceLuminance": 96.8,
-      "resultLuminance": 112.8,
-      "lighting": "daylight",
+      "resultLuminance": 112.7,
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
       "gesture": "two-sided placement - hand indicates each flank in turn"
     },
     {
@@ -82,7 +86,8 @@
       "referenceEnd": 5.75,
       "referenceLuminance": 115.0,
       "resultLuminance": 102.9,
-      "lighting": "daylight",
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
       "gesture": "repeated small pinches along the worktop"
     },
     {
@@ -91,7 +96,8 @@
       "referenceEnd": 6.9,
       "referenceLuminance": 113.0,
       "resultLuminance": 101.7,
-      "lighting": "daylight",
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
       "gesture": "pinch at the ceiling, drawing a horizontal element downward into place"
     },
     {
@@ -100,7 +106,8 @@
       "referenceEnd": 7.7,
       "referenceLuminance": 108.7,
       "resultLuminance": 113.3,
-      "lighting": "daylight",
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
       "gesture": "two-finger placement in the foreground, then drag right to extend the mass"
     },
     {
@@ -109,7 +116,8 @@
       "referenceEnd": 8.7,
       "referenceLuminance": 95.0,
       "resultLuminance": 116.2,
-      "lighting": "daylight",
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
       "gesture": "successive pinch-placements along the island face, one per seat"
     },
     {
@@ -118,7 +126,8 @@
       "referenceEnd": 10.15,
       "referenceLuminance": 101.8,
       "resultLuminance": 112.6,
-      "lighting": "daylight",
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
       "gesture": "final delicate pinch-placements at worktop and island centre, then hands exit frame"
     },
     {
@@ -127,7 +136,8 @@
       "referenceEnd": 11.15,
       "referenceLuminance": 90.0,
       "resultLuminance": 71.3,
-      "lighting": "daylight-dimming",
+      "referenceLighting": "daylight-dimming",
+      "resultLighting": "daylight-dimming",
       "gesture": "none - hands absent"
     },
     {
@@ -136,7 +146,8 @@
       "referenceEnd": 11.95,
       "referenceLuminance": 65.5,
       "resultLuminance": 46.1,
-      "lighting": "dusk",
+      "referenceLighting": "dusk",
+      "resultLighting": "dusk",
       "gesture": "none - hands absent"
     },
     {
@@ -145,7 +156,8 @@
       "referenceEnd": 13.37,
       "referenceLuminance": 121.8,
       "resultLuminance": 96.1,
-      "lighting": "warm-evening",
+      "referenceLighting": "warm-evening",
+      "resultLighting": "warm-evening",
       "gesture": "none - hands absent"
     }
   ],

@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from gesture_timing import gesture_progress, travel_for_progress  # noqa: E402
+from gesture_timing import gesture_progress, gesture_windows, travel_for_progress  # noqa: E402
 
 # As used by the compositor.
 LEAD = 0.45
@@ -109,6 +109,76 @@ class TestGestureProgress(unittest.TestCase):
                 if abs(gesture_progress(f / FPS, stage_start, LEAD, TRAIL) - 0.5) < 0.5 / FPS / LEAD
             ]
             self.assertIn(boundary_frame, acting, f"stage at {stage_start}s")
+
+
+
+# Every gesture-bearing boundary in the real manifest, in order. `empty`
+# carries an opening sweep over the bare shell at t=0, so it is in here too —
+# and 0 -> 0.75 is itself under the nominal 0.8 s span, a second overlapping
+# pair that a list starting at 0.75 would have quietly missed. The last three
+# stages (daylight-hold, dusk, warm-reveal) are lighting-only and have none.
+GESTURE_BOUNDARIES = [0.0, 0.75, 1.5, 3.1, 3.75, 5.75, 6.9, 7.7, 8.7]
+
+
+class TestGestureWindows(unittest.TestCase):
+    def test_adjacent_gestures_never_overlap(self):
+        # Regression: the nominal window is lead + trail = 0.8 s, but
+        # cabinet-wall (3.10) and counter-details (3.75) are only 0.65 s apart,
+        # so the first stayed active to 3.45 while the second began at 3.30 —
+        # roughly five frames with TWO large hands composited at once, against
+        # a reference whose gestures are strictly sequential.
+        windows = gesture_windows(GESTURE_BOUNDARIES, LEAD, TRAIL)
+        for i in range(len(GESTURE_BOUNDARIES) - 1):
+            ends = GESTURE_BOUNDARIES[i] + windows[i][1]
+            next_begins = GESTURE_BOUNDARIES[i + 1] - windows[i + 1][0]
+            self.assertLessEqual(
+                ends,
+                next_begins + 1e-9,
+                f"gesture at {GESTURE_BOUNDARIES[i]}s still overlaps the one at {GESTURE_BOUNDARIES[i + 1]}s",
+            )
+
+    def test_the_old_nominal_windows_really_did_overlap(self):
+        # Guards the premise: if these ever stopped overlapping, the test above
+        # would be proving nothing.
+        self.assertLess(3.75 - 3.1, LEAD + TRAIL)
+
+    def test_a_roomy_gap_keeps_the_full_measured_window(self):
+        # Shrinking must apply ONLY where it is needed — the measured lead and
+        # trail are the default, not a ceiling to be negotiated everywhere.
+        windows = gesture_windows([0.0, 5.0, 10.0], LEAD, TRAIL)
+        for lead, trail in windows:
+            self.assertAlmostEqual(lead, LEAD)
+            self.assertAlmostEqual(trail, TRAIL)
+
+    def test_a_tight_gap_is_split_in_the_measured_proportion(self):
+        # 0.65 s of room, shared as 0.45 : 0.35 — the two gestures meet exactly
+        # once, and neither is cut short disproportionately.
+        windows = gesture_windows([3.1, 3.75], LEAD, TRAIL)
+        gap = 3.75 - 3.1
+        self.assertAlmostEqual(windows[0][1], gap * TRAIL / (LEAD + TRAIL))
+        self.assertAlmostEqual(windows[1][0], gap * LEAD / (LEAD + TRAIL))
+        self.assertAlmostEqual(windows[0][1] + windows[1][0], gap)
+
+    def test_the_action_instant_still_lands_on_the_boundary_after_shrinking(self):
+        # The whole point of shrinking rather than clipping: the gesture plays
+        # its complete arc and still peaks exactly on its own boundary.
+        windows = gesture_windows(GESTURE_BOUNDARIES, LEAD, TRAIL)
+        for boundary, (lead, trail) in zip(GESTURE_BOUNDARIES, windows):
+            self.assertAlmostEqual(gesture_progress(boundary, boundary, lead, trail), 0.5)
+            self.assertAlmostEqual(gesture_progress(boundary - lead, boundary, lead, trail), 0.0)
+            self.assertAlmostEqual(gesture_progress(boundary + trail, boundary, lead, trail), 1.0)
+
+    def test_only_one_gesture_is_ever_on_screen(self):
+        # The end-to-end claim, swept at the compositor's real frame rate.
+        windows = gesture_windows(GESTURE_BOUNDARIES, LEAD, TRAIL)
+        for frame in range(int(13.37 * FPS) + 1):
+            t = frame / FPS
+            active = [
+                b
+                for b, (lead, trail) in zip(GESTURE_BOUNDARIES, windows)
+                if b - lead <= t <= b + trail and 0.0 < gesture_progress(t, b, lead, trail) < 1.0
+            ]
+            self.assertLessEqual(len(active), 1, f"two hands on screen at t={t:.3f}s: {active}")
 
 
 if __name__ == "__main__":

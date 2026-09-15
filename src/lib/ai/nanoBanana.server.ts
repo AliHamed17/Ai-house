@@ -6,6 +6,7 @@ import { readPublicFileAsBase64 } from './publicAsset.server';
 import {
   getStoredResult,
   putStoredResult,
+  ORPHAN_SLOT_MAX_MS,
   releaseResultSlot,
   reserveResultSlot,
   RESULT_STORE_AT_CAPACITY_MESSAGE,
@@ -118,6 +119,12 @@ export const nanoBananaProvider: MediaGenerationProvider = {
     // branch for why the slot must NOT be released in the ordinary `finally`
     // in that one case.
     let releaseDeferredToOrphan = false;
+    // Set if this submission's reserved slot is reclaimed before the orphaned
+    // call finally settles (see the catch below). Read just before the result
+    // is stored, so a very late completion cannot write into capacity it no
+    // longer holds. Declared out here because the catch sets it and the
+    // callback inside the try reads it.
+    let slotExpired = false;
     try {
       const ai = getClient();
 
@@ -161,7 +168,26 @@ export const nanoBananaProvider: MediaGenerationProvider = {
           }
 
           const mimeType = imagePart.inlineData.mimeType || 'image/png';
-          const resultKey = putStoredResult(mimeType, imagePart.inlineData.data, input.roomId);
+          // If this call was orphaned long enough for its slot to be
+          // reclaimed, it has to claim capacity again rather than write on a
+          // reservation that is gone — otherwise every expired orphan that
+          // eventually completes pushes the store past MAX_ENTRIES, which is
+          // the exact bound the reservation exists to hold. Re-reserving
+          // rather than discarding outright keeps a billed result whenever
+          // there is genuinely room for it.
+          let reclaimedSlot = false;
+          if (slotExpired) {
+            if (!reserveResultSlot()) {
+              throw new Error(RESULT_STORE_AT_CAPACITY_MESSAGE);
+            }
+            reclaimedSlot = true;
+          }
+          let resultKey: string;
+          try {
+            resultKey = putStoredResult(mimeType, imagePart.inlineData.data, input.roomId);
+          } finally {
+            if (reclaimedSlot) releaseResultSlot();
+          }
           return encodeJobId({
             provider: 'nano-banana',
             roomId: input.roomId,
@@ -187,7 +213,31 @@ export const nanoBananaProvider: MediaGenerationProvider = {
         // each one holding a large 2K base64 image — well before either
         // orphaned call actually finishes.
         releaseDeferredToOrphan = true;
-        error.orphaned.then(releaseResultSlot, releaseResultSlot);
+        // ...but not forever. If the orphaned promise NEVER settles — a hung
+        // transport, a provider outage — this deferral leaks the slot, and
+        // enough of them park the store permanently at MAX_ENTRIES so every
+        // later Nano generation is refused even once connectivity returns.
+        // The ceiling releases it and tells the still-running callback its
+        // reservation is gone, so a late completion re-claims capacity or is
+        // refused rather than overshooting the bound.
+        let released = false;
+        const releaseOnce = () => {
+          if (released) return;
+          released = true;
+          releaseResultSlot();
+        };
+        const expiry = setTimeout(() => {
+          slotExpired = true;
+          releaseOnce();
+        }, ORPHAN_SLOT_MAX_MS);
+        // Node keeps the process alive for a pending timer; this one must not
+        // hold a serverless invocation open on its own.
+        expiry.unref?.();
+        const settle = () => {
+          clearTimeout(expiry);
+          releaseOnce();
+        };
+        error.orphaned.then(settle, settle);
       }
       throw error;
     } finally {

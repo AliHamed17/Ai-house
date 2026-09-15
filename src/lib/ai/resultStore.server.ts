@@ -52,6 +52,17 @@ interface StoredResult {
 // TTL may raise that; lowering it MUST lower that.
 const TTL_MS = 60 * 60_000;
 const MAX_ENTRIES = 100;
+
+/**
+ * Longest a slot stays claimed for a call whose own wait already timed out
+ * (see OrphanedTimeoutError in nanoBanana.server.ts). The slot is deliberately
+ * held past the timeout so a late completion still has somewhere to land — but
+ * an orphan whose promise NEVER settles would otherwise hold it forever, and
+ * enough of those park the store permanently at MAX_ENTRIES, refusing every
+ * later generation even once the provider recovers. Comfortably past the 45s
+ * submit ceiling, so it only ever fires on a call that has genuinely hung.
+ */
+export const ORPHAN_SLOT_MAX_MS = 5 * 60_000;
 const store = new Map<string, StoredResult>();
 // Slots claimed by a generation that is currently paying for a result but
 // hasn't stored it yet (see reserveResultSlot). Counted alongside store.size

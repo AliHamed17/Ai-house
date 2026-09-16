@@ -16,7 +16,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from clip_schedule import build_clip_schedule, build_clip_windows, frame_at  # noqa: E402
+from clip_schedule import (  # noqa: E402
+    CLIP_LANDING_FRAMES,
+    build_clip_landing,
+    build_clip_schedule,
+    build_clip_windows,
+    frame_at,
+)
 
 FPS = 30
 
@@ -186,6 +192,98 @@ class TestClipWindows(unittest.TestCase):
         start, end = build_clip_windows(STAGES, FPS, lengths)["counter-details"]
         self.assertEqual(end - start, 10)
         self.assertEqual(end, frame_at(3.75, FPS))
+
+
+class TestClipLanding(unittest.TestCase):
+    """
+    The clip must ARRIVE at the still the compositor cuts to.
+
+    Nothing in a clip request names the authored target render — the provider
+    gets the previous stage's still and a differential prompt — so a clip can
+    settle its object slightly off and the compositor's very next frame (the
+    authored still) pops. These guard the dissolve that removes that by
+    construction.
+    """
+
+    ALL = {"upper-cabinets": 20, "backsplash": 40, "cabinet-wall": 12, "counter-details": 60}
+
+    def test_every_window_lands_exactly_on_the_target_still(self):
+        # The claim, end to end: the last frame the clip occupies IS the stage
+        # still, so the cut to it on the next frame changes nothing.
+        landing = build_clip_landing(STAGES, FPS, self.ALL)
+        windows = build_clip_windows(STAGES, FPS, self.ALL)
+        self.assertTrue(windows)
+        for stage_id, (_start, end) in windows.items():
+            self.assertAlmostEqual(landing[end - 1], 1.0, msg=f"{stage_id} never reaches its still")
+
+    def test_the_dissolve_only_touches_the_tail_of_its_window(self):
+        # The paid placement motion is what the viewer is there for; blending
+        # it away across the whole window would waste the generation.
+        landing = build_clip_landing(STAGES, FPS, self.ALL)
+        for stage_id, (start, end) in build_clip_windows(STAGES, FPS, self.ALL).items():
+            window = end - start
+            span = min(CLIP_LANDING_FRAMES, window)
+            self.assertGreater(window, span, f"{stage_id} needs a window worth testing")
+            for frame in range(start, end - span):
+                self.assertNotIn(frame, landing, f"{stage_id} frame {frame} should be untouched")
+            for frame in range(end - span, end):
+                self.assertIn(frame, landing, f"{stage_id} frame {frame} should be dissolving")
+
+    def test_the_dissolve_is_monotonic_and_bounded(self):
+        landing = build_clip_landing(STAGES, FPS, self.ALL)
+        for _stage_id, (start, end) in build_clip_windows(STAGES, FPS, self.ALL).items():
+            weights = [landing[f] for f in range(start, end) if f in landing]
+            for earlier, later in zip(weights, weights[1:]):
+                self.assertLess(earlier, later)
+            self.assertGreater(weights[0], 0.0)
+            self.assertLessEqual(weights[-1], 1.0)
+
+    def test_it_never_reaches_outside_its_own_window(self):
+        # The window floor keeps clips disjoint; a ramp that started before its
+        # window would blend a target still over the PREVIOUS stage's frames.
+        landing = build_clip_landing(STAGES, FPS, self.ALL)
+        owned = {
+            frame
+            for (start, end) in build_clip_windows(STAGES, FPS, self.ALL).values()
+            for frame in range(start, end)
+        }
+        self.assertTrue(set(landing).issubset(owned))
+
+    def test_a_window_shorter_than_the_ramp_still_lands(self):
+        # Shrink the ramp, never the guarantee.
+        lengths = {"counter-details": 3}
+        landing = build_clip_landing(STAGES, FPS, lengths)
+        start, end = build_clip_windows(STAGES, FPS, lengths)["counter-details"]
+        self.assertEqual(end - start, 3)
+        self.assertAlmostEqual(landing[end - 1], 1.0)
+        self.assertEqual(sorted(landing), list(range(start, end)))
+
+    def test_a_single_frame_window_is_just_the_still(self):
+        lengths = {"counter-details": 1}
+        landing = build_clip_landing(STAGES, FPS, lengths)
+        start, end = build_clip_windows(STAGES, FPS, lengths)["counter-details"]
+        self.assertEqual(end - start, 1)
+        self.assertAlmostEqual(landing[start], 1.0)
+
+    def test_stages_without_a_clip_carry_no_weight(self):
+        # A frame drawn from the stage still must never be blended with itself
+        # at some partial weight — it is already the target.
+        landing = build_clip_landing(STAGES, FPS, {"backsplash": 20})
+        start, end = build_clip_windows(STAGES, FPS, {"backsplash": 20})["backsplash"]
+        self.assertTrue(all(start <= f < end for f in landing))
+
+    def test_the_landing_agrees_with_the_schedule_frame_for_frame(self):
+        # Both are read in the same loop of the compositor; a frame carrying a
+        # landing weight but no scheduled clip frame would blend against
+        # nothing, and the reverse would cut instead of landing.
+        landing = build_clip_landing(STAGES, FPS, self.ALL)
+        schedule = build_clip_schedule(STAGES, FPS, self.ALL)
+        self.assertTrue(set(landing).issubset(set(schedule)))
+        for frame, weight in landing.items():
+            stage_id, _clip_index = schedule[frame]
+            _start, end = build_clip_windows(STAGES, FPS, self.ALL)[stage_id]
+            if frame == end - 1:
+                self.assertAlmostEqual(weight, 1.0)
 
 
 if __name__ == "__main__":

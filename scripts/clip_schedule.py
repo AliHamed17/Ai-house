@@ -14,11 +14,29 @@ The rule that makes that safe is the window floor. A clip may only play across
 the interval IMMEDIATELY BEFORE its stage, so every window lives inside
 [previous.start, stage.start) — and those intervals are disjoint, so two clips
 can never claim the same frame.
+
+What the window rule does NOT give on its own is that the clip actually ARRIVES
+at S. The provider is sent only the previous stage's still and a differential
+prompt; nothing in that request names the authored target render, so a clip can
+settle its new object a few pixels off, at a slightly different scale, or under
+slightly different shading, and still be a perfectly good clip. The compositor
+then draws that last clip frame and, on the very next frame, the authored still
+— a visible pop on the one frame the whole sequence is built around. The
+landing ramp below closes that by construction, on our side, without depending
+on a provider capability: the clip is cross-dissolved into the target still
+across the tail of its own window, reaching it exactly on the window's last
+frame. See build_clip_landing.
 """
 
 from __future__ import annotations
 
 import math
+
+# Frames at the END of a clip's window that cross-dissolve into the target
+# stage still: 0.2 s at 30 fps. Long enough that the hand-off reads as the
+# object settling rather than as a cut, short enough that the paid placement
+# motion is still what the viewer is watching for the rest of the window.
+CLIP_LANDING_FRAMES = 6
 
 
 def frame_at(seconds: float, fps: int) -> int:
@@ -113,3 +131,46 @@ def build_clip_schedule(
             )
             schedule[frame_index] = (stage_id, clip_index)
     return schedule
+
+
+def build_clip_landing(
+    stages: list[dict],
+    fps: int,
+    clip_lengths: dict[str, int],
+    landing_frames: int = CLIP_LANDING_FRAMES,
+) -> dict[int, float]:
+    """
+    Map master frame index -> weight of the TARGET stage still at that frame.
+
+    0.0 means "draw the clip frame as delivered"; 1.0 means "draw the authored
+    still". Only frames inside a clip window ever appear, and only the tail of
+    each window carries a non-zero weight, so the placement motion the clip was
+    paid for is untouched for everything before the landing.
+
+    The last frame of every window weighs exactly 1.0. That is the whole point:
+    the frame immediately after it is the stage still itself (the compositor's
+    non-clip path), so landing on that still makes the boundary continuous by
+    construction — no matter how far the provider's idea of the finished stage
+    drifted from the authored one. A clip whose object arrived exactly where
+    the still has it dissolves between two identical images and costs nothing.
+
+    Kept separate from build_clip_schedule rather than folded into its tuple so
+    the schedule's shape (and its tests) stay as they were; both derive their
+    windows from build_clip_windows, so they cannot disagree about where a clip
+    plays.
+    """
+    landing: dict[int, float] = {}
+    for _stage_id, (start_frame, end_frame) in build_clip_windows(stages, fps, clip_lengths).items():
+        window = end_frame - start_frame
+        # A window shorter than the ramp gets a shorter ramp, never one that
+        # would reach back past its own start and into the previous stage's
+        # frames — the disjointness the window floor exists to guarantee.
+        span = max(1, min(landing_frames, window))
+        for offset, frame_index in enumerate(range(start_frame, end_frame)):
+            remaining = window - offset  # 1 on the window's last frame
+            if remaining > span:
+                continue
+            # remaining == span -> 1/span (the dissolve opens), remaining == 1
+            # -> exactly 1.0 (the dissolve completes on the last frame).
+            landing[frame_index] = (span - remaining + 1) / span
+    return landing

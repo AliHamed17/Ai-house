@@ -388,6 +388,112 @@ function clearRecoveryEntry(id: string): void {
   }
 }
 
+// The approved concept is a breadcrumb for bytes that have ALREADY been paid
+// for and that the server keeps for up to resultStore.server's TTL_MS (60
+// min). Holding it only in React state meant a reload — the single most
+// ordinary thing a visitor does while looking at a finished render — silently
+// dropped both the source URL that a refinement or a cinematic clip is
+// generated FROM and the variant it was generated under, for an image the
+// result store would still have served. Nothing in the UI can recover that:
+// the approval cannot be re-made without generating (and paying for) the
+// image again.
+//
+// Deliberately its own key rather than another RecoveryEntry: a recovery
+// entry means "this generation's outcome is unresolved" and drives the Resume
+// banners and the Generate lock, while this means precisely the opposite — a
+// generation that resolved, and that the visitor accepted. Only ONE is kept
+// (approving a second image for a second room supersedes the first), matching
+// the single piece of React state it mirrors.
+const APPROVED_SOURCE_STORAGE_KEY = 'ai-studio:approved-source';
+
+// Every approved source is a stored-result URL (RESULT_URL_PREFIX in
+// resultStore.server): Approve records nothing for a mock provider, whose
+// result is a public placeholder asset, and a real Nano Banana result is
+// always `${RESULT_URL_PREFIX}${key}`. Restated here because that module is
+// server-only.
+const STORED_RESULT_URL_PREFIX = '/api/generation/result/';
+
+const VALID_STYLE_VARIANT_IDS = new Set<string>(materialVariants.map((v) => v.id));
+
+interface ApprovedSource {
+  path: string;
+  roomId: RoomId;
+  // styleVariant is part of the identity, not decoration: a refinement's
+  // prompt preserves the approved design without restating materials, and a
+  // clip explicitly preserves the source's materials, so whatever variant is
+  // recorded alongside the path is the one the output will actually show.
+  // Labelling such a job with a later, unrelated selector value would record
+  // provenance the image does not match.
+  styleVariant: string;
+  // The approved JOB's own createdAt, not the moment Approve was clicked. The
+  // ceiling this is measured against belongs to the server-side bytes, whose
+  // life starts when the job did — stamping "now" here would let a result
+  // approved ten minutes after it landed keep advertising itself for ten
+  // minutes longer than those bytes actually exist.
+  jobCreatedAt: number;
+}
+
+// Same reasoning as isValidRecoveryEntry above: a same-origin localStorage
+// value can be null, a since-changed shape, or simply missing a field, and
+// none of those throw on JSON.parse. This one is read straight back out as a
+// generate request's sourceAssetPath and styleVariant, so an unchecked cast
+// would let a corrupted entry spend a submission just to be told the source
+// is bad. (The server re-validates both independently —
+// assertStoredResultRoom/assertPublicSourceRoom and VALID_VARIANT_IDS — this
+// simply stops the round trip.)
+function isValidApprovedSource(value: unknown): value is ApprovedSource {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.path !== 'string' || !v.path.startsWith(STORED_RESULT_URL_PREFIX)) return false;
+  if (v.path.length <= STORED_RESULT_URL_PREFIX.length) return false;
+  if (typeof v.roomId !== 'string' || !VALID_RECOVERY_ROOM_IDS.has(v.roomId)) return false;
+  if (typeof v.styleVariant !== 'string' || !VALID_STYLE_VARIANT_IDS.has(v.styleVariant)) return false;
+  return typeof v.jobCreatedAt === 'number' && Number.isFinite(v.jobCreatedAt);
+}
+
+function readApprovedSource(): ApprovedSource | null {
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(APPROVED_SOURCE_STORAGE_KEY);
+  } catch {
+    // Best-effort (private browsing, storage disabled) — same as every other
+    // localStorage access here.
+    return null;
+  }
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+  // The same ceiling a completed IMAGE job's recovery entry gets, for the same
+  // reason and against the same clock: both point at bytes in the server's
+  // result store, so both must stop advertising them before that store's TTL
+  // prunes them. A breadcrumb outliving the bytes would aim the next Generate
+  // at a source that 410s (SOURCE_EXPIRED_MESSAGE) instead of quietly starting
+  // from the room's evidence frame as an unapproved room already does.
+  if (!isValidApprovedSource(parsed) || Date.now() - parsed.jobCreatedAt > RECOVERY_MAX_AGE_MS.imageJob) {
+    try {
+      localStorage.removeItem(APPROVED_SOURCE_STORAGE_KEY);
+    } catch {
+      // best-effort
+    }
+    return null;
+  }
+  return parsed;
+}
+
+function persistApprovedSource(entry: ApprovedSource | null): void {
+  try {
+    if (entry) localStorage.setItem(APPROVED_SOURCE_STORAGE_KEY, JSON.stringify(entry));
+    else localStorage.removeItem(APPROVED_SOURCE_STORAGE_KEY);
+  } catch {
+    // Best-effort (private browsing, storage disabled, quota) — the in-memory
+    // state this mirrors still works for as long as the tab stays open.
+  }
+}
+
 export function AIStudioPanel() {
   const [roomId, setRoomId] = useState<RoomId>('living');
   const [styleVariant, setStyleVariant] = useState(materialVariants[0].id);
@@ -408,15 +514,9 @@ export function AIStudioPanel() {
   const [confirmingLiveRun, setConfirmingLiveRun] = useState(false);
   const [job, setJob] = useState<GenerationJob | null>(null);
   const [approved, setApproved] = useState(false);
-  // styleVariant is part of the identity, not decoration: a refinement's
-  // prompt preserves the approved design without restating materials, and a
-  // clip explicitly preserves the source's materials, so whatever variant is
-  // recorded alongside the path is the one the output will actually show.
-  // Labelling such a job with a later, unrelated selector value would record
-  // provenance the image does not match.
-  const [approvedSource, setApprovedSource] = useState<
-    { path: string; roomId: RoomId; styleVariant: string } | null
-  >(null);
+  // Mirrors APPROVED_SOURCE_STORAGE_KEY (see ApprovedSource above), restored
+  // on mount so an already-billed, already-approved image survives a reload.
+  const [approvedSource, setApprovedSource] = useState<ApprovedSource | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // A job whose status-polling gave up after repeated transient failures
@@ -448,6 +548,18 @@ export function AIStudioPanel() {
   useEffect(() => () => {
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
   }, []);
+
+  // The single writer for BOTH halves of the approved source, so the React
+  // state and the persisted record can never drift apart. Every clear is as
+  // much a decision as the approval itself — switching room, switching
+  // material, rejecting that exact image, or a 410 saying the bytes are gone —
+  // and a clear that reached only memory would let the very next reload
+  // resurrect an approval the visitor already dropped, then quietly build a
+  // billed refinement or clip on top of it.
+  function recordApprovedSource(next: ApprovedSource | null): void {
+    persistApprovedSource(next);
+    setApprovedSource(next);
+  }
 
   // Restores a paid-job recovery point left behind by a previous page load,
   // OR by a genuinely different tab sharing this origin's localStorage that
@@ -547,7 +659,19 @@ export function AIStudioPanel() {
     // before clearOwnRecoveryEntry happens to also adopt a sibling).
     setJob(null);
     setApproved(false);
-    setApprovedSource(null);
+    // Re-read rather than blanket-null (regression): adoption is a forced
+    // context switch to resolve someone's pending job, NOT the visitor's own
+    // decision to drop an approval, and nulling here left the persisted record
+    // still holding a perfectly good already-billed image that this tab would
+    // then refuse to use until a reload brought it back. What made the blanket
+    // null look necessary was `job`/`approved`, which carry no room of their
+    // own and are cleared just above; approvedSource carries its OWN roomId
+    // and every consumer goes through approvedSourceForRoom below, which
+    // already gates on that room matching the current one — so an entry
+    // belonging to a room this adoption switches away from does not apply until
+    // the visitor comes back to it. Reading through recordApprovedSource's
+    // same source of truth is also what keeps state and storage in lockstep.
+    setApprovedSource(readApprovedSource());
     if (entry.kind === 'job') {
       setRecoverableJobId(entry.jobId);
     } else {
@@ -603,6 +727,11 @@ export function AIStudioPanel() {
     /* eslint-disable react-hooks/set-state-in-effect */
     locallyIgnoredIdsRef.current = readLocallyIgnoredIds();
     adoptRecoveryEntry();
+    // After adoptRecoveryEntry, not before: it sets this too (on the path
+    // where it actually adopts something), and this unconditional restore is
+    // what covers the ordinary case — a plain reload with nothing outstanding,
+    // where adoption returns early and never reaches its own read.
+    setApprovedSource(readApprovedSource());
     /* eslint-enable react-hooks/set-state-in-effect */
     // job is always its null initial value on this very first render, so
     // adoptRecoveryEntry's own job/approved read can never be stale here —
@@ -730,7 +859,25 @@ export function AIStudioPanel() {
 
   const videoAvailableForRoom = VIDEO_CAPABLE_ROOMS.has(roomId);
   const isLiveForOutput = outputType === 'image' ? liveStatus?.nanoBanana : liveStatus?.higgsfield;
-  const approvedForCurrentRoom = approvedSource !== null && approvedSource.roomId === roomId;
+  // The approved source only ever applies to the room it was generated for —
+  // every consumer gates on this rather than on approvedSource directly, which
+  // is what makes it safe for a record to outlive a room switch or an
+  // adoption that moves the panel somewhere else.
+  const approvedSourceForRoom = approvedSource !== null && approvedSource.roomId === roomId ? approvedSource : null;
+  const approvedForCurrentRoom = approvedSourceForRoom !== null;
+  // What the style selector SHOWS, which has to be what the next Generate will
+  // actually use: an approval carries its own variant and handleGenerate
+  // prefers it over this state (see its own comment), while after a reload the
+  // plain styleVariant state comes back on its own default with no memory of
+  // it — so the selector would display one material while the next billed
+  // generation refined the approved image in another, the exact drift the
+  // selector lock exists to prevent. Derived rather than synced into state on
+  // mount: that makes the two agree by construction on every path (mount, a
+  // sibling tab's adoption, a room switch) with no ordering to get wrong, and
+  // it is a no-op in the ordinary in-session case, where the selector is
+  // locked while the job it will be attributed to is undecided
+  // (styleLockedToPendingJob) and so already holds that job's variant.
+  const displayedStyleVariant = approvedSourceForRoom?.styleVariant ?? styleVariant;
   // A live (billed) Higgsfield clip must animate a real approved concept, not
   // the placeholder still. Default to requiring approval whenever the mode
   // isn't genuinely confirmed yet — never relax this on an unconfirmed
@@ -813,7 +960,7 @@ export function AIStudioPanel() {
     setJob(null);
     setError(null);
     setApproved(false);
-    setApprovedSource(null);
+    recordApprovedSource(null);
   }
 
   function handleOutputTypeChange(nextOutputType: GenerationOutputType) {
@@ -1245,7 +1392,11 @@ export function AIStudioPanel() {
         // named fell out of the server's cache. Nothing to resume: clear it
         // so the next Generate falls back to a fresh source instead of
         // retrying the same request and failing the same way forever.
-        if (res.status === 410) setApprovedSource(null);
+        // recordApprovedSource, not a bare setState: the persisted record
+        // points at exactly the bytes the server has just said are gone, so
+        // leaving it in storage would hand the same dead source back on the
+        // next reload and fail identically again.
+        if (res.status === 410) recordApprovedSource(null);
         // The server's own mode resolution disagreed with what this tab's
         // cached probe believed (see LIVE_RUN_NOT_CONFIRMED_MESSAGE) —
         // nothing was billed, but this tab's cached liveStatus is now known
@@ -1373,8 +1524,7 @@ export function AIStudioPanel() {
     // Once a concept for THIS room has been approved, both a refinement and a
     // cinematic clip operate on that approved image; before then, an image
     // starts from the room's evidence frame and a clip from its concept still.
-    const approvedForThisRoom = approvedSource && approvedSource.roomId === roomId ? approvedSource : null;
-    const approvedForRoom = approvedForThisRoom?.path;
+    const approvedForRoom = approvedSourceForRoom?.path;
     const sourceAssetPath = approvedForRoom ?? (outputType === 'image' ? roomEvidenceFrame[roomId]?.path : conceptImagePath(roomId));
     const body = {
       roomId,
@@ -1383,7 +1533,7 @@ export function AIStudioPanel() {
       // happens to read now. Changing the selector clears the approval (see
       // its onChange), so the two normally agree; this makes them agree by
       // construction rather than by timing.
-      styleVariant: approvedForThisRoom?.styleVariant ?? styleVariant,
+      styleVariant: displayedStyleVariant,
       sourceAssetPath,
       editInstruction: editInstruction || undefined,
       simulate,
@@ -1448,7 +1598,7 @@ export function AIStudioPanel() {
               control is live again, and changing it there clears the
               approval so a fresh concept is made in the chosen material. */}
           <select
-            value={styleVariant}
+            value={displayedStyleVariant}
             disabled={styleLockedToPendingJob}
             title={
               styleLockedToPendingJob
@@ -1466,7 +1616,14 @@ export function AIStudioPanel() {
               // Generate start a fresh concept in the chosen material, which
               // is what picking it means. The control stays live rather than
               // being disabled, so nothing here is silently overridden.
-              if (e.target.value !== styleVariant) setApprovedSource(null);
+              // Compared against what the control was DISPLAYING, not against
+              // the raw styleVariant state: after a reload those differ (the
+              // display comes from the restored approval — see
+              // displayedStyleVariant), and comparing against the state would
+              // read "no change" for a genuine change back to the default,
+              // leaving the approval in place and snapping the control
+              // straight back to the variant the visitor just moved off.
+              if (e.target.value !== displayedStyleVariant) recordApprovedSource(null);
             }}
             className="rounded-xl border border-limestone/60 bg-ivory px-3 py-2 text-charcoal disabled:cursor-not-allowed disabled:opacity-45"
           >
@@ -1703,9 +1860,10 @@ export function AIStudioPanel() {
                     // completing and this click lost an unapproved,
                     // possibly-billed result for good — see startPolling's own
                     // comment). adoptRecoveryEntry is called BEFORE
-                    // setApprovedSource below (rather than after, as Reject
+                    // recordApprovedSource below (rather than after, as Reject
                     // does) because it matters here specifically: its own
-                    // setApprovedSource(null) reset then runs FIRST in the same
+                    // approved-source reset (a re-read of the record as it
+                    // stood BEFORE this click) runs FIRST in the same
                     // batch, so the explicit call below — reading job/roomId
                     // from this same click's closure, still the ORIGINAL
                     // room/job regardless of any room switch adoption just
@@ -1738,7 +1896,13 @@ export function AIStudioPanel() {
                     // live, this placeholder SVG would satisfy the live-video approval
                     // gate and let a real billed clip animate a fake concept.
                     if (job.outputType === 'image' && job.resultUrl && job.provider !== 'mock') {
-                      setApprovedSource({
+                      // recordApprovedSource, not a bare setState: the point
+                      // of approving is that this already-billed image becomes
+                      // the material for whatever is generated next, and a
+                      // reload between the two used to lose it outright (see
+                      // ApprovedSource above).
+                      const jobCreatedAt = Date.parse(job.createdAt);
+                      recordApprovedSource({
                         path: job.resultUrl,
                         roomId,
                         // The job's OWN variant, not the selector's current
@@ -1750,6 +1914,11 @@ export function AIStudioPanel() {
                         // back from the signed job id, so it is what the
                         // image was actually generated with.
                         styleVariant: job.meta.styleVariant,
+                        // Falls back to now only if the server's own timestamp
+                        // is unparseable; "now" is the LATER of the two, so the
+                        // fallback is the generous direction and is bounded by
+                        // the server's 410 either way.
+                        jobCreatedAt: Number.isFinite(jobCreatedAt) ? jobCreatedAt : Date.now(),
                       });
                     }
                   }}
@@ -1766,7 +1935,7 @@ export function AIStudioPanel() {
                     // approved image; rejecting a later refinement or clip that was
                     // generated FROM it must not lose the still-good baseline.
                     if (approvedSource && approvedSource.path === job.resultUrl) {
-                      setApprovedSource(null);
+                      recordApprovedSource(null);
                     }
                     // This tab's own unacknowledged result is what was
                     // deferring adoption (see adoptRecoveryEntry), and Reject

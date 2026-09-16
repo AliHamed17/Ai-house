@@ -29,11 +29,20 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from qa_report import (  # noqa: E402
+    MIN_LIGHTING_ARC_CORRELATION,
+    json_number,
+    lighting_arc_problems,
+)
 
 REFERENCE_ANALYSIS = Path("analysis/reference-transformation-video.json")
 RESULT_MP4 = Path("public/transformation/kitchen-transformation.mp4")
@@ -174,9 +183,14 @@ def main() -> int:
     if len(lighting_rows) >= 2:
         lr = np.array([r["referenceLuminance"] for r in lighting_rows])
         lo = np.array([r["resultLuminance"] for r in lighting_rows])
+        # nan whenever either series is constant — a flat, black or frozen
+        # render is exactly that, and lighting_arc_problems below treats it as
+        # the failure it is rather than letting it pass as "no problem found".
         lighting_correlation = float(np.corrcoef(lr, lo)[0, 1])
     else:
         lighting_correlation = float("nan")
+
+    lighting_problems = lighting_arc_problems(lighting_correlation, len(lighting_rows))
 
     # Beat timing must be checked against the manifest the COMPOSITOR actually
     # wrote, not against ref_stages. Comparing ref_stages to itself (which is
@@ -248,8 +262,16 @@ def main() -> int:
         "beatTimingExact": timing_exact,
         "beatTimingProblems": timing_problems,
         "timingVerifiedAgainst": str(produced_path),
-        "lightingArcCorrelation": round(lighting_correlation, 4),
-        "allStageLuminanceCorrelation": round(all_correlation, 4),
+        # json_number, not round(): a flat or fully black render makes
+        # np.corrcoef return nan, and json.dumps writes that as a bare `NaN`
+        # token, which is not valid JSON — the report would be unreadable by
+        # every strict parser, including whoever is trying to find out why the
+        # run failed. null says "no measurement" in a form that parses.
+        "lightingArcCorrelation": json_number(lighting_correlation),
+        "allStageLuminanceCorrelation": json_number(all_correlation),
+        "minLightingArcCorrelation": MIN_LIGHTING_ARC_CORRELATION,
+        "lightingArcAcceptable": not lighting_problems,
+        "lightingArcProblems": lighting_problems,
         "correlationCaveat": (
             "allStageLuminanceCorrelation is expected to be weak and is reported only for completeness: "
             "most of the reference's early luminance movement is content entering frame (dark joinery), "
@@ -268,6 +290,8 @@ def main() -> int:
     for problem in timing_problems:
         print(f"  timing problem: {problem}")
     print(f"lighting-arc correlation (lighting-only stages): {lighting_correlation:.3f}")
+    for problem in lighting_problems:
+        print(f"  lighting problem: {problem}")
     print(f"all-stage luminance correlation (content-confounded): {all_correlation:.3f}")
     # A failed audit has to fail the COMMAND, not just be written into the
     # report. Recording the problem and still exiting 0 meant
@@ -276,7 +300,13 @@ def main() -> int:
     # is precisely the case the structural checks above exist to catch. The
     # report and sheet are written first, so a failing run still leaves the
     # evidence behind for whoever reads it.
-    return 1 if timing_problems else 0
+    #
+    # The lighting arc counts here too (regression): checking only
+    # timing_problems meant a regeneration that kept the manifest intact — so
+    # every structural check still passed — but rendered the arc backwards,
+    # flat or fully black exited 0 all the same, and whatIsCompared goes on
+    # claiming "shape of the luminance arc" is part of this audit.
+    return 1 if timing_problems or lighting_problems else 0
 
 
 if __name__ == "__main__":

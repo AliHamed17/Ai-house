@@ -40,7 +40,12 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from clip_schedule import build_clip_schedule, build_clip_windows  # noqa: E402
+from clip_schedule import (  # noqa: E402
+    CLIP_LANDING_FRAMES,
+    build_clip_landing,
+    build_clip_schedule,
+    build_clip_windows,
+)
 from gesture_timing import gesture_progress, gesture_windows  # noqa: E402
 from hand_layer import render_gesture  # noqa: E402
 
@@ -193,6 +198,13 @@ def main() -> int:
     clip_lengths = {stage_id: len(frames) for stage_id, frames in clip_frames.items()}
     clip_windows = build_clip_windows(stages, fps, clip_lengths)
     clip_schedule = build_clip_schedule(stages, fps, clip_lengths)
+    # Nothing in a clip request names the authored target render — the provider
+    # gets the PREVIOUS stage's still and a differential prompt — so a clip can
+    # settle its object slightly off the authored still and the cut to that
+    # still on the very next frame pops. This dissolves the clip into its
+    # target across the tail of its own window, reaching it exactly on the last
+    # frame before the boundary. See build_clip_landing.
+    clip_landing = build_clip_landing(stages, fps, clip_lengths)
     for stage_id in sorted(clip_frames):
         window = clip_windows.get(stage_id)
         if window is None:
@@ -246,14 +258,39 @@ def main() -> int:
         scheduled = clip_schedule.get(f)
         if scheduled is not None:
             clip_stage_id, clip_frame_index = scheduled
-            source = np.asarray(
-                Image.open(clip_frames[clip_stage_id][clip_frame_index]).convert("RGB"),
-                dtype=np.uint8,
+            frame = apply_exposure(
+                np.asarray(
+                    Image.open(clip_frames[clip_stage_id][clip_frame_index]).convert("RGB"),
+                    dtype=np.uint8,
+                ),
+                rel,
             )
+            # Land the clip on the authored still it is transitioning into, so
+            # the cut to that still on the next frame is continuous however far
+            # the provider's finished state drifted from ours. Weight is 0 for
+            # everything but the window's tail and exactly 1.0 on its last
+            # frame, so a faithful clip dissolves between two identical images.
+            landing = clip_landing.get(f, 0.0)
+            if landing > 0.0:
+                # Each half is exposed with ITS OWN stage normalisation BEFORE
+                # blending. `rel` above belongs to the stage currently playing;
+                # the still being landed on belongs to the NEXT one, whose
+                # envelope median can differ. Blending raw pixels and exposing
+                # once afterwards would arrive at a target that is right in
+                # content and wrong in brightness — trading a geometry pop for
+                # an exposure one. This way the landing frame is exactly what
+                # the frame after the boundary renders.
+                target_norm = stage_norm[clip_stage_id]
+                target_rel = exposure_at(envelope, t) / target_norm if target_norm > 0 else 1.0
+                target = apply_exposure(arrays[clip_stage_id], target_rel)
+                frame = np.clip(
+                    frame.astype(np.float32) * (1.0 - landing) + target.astype(np.float32) * landing,
+                    0,
+                    255,
+                ).astype(np.uint8)
         else:
-            source = arrays[stage["id"]]
+            frame = apply_exposure(arrays[stage["id"]], rel)
 
-        frame = apply_exposure(source, rel)
         img = Image.fromarray(frame)
 
         # Hand layer: peak pinned to the stage boundary so the gesture and the
@@ -336,13 +373,22 @@ def main() -> int:
         # frames came from that clip.
         "stagesFromGeneratedClips": sorted(clip_windows.keys()),
         "generatedClipWindows": {
-            stage_id: {"startFrame": start, "endFrame": end, "frames": end - start}
+            stage_id: {
+                "startFrame": start,
+                "endFrame": end,
+                "frames": end - start,
+                # Tail of this window cross-dissolved into the stage's authored
+                # still, so the clip lands on it exactly rather than cutting.
+                "landingFrames": min(CLIP_LANDING_FRAMES, end - start),
+            }
             for stage_id, (start, end) in sorted(clip_windows.items())
         },
         "provenance": (
             "Composed deterministically from locked-camera 3D renders of the real house model. "
             "Stages listed in stagesFromGeneratedClips used an approved Higgsfield clip for their motion, "
-            "over the frame range given in generatedClipWindows; "
+            "over the frame range given in generatedClipWindows, each cross-dissolved into that stage's "
+            "authored still over its final landingFrames so the boundary is continuous whatever the "
+            "provider returned; "
             "all edit timing, exposure and hand compositing remain compositor-controlled."
         ),
     }

@@ -65,5 +65,25 @@ export default defineConfig({
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    env: {
+      // The generate rate limiter is 12 requests per rolling 60 s per client
+      // key, and with the production default (TRUSTED_PROXY_HOPS unset, so
+      // every caller collapses to 'anonymous' — see rateLimit.server) the
+      // ENTIRE suite is one client. Dozens of tests legitimately drive real
+      // generations, so whether any given test got throttled depended on how
+      // fast the tests before it happened to run: a genuine, load-dependent
+      // flake in which a passing test fails because an unrelated one ran
+      // quickly. Telling the test server it sits behind exactly one trusted
+      // hop lets each test present its own X-Forwarded-For and get its own
+      // bucket (see the beforeEach in tests/e2e/ai-studio.spec.ts), so tests
+      // stop paying for each other.
+      //
+      // This is the harness's configuration, not the app's: the default stays
+      // 0, no deployment is changed, and nothing here weakens what is tested —
+      // no e2e test exercises the real limiter (the 429 cases all fulfil the
+      // status themselves), while the limiter and this exact header parsing
+      // are covered directly by tests/unit/ai-rate-limit*.test.ts.
+      TRUSTED_PROXY_HOPS: '1',
+    },
   },
 });

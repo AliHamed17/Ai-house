@@ -44,6 +44,19 @@ async function readRawRecoveryEntry(page: Page, id: string): Promise<Record<stri
 }
 
 test.describe('AI Design Studio (demo mode)', () => {
+  // Give every test its own rate-limit bucket. The generate limiter is 12
+  // requests per rolling 60 s per client key, and this file alone drives far
+  // more real generations than that — so with one shared key (the production
+  // default) a test's success depended on how fast the tests BEFORE it
+  // happened to run, and a perfectly good test would fail on
+  // "Too many attempts" because an unrelated one had been quick. The test
+  // server is configured with TRUSTED_PROXY_HOPS=1 (see playwright.config.ts)
+  // precisely so this header decides the key. testId is stable within a run
+  // and unique per test, which is exactly the isolation wanted.
+  test.beforeEach(async ({ context }, testInfo) => {
+    await context.setExtraHTTPHeaders({ 'x-forwarded-for': `10.0.0.${testInfo.testId}` });
+  });
+
   test('generates a concept image and reaches the completed state', async ({ page }) => {
     await page.goto('/#ai-studio');
     await page.getByRole('button', { name: /Generate concept image/i }).click();
@@ -1911,5 +1924,232 @@ test.describe('AI Design Studio (demo mode)', () => {
     expect(ids).toHaveLength(2);
     expect(ids).toContain('job:sibling-different-room-job-id');
     expect(ids.some((id) => id.startsWith('submission:'))).toBe(true);
+  });
+
+  // The approved source (AIStudioPanel's APPROVED_SOURCE_STORAGE_KEY) is the
+  // one piece of studio state that outlives the generation it came from: it
+  // names an already-billed image in the server's result store, and it is what
+  // the NEXT refinement or cinematic clip is generated from. The tests below
+  // cover both halves of that — it must survive what should not clear it, and
+  // it must not survive what should.
+  const APPROVED_SOURCE_STORAGE_KEY = 'ai-studio:approved-source';
+
+  // A completed, NON-mock image job for `living`, generated in a variant that
+  // is deliberately not the selector's own default ('warm-oak'): after a
+  // reload the selector resets to that default, so 'cool-stone' coming back
+  // can only have come from the restored approval. Approve records nothing at
+  // all for a mock provider (its result is a public placeholder, not a paid
+  // one), so a plain demo-mode run cannot exercise any of this.
+  const APPROVED_RESULT_URL = '/api/generation/result/approved-reload-result-id';
+  const APPROVED_VARIANT = 'cool-stone';
+
+  async function routeCompletedNonMockImage(page: Page) {
+    await page.route('**/api/generation/status/**', (route) => {
+      // Echo the REAL job id back: a fabricated one would not match the
+      // recovery entry this run wrote, so Approve would clear the wrong key,
+      // adopt its own still-present entry as a "sibling", and suppress the
+      // approval it was meant to record.
+      const jobId = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop() ?? '');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          jobId,
+          provider: 'nano-banana',
+          outputType: 'image',
+          roomId: 'living',
+          status: 'completed',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          resultUrl: APPROVED_RESULT_URL,
+          meta: { model: 'nano-banana', styleVariant: APPROVED_VARIANT, prompt: 'p', approved: false },
+        }),
+      });
+    });
+  }
+
+  // Accepts the submission without touching the real generate route. The
+  // status route is stubbed alongside it (routeCompletedNonMockImage echoes
+  // whatever job id it is asked for), so an invented id is never checked
+  // against a signature and still matches the recovery entry this run writes —
+  // which is what a fabricated id must do, or Approve clears the wrong key.
+  //
+  // Not reaching the real route is the point: the generate limiter is 12
+  // requests per 60 s against ONE key for the whole suite (TRUSTED_PROXY_HOPS
+  // is 0, so every caller is 'anonymous'), and these three tests would
+  // otherwise spend budget that tests running minutes earlier in the same
+  // sliding window still need.
+  async function stubAcceptedGenerate(page: Page, jobId: string) {
+    await page.route('**/api/nano-banana/generate', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ jobId }) }),
+    );
+  }
+
+  async function generateAndApprove(page: Page, jobId: string) {
+    await stubAcceptedGenerate(page, jobId);
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible({ timeout: 20_000 });
+    await page.getByRole('button', { name: 'Approve' }).click();
+    await expect(page.getByRole('button', { name: '✓ Approved' })).toBeVisible();
+  }
+
+  // What these tests actually need from the next Generate is its REQUEST body
+  // — what a billed generation would have been spent on — not a result. Answer
+  // it with a definite failure so nothing reaches the real route: the generate
+  // limiter is 12 requests per 60 s against a single shared key for the whole
+  // suite (TRUSTED_PROXY_HOPS is 0, so every caller is 'anonymous'), and a
+  // burst of body-inspecting clicks would throttle whichever test happened to
+  // run next. 400 is deliberate — a definite, non-recoverable status, so the
+  // panel clears its own entry instead of leaving an ambiguous submission
+  // behind for the next assertion to trip over.
+  async function stubGenerateRoute(page: Page) {
+    await page.route('**/api/nano-banana/generate', (route) =>
+      route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'e2e: request body captured, no generation performed' }),
+      }),
+    );
+  }
+
+  async function nextGenerateBody(page: Page): Promise<Record<string, unknown>> {
+    const request = page.waitForRequest((r) => r.url().includes('/api/nano-banana/generate'));
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    return JSON.parse((await request).postData() ?? '{}');
+  }
+
+  test('an approved image survives a page reload, so the paid result can still be refined or animated (regression)', async ({
+    page,
+  }) => {
+    // approvedSource used to live only in React state, recorded AFTER the
+    // job's recovery entry was deleted. A reload therefore lost both the
+    // source URL and the last breadcrumb pointing at it, while the server
+    // still held the (already billed) bytes for up to an hour — leaving the
+    // visitor no way to refine or animate that image except by paying to
+    // generate another one.
+    await routeCompletedNonMockImage(page);
+    await generateAndApprove(page, 'approved-reload-job-id');
+
+    await page.reload();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled({ timeout: 20_000 });
+
+    // The selector must come back showing what the restored approval holds,
+    // not its own default: the next Generate refines that approved image, so a
+    // selector displaying 'warm-oak' over a cool-stone source is the exact
+    // drift the selector lock exists to prevent.
+    await expect(page.getByLabel('Style variation')).toHaveValue(APPROVED_VARIANT);
+
+    await stubGenerateRoute(page);
+    const body = await nextGenerateBody(page);
+    expect(body.sourceAssetPath).toBe(APPROVED_RESULT_URL);
+    expect(body.styleVariant).toBe(APPROVED_VARIANT);
+  });
+
+  test('dropping an approved image is just as durable as approving one — a reload never resurrects it (regression)', async ({
+    page,
+  }) => {
+    // The other half: persisting the approval without persisting its removal
+    // would be worse than not persisting at all. Picking a different material
+    // is a decision to explore a different design, so the next Generate must
+    // start fresh from the evidence frame — including after a reload.
+    await routeCompletedNonMockImage(page);
+    await generateAndApprove(page, 'dropped-approval-job-id');
+
+    const selector = page.getByLabel('Style variation');
+    await expect(selector).toBeEnabled();
+    await expect(selector).toHaveValue(APPROVED_VARIANT);
+    await selector.selectOption('warm-oak');
+
+    expect(
+      await page.evaluate((key) => localStorage.getItem(key), APPROVED_SOURCE_STORAGE_KEY),
+    ).toBeNull();
+
+    await page.reload();
+    await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled({ timeout: 20_000 });
+    await expect(selector).toHaveValue('warm-oak');
+
+    await stubGenerateRoute(page);
+    const body = await nextGenerateBody(page);
+    expect(String(body.sourceAssetPath ?? '')).not.toContain('/api/generation/result/');
+    expect(body.styleVariant).toBe('warm-oak');
+  });
+
+  test('a corrupt or expired persisted approval is discarded, never handed to a billed generation (regression)', async ({
+    page,
+  }) => {
+    // Same reasoning as the recovery entries' own shape validation: a
+    // same-origin localStorage value can be null, a since-changed shape, or
+    // simply stale, and none of those throw on JSON.parse. This one is read
+    // straight back out as a generate request's sourceAssetPath.
+    const cases: Record<string, unknown> = {
+      'not an object': 'nonsense',
+      'missing every field': {},
+      'a path that is not a stored result': {
+        path: '/evidence/frames/living.jpg',
+        roomId: 'living',
+        styleVariant: APPROVED_VARIANT,
+        jobCreatedAt: Date.now(),
+      },
+      'an unknown style variant': {
+        path: APPROVED_RESULT_URL,
+        roomId: 'living',
+        styleVariant: 'not-a-real-variant',
+        jobCreatedAt: Date.now(),
+      },
+      'an unknown room': {
+        path: APPROVED_RESULT_URL,
+        roomId: 'not-a-real-room',
+        styleVariant: APPROVED_VARIANT,
+        jobCreatedAt: Date.now(),
+      },
+      // Past RECOVERY_MAX_AGE_MS.imageJob (55 min), i.e. past the point the
+      // server's result store still holds the bytes this points at.
+      'older than the bytes it points at': {
+        path: APPROVED_RESULT_URL,
+        roomId: 'living',
+        styleVariant: APPROVED_VARIANT,
+        jobCreatedAt: Date.now() - 56 * 60_000,
+      },
+    };
+
+    // No real generation happens in this test at all — every case only needs
+    // to see what the panel WOULD have submitted.
+    await stubGenerateRoute(page);
+
+    for (const [label, value] of Object.entries(cases)) {
+      await page.goto('/#ai-studio');
+      // Each case starts from genuinely empty storage: the previous
+      // iteration's own Generate left a recovery entry behind, and adopting it
+      // would lock Generate and make this case prove nothing.
+      await page.evaluate(
+        ({ key, raw }) => {
+          localStorage.clear();
+          sessionStorage.clear();
+          localStorage.setItem(key, raw);
+        },
+        { key: APPROVED_SOURCE_STORAGE_KEY, raw: JSON.stringify(value) },
+      );
+      await page.reload();
+
+      // The studio still loads (a crash on mount would be the other failure
+      // mode here) and the bad entry is pruned rather than trusted.
+      await expect(page.getByRole('button', { name: /Generate concept image/i })).toBeEnabled({
+        timeout: 20_000,
+      });
+      expect(
+        await page.evaluate((key) => localStorage.getItem(key), APPROVED_SOURCE_STORAGE_KEY),
+        label,
+      ).toBeNull();
+      // Not trusted for the displayed material either — four of these cases
+      // carry a perfectly plausible 'cool-stone', which would show here if the
+      // entry had been accepted.
+      await expect(page.getByLabel('Style variation'), label).toHaveValue('warm-oak');
+
+      const body = await nextGenerateBody(page);
+      expect(String(body.sourceAssetPath ?? ''), label).not.toContain('/api/generation/result/');
+      expect(body.styleVariant, label).toBe('warm-oak');
+      await page.evaluate((key) => localStorage.removeItem(key), APPROVED_SOURCE_STORAGE_KEY);
+    }
   });
 });

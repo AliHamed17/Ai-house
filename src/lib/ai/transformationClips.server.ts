@@ -128,6 +128,19 @@ export function transformationClipPlan(): TransformationClipPlanEntry[] {
       // at an arbitrary URL the way a free-form sourceAssetPath could.
       sourceAssetPath: stageStillPath(previous.id),
       prompt: buildStageClipPrompt(stage.id),
+      // Note what this request does NOT contain: the authored render of the
+      // stage the clip is transitioning INTO. `/v1/image2video/dop` takes a
+      // start image and a prompt, not a start-and-end pair, so there is no
+      // honest way to make the provider land on our target still — a clip can
+      // settle its new object a few pixels off, at a slightly different scale,
+      // or under slightly different shading, and still be a good clip. The
+      // compositor closes that on our side rather than assuming a capability
+      // the endpoint does not have: every clip is cross-dissolved into its
+      // target stage still across the tail of its own window, reaching it
+      // exactly on the last frame before the boundary, so the cut to that
+      // still is continuous whatever came back. See build_clip_landing in
+      // scripts/clip_schedule.py and the manifest's generatedClipWindows
+      // .landingFrames.
       // The clip is the transition INTO this stage, so it plays across the
       // interval immediately BEFORE the boundary and is scheduled to finish
       // exactly on it (scripts/clip_schedule.py). Its usable length is

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-15T15:29:00.611546+00:00",
+  "generatedAt": "2026-09-16T20:22:42.360590+00:00",
   "method": "Stage-by-stage comparison of the measured reference against the assembled result; luminance sampled at each stage midpoint from a 4 fps extraction.",
   "whatIsCompared": [
     "stage order",
@@ -38,6 +38,9 @@
   "timingVerifiedAgainst": "public/transformation/manifest.json",
   "lightingArcCorrelation": 0.9969,
   "allStageLuminanceCorrelation": 0.6118,
+  "minLightingArcCorrelation": 0.9,
+  "lightingArcAcceptable": true,
+  "lightingArcProblems": [],
   "correlationCaveat": "allStageLuminanceCorrelation is expected to be weak and is reported only for completeness: most of the reference's early luminance movement is content entering frame (dark joinery), not a lighting change, and two different kitchens cannot agree on that. lightingArcCorrelation covers the stages where lighting is the only variable.",
   "stages": [
     {

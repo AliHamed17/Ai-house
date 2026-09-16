@@ -162,10 +162,21 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     done = load_manifest()
 
+    # Every requested room that did NOT produce a saved image in this run —
+    # whatever the reason. This used to be tracked nowhere and the command
+    # exited 0 regardless, so a batch could fail every single render (bad key,
+    # provider refusal, missing frame) while `uv run scripts/generate-concepts.py`
+    # reported success and whatever ran it carried on as though the assets
+    # existed. A room already present from an EARLIER run does not excuse a
+    # failure here: the operator asked for this render, and (in the live case)
+    # paid to find out it did not happen.
+    failed: list[str] = []
+
     for room_id in rooms:
         frame_path = FRAMES_DIR / FRAME[room_id]
         if not frame_path.exists():
             print(f"[skip] {room_id}: missing evidence frame {frame_path}", file=sys.stderr)
+            failed.append(room_id)
             continue
         print(f"[gen ] {room_id} <- {frame_path.name} ({MODEL}) ...")
         try:
@@ -179,6 +190,7 @@ def main() -> int:
             )
         except Exception as exc:  # noqa: BLE001 - surface any provider/auth error plainly
             print(f"[fail] {room_id}: {exc}", file=sys.stderr)
+            failed.append(room_id)
             continue
 
         saved = False
@@ -194,10 +206,20 @@ def main() -> int:
                 print(f"[note] {room_id}: {part.text}")
         if not saved:
             print(f"[fail] {room_id}: model returned no image", file=sys.stderr)
+            failed.append(room_id)
 
+    # The manifest is written before the failure exit, exactly like the QA
+    # command's report: a partly-successful batch must keep the renders it did
+    # produce, and whoever reads the failure needs to see what survived.
     save_manifest(done)
     print(f"\nManifest now lists {len(done)} real render(s): {', '.join(sorted(done)) or '(none)'}")
     print("The site will serve <room>.png for those rooms and placeholders for the rest.")
+    if failed:
+        print(
+            f"\n{len(failed)} of {len(rooms)} requested render(s) did not complete: {', '.join(failed)}",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

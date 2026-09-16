@@ -149,20 +149,41 @@ export function RoomTransformation({
 
   /** Step out of the film and into the same design state in the 3D explorer. */
   const enterAtThisStage = useCallback(() => {
+    const video = videoRef.current;
+    // Read the element's OWN clock, not the `stageId` state (regression).
+    // `timeupdate` fires roughly four times a second and is not
+    // frame-synchronous, so between two of its events the state still names
+    // the PREVIOUS stage while the video has visibly crossed the boundary —
+    // and a click in that gap opened the explorer on furniture and lighting
+    // the visitor was demonstrably not looking at. currentTime is exact at the
+    // instant of the click, which is precisely the instant that matters here.
+    //
+    // Guarded on readyState: before metadata exists currentTime is a
+    // meaningless 0 (nothing has been loaded to seek within), while the state
+    // is correct by construction — it starts at the first stage and scrub()
+    // writes it directly from the time it just set.
+    const stageNow =
+      video && video.readyState >= HTMLMediaElement.HAVE_METADATA
+        ? getTransformationStageAtTime(video.currentTime)
+        : stage;
+    // Keep the visible stage list agreeing with the state just handed off, so
+    // the section behind the explorer does not go on highlighting the beat
+    // that was NOT opened.
+    setStageId(stageNow.id);
     // The stage's OWN authored rig lights the explorer now (see Scene.tsx),
     // so this no longer drives the handoff itself. It sets the mode the
     // visitor falls back to the moment they clear the stage with "Show
     // finished kitchen", so leaving an evening beat does not snap the room to
     // midday.
-    setLightingMode(stage.lighting === 'warm-evening' || stage.lighting === 'dusk' ? 'evening' : 'day');
+    setLightingMode(stageNow.lighting === 'warm-evening' || stageNow.lighting === 'dusk' ? 'evening' : 'day');
     // The page owns whether the explorer is mounted (see page.tsx), same as
     // the floor plan and room-story sections — the store's isExplorerOpen is
     // not what actually renders it. The stage travels WITH the request rather
     // than being written to the store first: openExplorerAt resets it on
     // every entry, so setting it here beforehand would be clobbered, and an
     // ordinary entry would otherwise inherit whatever this one left behind.
-    onEnterRoom(TRANSFORMATION_ROOM_ID, { transformationStage: stageId });
-  }, [stageId, stage.lighting, setLightingMode, onEnterRoom]);
+    onEnterRoom(TRANSFORMATION_ROOM_ID, { transformationStage: stageNow.id });
+  }, [stage, setLightingMode, onEnterRoom]);
 
   return (
     <section

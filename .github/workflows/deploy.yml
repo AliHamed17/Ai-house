@@ -1,0 +1,182 @@
+# Publishes the site to Vercel from GitHub Actions.
+#
+# This exists because the app has no public URL: it is only ever run locally
+# or in CI. Deploying needs a Vercel account, and that account's credentials
+# belong to the repository owner, not to any contributor or agent — so the
+# deploy runs here, reading three repository secrets, rather than from anyone's
+# machine.
+#
+# SETUP (once, ~2 minutes):
+#   1. Create the project on Vercel:  npx vercel link
+#      That writes .vercel/project.json containing "orgId" and "projectId".
+#   2. Create a token at https://vercel.com/account/settings/tokens
+#   3. Add three repository secrets under
+#      Settings -> Secrets and variables -> Actions -> New repository secret:
+#        VERCEL_TOKEN       the token from step 2
+#        VERCEL_ORG_ID      "orgId"     from .vercel/project.json
+#        VERCEL_PROJECT_ID  "projectId" from .vercel/project.json
+#   4. Run this workflow: Actions -> Deploy -> Run workflow.
+#      The deployment URL is printed in the job summary.
+#
+# Until those secrets exist the workflow SKIPS rather than fails, so a fork or
+# a clone that never intends to deploy is never shown a red X for it.
+#
+# The deployment gets NO AI credentials, which is deliberate: with none set the
+# app serves its full demo mode (see src/lib/ai/registry.server.ts), so the
+# published site is completely usable and cannot spend anyone's money. Turning
+# on real generation is a separate, considered decision — AI_ALLOW_LIVE plus a
+# provider key, and, as README.md's own warning says, real authentication and
+# quotas in front of the /api/*/generate routes first, because the
+# cost-confirmation step is client-side and is not a server-side control.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'preview (a throwaway URL) or production (the project domain)'
+        type: choice
+        options: [preview, production]
+        default: preview
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build and deploy to Vercel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for deploy credentials
+        id: creds
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          # Secrets are not readable in an `if:` expression, so the gate has to
+          # be a step that sets an output the later steps key off.
+          if [ -n "$VERCEL_TOKEN" ] && [ -n "$VERCEL_ORG_ID" ] && [ -n "$VERCEL_PROJECT_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Deploy skipped"
+              echo
+              echo "No Vercel credentials are configured for this repository, so there is nothing to deploy to."
+              echo "See the setup steps at the top of \`.github/workflows/deploy.yml\` — it takes about two minutes."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Checkout
+        if: steps.creds.outputs.ready == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        if: steps.creds.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.creds.outputs.ready == 'true'
+        run: npm ci
+
+      # Deliberately re-run here rather than trusted from CI: a push to main can
+      # reach this workflow without the CI run having finished, and publishing a
+      # build that does not typecheck or whose tests fail is worse than
+      # publishing nothing. The Playwright suite is NOT repeated — CI owns that,
+      # it takes ~8 minutes, and it needs a browser download this job has no
+      # other use for.
+      - name: Type check
+        if: steps.creds.outputs.ready == 'true'
+        run: npm run typecheck
+
+      - name: Unit tests
+        if: steps.creds.outputs.ready == 'true'
+        run: npm run test
+
+      - name: Build for Vercel
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          # The CLI reads all three from the environment; passing the token as
+          # --token would put it in the process's argv, readable by anything
+          # else on the runner.
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          TARGET: ${{ inputs.environment || 'preview' }}
+        run: |
+          set -euo pipefail
+          npx --yes vercel@latest pull --yes --environment="$TARGET"
+          if [ "$TARGET" = 'production' ]; then
+            npx --yes vercel@latest build --prod
+          else
+            npx --yes vercel@latest build
+          fi
+
+      - name: Deploy
+        if: steps.creds.outputs.ready == 'true'
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          TARGET: ${{ inputs.environment || 'preview' }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET" = 'production' ]; then
+            OUTPUT=$(npx --yes vercel@latest deploy --prebuilt --prod)
+          else
+            OUTPUT=$(npx --yes vercel@latest deploy --prebuilt)
+          fi
+          # The CLI writes progress to stderr and the URL to stdout, but taking
+          # the last line rather than the whole capture means a future version
+          # that adds a stdout line cannot turn the URL into an unusable blob.
+          URL=$(printf '%s\n' "$OUTPUT" | tail -n 1)
+          case "$URL" in
+            https://*) ;;
+            *) echo "::error::vercel deploy did not print a URL; got: $OUTPUT"; exit 1 ;;
+          esac
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Deployed"
+            echo
+            echo "**$URL**"
+            echo
+            echo "Commit \`${GITHUB_SHA:0:7}\` · target \`$TARGET\`"
+            echo
+            echo "The AI Design Studio runs in demo mode: this deployment is given no provider credentials, so it cannot spend money."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # A deployment that 500s on its own landing page is not a deployment. One
+      # request against the URL just published is enough to catch a broken
+      # runtime config that a local build cannot see.
+      - name: Smoke-test the deployment
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          # Through the environment, not interpolated into the script: a step
+          # output spliced into shell source is a command-injection shape, and
+          # there is no reason to write one even when the value is our own.
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$URL" || echo 000)
+            if [ "$CODE" = '200' ]; then
+              echo "OK: $URL returned 200"
+              exit 0
+            fi
+            echo "attempt $attempt: $URL returned $CODE; retrying in 10s"
+            sleep 10
+          done
+          echo "::error::$URL never returned 200 — the deployment is live but not serving."
+          exit 1

@@ -48,6 +48,44 @@ npm run dev
 Open <http://localhost:3000>. No environment variables are required — the AI
 Design Studio automatically runs in demo mode.
 
+## Publishing it
+
+There is no public URL for this project yet; it runs locally or in CI. The
+fastest way to get one is `.github/workflows/deploy.yml`, which builds and
+deploys to Vercel from GitHub Actions — so the credentials stay in the
+repository's own secrets rather than on anyone's laptop.
+
+Set it up once:
+
+```bash
+npx vercel link          # creates the project; writes .vercel/project.json
+```
+
+Then add three repository secrets (**Settings → Secrets and variables →
+Actions**), taking the last two straight from `.vercel/project.json`:
+
+| Secret | Value |
+| --- | --- |
+| `VERCEL_TOKEN` | a token from <https://vercel.com/account/settings/tokens> |
+| `VERCEL_ORG_ID` | `orgId` |
+| `VERCEL_PROJECT_ID` | `projectId` |
+
+Run it from **Actions → Deploy → Run workflow** (choose `preview` for a
+throwaway URL or `production` for the project domain); the URL appears in the
+job summary. Pushes to `main` deploy a preview automatically. Until those
+secrets exist the workflow skips instead of failing, so a fork never sees a red
+X for a deployment it was never going to do.
+
+The deployment is given **no AI credentials on purpose**: with none set the app
+serves its full demo mode, so the published site is completely usable and
+cannot spend money. Enabling real generation is a separate decision — see
+`AI_ALLOW_LIVE` below, and read its warning about putting authentication and
+quotas in front of the `/api/*/generate` routes first.
+
+Deploying by hand instead works the same way: `npx vercel deploy` from a
+machine logged into a Vercel account, no environment variables needed for demo
+mode.
+
 ## Commands
 
 ```bash

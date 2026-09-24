@@ -100,9 +100,14 @@ never sees a red X for a deployment it was never going to do.
 
 The deployment is given **no AI credentials on purpose**: with none set the app
 serves its full demo mode, so the published site is completely usable and
-cannot spend money. Enabling real generation is a separate decision — see
-`AI_ALLOW_LIVE` below, and read its warning about putting authentication and
-quotas in front of the `/api/*/generate` routes first.
+cannot spend money. That is a claim about the Vercel project's own environment,
+so the workflow checks it rather than assuming it — if the environment it is
+about to deploy sets `AI_ALLOW_LIVE=true` or any provider credential, it stops
+and names the variables (never their values) instead of publishing something it
+would go on to describe as unable to spend money. Enabling real generation is a
+separate decision — see `AI_ALLOW_LIVE` below, and read its warning about
+putting authentication and quotas in front of the public, unauthenticated
+`/api/*/generate` routes first.
 
 Deploying by hand instead works the same way, and needs no repository secrets:
 `npx vercel deploy` from a machine logged into a Vercel account. The same

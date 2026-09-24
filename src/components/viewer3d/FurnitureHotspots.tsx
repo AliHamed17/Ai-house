@@ -5,6 +5,7 @@ import { Html } from '@react-three/drei';
 import { allFurnitureItems } from '@/data/furniture';
 import { useViewerStore } from '@/lib/store/viewerStore';
 import { useShortlistStore } from '@/lib/store/shortlistStore';
+import { usePointerLockRelease } from '@/lib/usePointerLockRelease';
 import { getStage, isFurnitureVisibleAtStage } from '@/lib/transformation';
 import { stageLightingGlows } from './StageLighting';
 import { FurnitureMesh } from './FurnitureMesh';
@@ -28,6 +29,13 @@ export function FurnitureHotspots() {
   const lightingMode = useViewerStore((s) => s.lightingMode);
   const shortlistIds = useShortlistStore((s) => s.ids);
   const toggleShortlist = useShortlistStore((s) => s.toggle);
+
+  // The open panel is real DOM with a link and two buttons in it. The same
+  // click that opens it also asks first-person mode to lock the pointer,
+  // which would hide the cursor and keep every subsequent mouse event on the
+  // canvas — leaving the visitor looking at a Shop/Save panel they cannot
+  // reach. Drag-to-look still works while it is open.
+  usePointerLockRelease(selectedId !== null);
 
   // Fixtures and display joinery glow whenever the room is lit artificially:
   // in the transformation's dusk/warm-reveal beats, and in ordinary evening

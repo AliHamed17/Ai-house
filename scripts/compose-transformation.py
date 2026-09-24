@@ -46,6 +46,7 @@ from clip_schedule import (  # noqa: E402
     build_clip_schedule,
     build_clip_windows,
 )
+from clip_assets import resolve_approved_clip_source  # noqa: E402
 from gesture_timing import gesture_progress, gesture_windows  # noqa: E402
 from hand_layer import render_gesture  # noqa: E402
 
@@ -149,11 +150,9 @@ def main() -> int:
         for clip in clip_meta.get("clips", []):
             if not clip.get("approved"):
                 continue
-            src = Path(str(clip.get("file", "")).lstrip("/"))
-            src = src if src.exists() else Path("public") / str(clip.get("file", "")).lstrip("/")
-            if not src.exists():
-                print(f"  clip for stage {clip.get('stageId')} listed but missing at {src}, skipping")
-                continue
+            # Fatal when it cannot be found — see clip_assets for why a paid,
+            # approved clip must never be skipped past.
+            src = resolve_approved_clip_source(str(clip.get("stageId")), str(clip.get("file", "")))
             out = clip_work / str(clip["stageId"])
             out.mkdir(parents=True, exist_ok=True)
             for old in out.glob("*.png"):
@@ -166,9 +165,17 @@ def main() -> int:
                 capture_output=True,
             )
             frames = sorted(out.glob("c_*.png"))
-            if frames:
-                clip_frames[clip["stageId"]] = frames
-                print(f"  using approved clip for stage {clip['stageId']} ({len(frames)} frames)")
+            # Same reasoning as the missing file above: a decode that yields
+            # nothing drops the approved clip just as silently, and ffmpeg
+            # exiting 0 on a truncated or unreadable file is exactly the case
+            # that would otherwise slip through.
+            if not frames:
+                raise SystemExit(
+                    f"approved clip for stage {clip['stageId']} at {src} decoded to no frames. "
+                    "The file is unusable — replace it, or un-approve the clip, and compose again."
+                )
+            clip_frames[clip["stageId"]] = frames
+            print(f"  using approved clip for stage {clip['stageId']} ({len(frames)} frames)")
 
     base_images: dict[str, Image.Image] = {}
     for entry in stills_index["stills"]:

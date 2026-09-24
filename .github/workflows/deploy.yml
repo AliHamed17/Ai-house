@@ -144,14 +144,59 @@ jobs:
             echo "::error::vercel pull did not write $ENV_FILE, so the deployment's runtime configuration cannot be verified."
             exit 1
           fi
+          # Reads one variable out of that dotenv file. Values are only ever
+          # held in shell variables and tested for emptiness — never printed,
+          # and never passed as an argument to anything.
+          dotenv_value() {
+            local line value
+            line=$(grep -m1 "^$1=" "$ENV_FILE" || true)
+            [ -n "$line" ] || return 0
+            value=${line#*=}
+            # Vercel quotes dotenv values.
+            value=${value%\"}; value=${value#\"}
+            value=${value%\'}; value=${value#\'}
+            printf '%s' "$value"
+          }
+
+          # This workflow's whole promise is a deployment that CANNOT spend
+          # money — it is stated in the job summary and in README. That is a
+          # claim about the Vercel project's runtime configuration, which is
+          # exactly what was just pulled, so it gets checked rather than
+          # assumed. With the live switch on and a provider credential
+          # present, the published /api/*/generate routes are public,
+          # unauthenticated and billed.
+          #
+          # Rejecting is the only honest option here: stripping these from the
+          # pulled file would change nothing, because the deployed functions
+          # read the PROJECT's environment, not this runner's copy of it.
+          LIVE_VARS=''
+          if [ "$(dotenv_value AI_ALLOW_LIVE)" = 'true' ]; then
+            LIVE_VARS="$LIVE_VARS AI_ALLOW_LIVE"
+          fi
+          for VAR in GEMINI_API_KEY GOOGLE_API_KEY HF_CREDENTIALS HF_API_KEY HF_API_SECRET; do
+            if [ -n "$(dotenv_value "$VAR")" ]; then
+              LIVE_VARS="$LIVE_VARS $VAR"
+            fi
+          done
+          if [ -n "$LIVE_VARS" ]; then
+            {
+              echo "### Deploy stopped: this environment is not demo-only"
+              echo
+              echo "The Vercel project's \`$TARGET\` environment sets \`${LIVE_VARS# }\`."
+              echo
+              echo "This workflow publishes a deployment it describes as unable to spend money, and that is no longer true here: the \`/api/*/generate\` routes are public and unauthenticated, so a live switch plus a provider credential makes them a billable endpoint for anyone who finds the URL."
+              echo
+              echo "Either remove those variables from this environment on the Vercel project, or deploy it by hand — but read README's \`AI_ALLOW_LIVE\` warning about putting authentication and quotas in front of those routes first."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Refusing to publish a 'demo-only' deployment whose Vercel environment enables live generation (${LIVE_VARS# }). See the job summary."
+            exit 1
+          fi
+
           MISSING_SECRET=''
           if SECRET_LINE=$(grep -m1 '^JOB_ID_SIGNING_SECRET=' "$ENV_FILE"); then
-            SECRET_VALUE=${SECRET_LINE#JOB_ID_SIGNING_SECRET=}
-            # Vercel quotes dotenv values; an empty one signs with the same
-            # random per-process fallback as no value at all, so both fail.
-            SECRET_VALUE=${SECRET_VALUE%\"}; SECRET_VALUE=${SECRET_VALUE#\"}
-            SECRET_VALUE=${SECRET_VALUE%\'}; SECRET_VALUE=${SECRET_VALUE#\'}
-            [ -n "$SECRET_VALUE" ] || MISSING_SECRET='empty'
+            # An empty value signs with the same random per-process fallback
+            # as no value at all, so both fail.
+            [ -n "$(dotenv_value JOB_ID_SIGNING_SECRET)" ] || MISSING_SECRET='empty'
           else
             MISSING_SECRET='absent'
           fi

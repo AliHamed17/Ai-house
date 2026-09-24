@@ -2,8 +2,11 @@
 
 import { useState } from 'react';
 import { useViewerStore, type ViewMode } from '@/lib/store/viewerStore';
+import { useShortlistStore } from '@/lib/store/shortlistStore';
 import { materialVariants } from '@/data/materials';
 import { ENTRY_ROOM_ID } from '@/data/house';
+import { buildViewerLinkUrl } from '@/lib/viewerLink';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const MODES: { id: ViewMode; label: string }[] = [
   { id: 'first-person', label: 'Walk' },
@@ -27,7 +30,17 @@ export function ViewerHud({ onExit }: { onExit: () => void }) {
   const isPointerLocked = useViewerStore((s) => s.isPointerLocked);
   const transformationStage = useViewerStore((s) => s.transformationStage);
   const setTransformationStage = useViewerStore((s) => s.setTransformationStage);
+  const activeRoomId = useViewerStore((s) => s.activeRoomId);
+  const shortlistOpen = useViewerStore((s) => s.shortlistOpen);
+  const setShortlistOpen = useViewerStore((s) => s.setShortlistOpen);
+  const shortlistCount = useShortlistStore((s) => s.ids.length);
   const [variantMenuOpen, setVariantMenuOpen] = useState(false);
+  // The share popover records WHICH view its link describes, so it stops
+  // showing the moment the visitor changes any of them — a link left on
+  // screen after they switched to Dollhouse would otherwise still say Walk,
+  // and they would send that. Deriving it beats clearing it from an effect:
+  // there is no render where the popover and the view disagree.
+  const [share, setShare] = useState<{ key: string; url: string; copied: boolean } | null>(null);
 
   // Reset means different things per mode: in dollhouse it restores the
   // elevated overview; otherwise it returns the walker to the entry room and
@@ -41,6 +54,28 @@ export function ViewerHud({ onExit }: { onExit: () => void }) {
       requestTeleport(ENTRY_ROOM_ID);
       setMode('first-person');
     }
+  };
+
+  // The link describes the view, not the camera: the room the visitor is in,
+  // how they're looking at it, and how it's lit and finished. Reproducing an
+  // exact pose would make every link a different walk-in point from the one
+  // the room was designed to be entered at, and would go stale the moment a
+  // spawn moves. The URL is always shown, not just copied, because a refused
+  // clipboard write must not leave a visitor with nothing to send.
+  const linkState = {
+    roomId: activeRoomId,
+    mode,
+    lightingMode,
+    materialVariantId,
+    transformationStage,
+  };
+  // '|' appears in none of these ids, so two different views cannot collide.
+  const viewKey = [activeRoomId, mode, lightingMode, materialVariantId, transformationStage ?? ''].join('|');
+  const shownShare = share !== null && share.key === viewKey ? share : null;
+
+  const handleShareView = async () => {
+    const url = buildViewerLinkUrl(window.location.href, linkState);
+    setShare({ key: viewKey, url, copied: await copyTextToClipboard(url) });
   };
 
   return (
@@ -173,6 +208,43 @@ export function ViewerHud({ onExit }: { onExit: () => void }) {
             )}
           </div>
 
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                if (shownShare) setShare(null);
+                else void handleShareView();
+              }}
+              aria-expanded={shownShare !== null}
+              className="rounded-full border border-limestone/60 bg-ivory/90 px-4 py-2 text-xs font-semibold tracking-wide text-charcoal shadow-lg backdrop-blur-sm hover:bg-ivory"
+            >
+              Share view
+            </button>
+            {shownShare && (
+              <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-limestone/60 bg-ivory/95 p-3 shadow-xl backdrop-blur-sm">
+                <p className="text-[11px] text-charcoal/75">
+                  {shownShare.copied
+                    ? 'Link copied — it reopens this room, mode, lighting, and materials.'
+                    : "Your browser wouldn't let the page reach the clipboard — copy this link:"}
+                </p>
+                <input
+                  readOnly
+                  aria-label="Link to this view"
+                  value={shownShare.url}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="mt-2 w-full rounded-lg border border-limestone/70 bg-ivory px-2 py-1 font-mono text-[11px] text-charcoal"
+                />
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShortlistOpen(!shortlistOpen)}
+            aria-pressed={shortlistOpen}
+            className="rounded-full border border-limestone/60 bg-ivory/90 px-4 py-2 text-xs font-semibold tracking-wide text-charcoal shadow-lg backdrop-blur-sm hover:bg-ivory"
+          >
+            ♥ Saved{shortlistCount > 0 ? ` (${shortlistCount})` : ''}
+          </button>
           <button
             type="button"
             onClick={() => setMinimapOpen(!minimapOpen)}
@@ -221,6 +293,17 @@ export function ViewerHud({ onExit }: { onExit: () => void }) {
               <div>
                 <dt className="font-semibold">Hotspots &amp; rooms</dt>
                 <dd>Click a glowing doorway marker, a room on the map, or use the Rooms list to teleport instantly.</dd>
+              </div>
+              <div>
+                <dt className="font-semibold">Saving pieces</dt>
+                <dd>
+                  Click a piece of furniture and choose Save to add it to your list. ♥ Saved shows the list with every
+                  retailer link, ready to copy. It stays on this device.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold">Sharing a view</dt>
+                <dd>Share view copies a link that reopens this exact room, mode, lighting, and materials.</dd>
               </div>
               <div>
                 <dt className="font-semibold">Exit</dt>

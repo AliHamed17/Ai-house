@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { SiteHeader } from '@/components/layout/SiteHeader';
 import { Hero } from '@/components/landing/Hero';
 import { EvidenceSection } from '@/components/landing/EvidenceSection';
@@ -14,6 +14,7 @@ import { AIStudioSection } from '@/components/landing/AIStudioSection';
 import { TechnicalNote } from '@/components/landing/TechnicalNote';
 import { useViewerStore } from '@/lib/store/viewerStore';
 import { houseModel, ENTRY_ROOM_ID } from '@/data/house';
+import { parseViewerLink } from '@/lib/viewerLink';
 import type { RoomId, TransformationStageId } from '@/lib/types';
 
 const Explorer3D = dynamic(() => import('@/components/viewer3d/Explorer3D').then((m) => m.Explorer3D), {
@@ -49,6 +50,37 @@ export default function Home() {
   );
 
   const openExplorer = useCallback(() => openExplorerAt(ENTRY_ROOM_ID), [openExplorerAt]);
+
+  // A shared link (see src/lib/viewerLink.ts) opens the explorer straight
+  // into the view it names. This sets more than openExplorerAt does — mode,
+  // lighting and materials as well as the room — because those are the whole
+  // point of the link: the sender chose them, and inheriting this visitor's
+  // own leftovers instead would show them a different house than the one they
+  // were sent. An ordinary in-page entry deliberately keeps them, which is
+  // why the two paths don't share one setter.
+  //
+  // Runs once, on mount: the query string is where the page was opened, not a
+  // value that changes underneath a mounted page, and re-applying it later
+  // would yank a visitor who had since walked somewhere else back to it.
+  useEffect(() => {
+    const view = parseViewerLink(window.location.search);
+    if (!view) return;
+    const room = houseModel.rooms.find((r) => r.id === view.roomId);
+    if (!room) return;
+    const store = useViewerStore.getState();
+    store.setPlayerPose({ x: room.cameraSpawn.x, z: room.cameraSpawn.z, yaw: room.cameraSpawnYaw });
+    store.setActiveRoomId(room.id);
+    store.setMode(view.mode);
+    store.setLightingMode(view.lightingMode);
+    store.setMaterialVariantId(view.materialVariantId);
+    store.setTransformationStage(view.transformationStage);
+    // Reading window.location is a probe of an external system, not state
+    // derivable during render — the same reason Explorer3D's WebGL probe
+    // needs this. The explorer is code-split behind a dynamic import, so it
+    // is only fetched once this decides a link actually asked for it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExplorerOpen(true);
+  }, []);
 
   return (
     <>

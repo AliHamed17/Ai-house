@@ -23,6 +23,14 @@ configured.
   floor-plan mode, a live minimap, door hotspots, a room navigator, day/
   evening lighting, and three swappable material variants. Falls back to a
   2D room-card view if WebGL is unavailable.
+- **Saved pieces** — click any piece of furniture and `Save` to shortlist it.
+  `♥ Saved` lists everything you've kept, grouped by room, each row still
+  carrying its real retailer link, with a one-click plain-text export for
+  whoever is doing the ordering. The list lives in your browser only.
+- **Shareable views** — `Share view` copies a link that reopens the explorer
+  in exactly the room, mode, lighting, and materials you were looking at
+  (`/?room=kitchen&mode=orbit&light=evening&look=cool-stone`), so a specific
+  view can be sent or bookmarked instead of described.
 - **AI Design Studio** — generate a photorealistic room concept (Nano
   Banana) or animate an approved still into a cinematic clip (Higgsfield),
   with real submit → poll-status job flow and demo-mode success/failure/
@@ -165,6 +173,8 @@ src/data/materials.ts           Palette, material variants, lighting presets
 src/data/roomPrompts.ts         Nano Banana / Higgsfield prompt templates
 src/lib/geometry/               Wall-panel sweep algorithm, collision, point-in-polygon
 src/lib/validation/             House-model structural validation (used by tests)
+src/lib/shortlist.ts            Saved-pieces list: storage validation, grouping, plain-text export
+src/lib/viewerLink.ts           Shareable explorer views: query-string encode/parse, URL building
 src/lib/ai/                     Provider abstraction, Nano Banana + Higgsfield adapters, mock provider
 src/components/viewer3d/        The 3D explorer (scene, controls, hotspots, minimap, mobile controls)
 src/components/floorplan/       Shared interactive floor-plan SVG (landing page + in-explorer floor-plan mode)
@@ -332,3 +342,10 @@ frames) are served from `public/evidence/`. Keep this project private until
 you've confirmed you're comfortable with those images and the house's
 general layout being publicly visible — no address or map coordinates are
 included anywhere in the project.
+
+Your saved-pieces list never leaves the browser: it is a list of furniture
+ids in `localStorage` under `ai-house:shortlist:v1`, read only by the page
+itself, with no account, sync, or server call behind it. Clearing the list
+(or the site's data) is the whole of deleting it. A shared view link carries
+only what the explorer was showing — a room, a mode, a lighting setting, a
+material variant — and never the saved list.

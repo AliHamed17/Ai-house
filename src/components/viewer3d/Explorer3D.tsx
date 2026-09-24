@@ -10,8 +10,10 @@ import { RoomNavigator } from './RoomNavigator';
 import { MobileControls } from './MobileControls';
 import { TeleportFade } from './TeleportFade';
 import { Fallback2D } from './Fallback2D';
+import { ShortlistPanel } from './ShortlistPanel';
 import { InteractiveFloorPlan } from '@/components/floorplan/InteractiveFloorPlan';
 import { useViewerStore } from '@/lib/store/viewerStore';
+import { useShortlistStore } from '@/lib/store/shortlistStore';
 import type { RoomId } from '@/lib/types';
 
 function detectWebgl(): boolean {
@@ -44,6 +46,15 @@ export function Explorer3D({ onClose }: { onClose: () => void }) {
   const setReducedMotion = useViewerStore((s) => s.setReducedMotion);
   const requestTeleport = useViewerStore((s) => s.requestTeleport);
   const setRenderMode = useViewerStore((s) => s.setRenderMode);
+  const hydrateShortlist = useShortlistStore((s) => s.hydrate);
+
+  // Restoring the saved list from localStorage — an external system — has to
+  // happen after mount, not while the store is built: the server render has
+  // no localStorage, and a store that read it eagerly would make the client's
+  // first paint disagree with the HTML the server sent.
+  useEffect(() => {
+    hydrateShortlist();
+  }, [hydrateShortlist]);
 
   useEffect(() => {
     // One-time capability probe against the browser's WebGL implementation —
@@ -116,6 +127,7 @@ export function Explorer3D({ onClose }: { onClose: () => void }) {
       )}
 
       <ViewerHud onExit={onClose} />
+      <ShortlistPanel />
       <Minimap />
       <RoomNavigator />
       <MobileControls />

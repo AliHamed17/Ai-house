@@ -39,6 +39,14 @@ interface ViewerState {
   helpOpen: boolean;
   setHelpOpen: (open: boolean) => void;
 
+  /**
+   * Whether the saved-pieces panel is showing. Only the panel's visibility
+   * lives here — the saved pieces themselves are their own store
+   * (src/lib/store/shortlistStore.ts) because they outlive the explorer.
+   */
+  shortlistOpen: boolean;
+  setShortlistOpen: (open: boolean) => void;
+
   teleportTarget: RoomId | null;
   teleportToken: number;
   requestTeleport: (roomId: RoomId) => void;
@@ -97,6 +105,9 @@ export const useViewerStore = create<ViewerState>((set) => ({
 
   helpOpen: false,
   setHelpOpen: (open) => set({ helpOpen: open }),
+
+  shortlistOpen: false,
+  setShortlistOpen: (open) => set({ shortlistOpen: open }),
 
   teleportTarget: null,
   teleportToken: 0,

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Html } from '@react-three/drei';
 import { allFurnitureItems } from '@/data/furniture';
 import { useViewerStore } from '@/lib/store/viewerStore';
+import { useShortlistStore } from '@/lib/store/shortlistStore';
 import { getStage, isFurnitureVisibleAtStage } from '@/lib/transformation';
 import { stageLightingGlows } from './StageLighting';
 import { FurnitureMesh } from './FurnitureMesh';
@@ -25,6 +26,8 @@ export function FurnitureHotspots() {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const transformationStage = useViewerStore((s) => s.transformationStage);
   const lightingMode = useViewerStore((s) => s.lightingMode);
+  const shortlistIds = useShortlistStore((s) => s.ids);
+  const toggleShortlist = useShortlistStore((s) => s.toggle);
 
   // Fixtures and display joinery glow whenever the room is lit artificially:
   // in the transformation's dusk/warm-reveal beats, and in ordinary evening
@@ -88,14 +91,36 @@ export function FurnitureHotspots() {
                       ×
                     </button>
                   </div>
-                  <a
-                    href={item.productUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-2 inline-block rounded-full bg-bronze px-3 py-1 text-xs font-medium text-ivory hover:bg-charcoal"
-                  >
-                    Shop this — {item.retailer}
-                  </a>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <a
+                      href={item.productUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block rounded-full bg-bronze px-3 py-1 text-xs font-medium text-ivory hover:bg-charcoal"
+                    >
+                      Shop this — {item.retailer}
+                    </a>
+                    {/* Saving is a toggle on one shared list, so the button
+                        states what the next click will do AND what is true
+                        now (aria-pressed) — a visitor who walks back to a
+                        piece they already saved must not be able to add it
+                        twice or be told it isn't there. */}
+                    <button
+                      type="button"
+                      aria-pressed={shortlistIds.includes(item.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleShortlist(item.id);
+                      }}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                        shortlistIds.includes(item.id)
+                          ? 'border-bronze bg-bronze/15 text-charcoal hover:bg-bronze/25'
+                          : 'border-limestone/70 text-charcoal/80 hover:bg-limestone/40 hover:text-charcoal'
+                      }`}
+                    >
+                      {shortlistIds.includes(item.id) ? '✓ Saved' : '+ Save'}
+                    </button>
+                  </div>
                 </div>
               </Html>
             )}

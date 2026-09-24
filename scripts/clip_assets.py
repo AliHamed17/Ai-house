@@ -17,7 +17,50 @@ and the operator is told both ways out of it.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
+
+
+def assert_known_stage_id(stage_id: str, known_stage_ids: Iterable[str]) -> None:
+    """
+    Fails unless an approved clip names a stage the manifest actually has.
+
+    A stale or mistyped `stageId` is the same silent loss as a missing file,
+    one step further along: the clip loads and decodes fine, then nothing
+    schedules it, because the scheduler is keyed by stage id and there is no
+    such stage. Composition used to log that and exit 0, publishing a master
+    without the approved motion.
+
+    Caught here rather than at scheduling time so the message can say what is
+    wrong — a name that matches no stage — instead of the downstream symptom,
+    which looks identical to a stage whose window is genuinely too short.
+    """
+    known = list(known_stage_ids)
+    if stage_id in known:
+        return
+    raise SystemExit(
+        f"clip for stage {stage_id!r} is marked approved but no such stage exists in the transformation "
+        f"manifest (stages: {', '.join(known)}). Fix the stageId in public/transformation/clips.json, "
+        "or un-approve the clip, and compose again."
+    )
+
+
+def assert_clip_scheduled(stage_id: str, window: object) -> None:
+    """
+    Fails unless an approved clip actually got a window to play in.
+
+    The third way a paid clip disappears without trace: it is listed,
+    approved, found and decoded, its stage exists — and the scheduler still
+    has no room for it before that stage's boundary. Composition used to log
+    "NOT used" to stderr and exit 0, which in a script whose output is a
+    published master is indistinguishable from success.
+    """
+    if window is not None:
+        return
+    raise SystemExit(
+        f"approved clip for stage {stage_id} cannot be scheduled: there is no room for it before its "
+        "stage boundary. Shorten the clip, move the stage boundary in the transformation manifest, or "
+        "un-approve the clip, and compose again."
+    )
 
 
 def resolve_approved_clip_source(

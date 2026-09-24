@@ -46,7 +46,11 @@ from clip_schedule import (  # noqa: E402
     build_clip_schedule,
     build_clip_windows,
 )
-from clip_assets import resolve_approved_clip_source  # noqa: E402
+from clip_assets import (  # noqa: E402
+    assert_clip_scheduled,
+    assert_known_stage_id,
+    resolve_approved_clip_source,
+)
 from gesture_timing import gesture_progress, gesture_windows  # noqa: E402
 from hand_layer import render_gesture  # noqa: E402
 
@@ -150,9 +154,11 @@ def main() -> int:
         for clip in clip_meta.get("clips", []):
             if not clip.get("approved"):
                 continue
-            # Fatal when it cannot be found — see clip_assets for why a paid,
-            # approved clip must never be skipped past.
-            src = resolve_approved_clip_source(str(clip.get("stageId")), str(clip.get("file", "")))
+            # Both fatal — see clip_assets for why a paid, approved clip must
+            # never be skipped past, whether it is unfindable or unschedulable.
+            stage_id = str(clip.get("stageId"))
+            assert_known_stage_id(stage_id, [str(s["id"]) for s in stages])
+            src = resolve_approved_clip_source(stage_id, str(clip.get("file", "")))
             out = clip_work / str(clip["stageId"])
             out.mkdir(parents=True, exist_ok=True)
             for old in out.glob("*.png"):
@@ -214,9 +220,13 @@ def main() -> int:
     clip_landing = build_clip_landing(stages, fps, clip_lengths)
     for stage_id in sorted(clip_frames):
         window = clip_windows.get(stage_id)
-        if window is None:
-            print(f"  clip for stage {stage_id} has no room before its boundary; NOT used", file=sys.stderr)
-        elif window[1] - window[0] < clip_lengths[stage_id]:
+        # Fatal, not a log line: this clip is approved and paid for, and a
+        # master published without it looks entirely correct — QA measures
+        # stage timing and the lighting arc, neither of which can tell that a
+        # stage was drawn from its still instead of its motion.
+        assert_clip_scheduled(stage_id, window)
+        assert window is not None  # narrowed by the check above
+        if window[1] - window[0] < clip_lengths[stage_id]:
             print(
                 f"  clip for stage {stage_id} is {clip_lengths[stage_id]} frames for a "
                 f"{window[1] - window[0]}-frame window; resampling the whole clip into it "

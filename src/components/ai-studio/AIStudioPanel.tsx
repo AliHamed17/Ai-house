@@ -143,12 +143,22 @@ const FETCH_TIMEOUT_MS = {
   // Unbounded, liveStatus stays null and the studio sits on "Checking
   // provider status…" with generation disabled, permanently.
   mode: 10_000,
-  // A status read normally returns in milliseconds; generous enough that a
-  // merely slow network still gets its answer instead of being retried.
-  // POLL_STUCK_AFTER_MS catches a JOB that never settles; this catches a
-  // REQUEST that never settles, which that ceiling cannot see because it is
-  // only ever evaluated on a response that actually arrived.
-  status: 20_000,
+  // A status read normally returns in milliseconds, but the ceiling is set by
+  // the SERVER's own worst case, not by that: higgsfield.server wraps its
+  // status fetch in retryOnce(withTimeout(..., 10_000)), so a first attempt
+  // that times out and a retry that only just succeeds is 10s + 400ms + 10s =
+  // 20.4s before a response can even start coming back. A 20s deadline here
+  // aborted exactly that recovery — the one case the server's retry exists
+  // for — threw away a good answer, counted it as another transient failure,
+  // and on repeat pushed the panel into recovery while issuing further
+  // credentialed status calls. 30s clears the full budget with room to spare.
+  //
+  // Same rule as `submit` below, for the same reason: the client deadline is
+  // derived from the server's, and the two are never harmonised. Polling is
+  // sequential (each poll is scheduled by setTimeout once the previous one
+  // settles), so a longer deadline cannot overlap requests, and
+  // POLL_STUCK_AFTER_MS at 10 minutes is untouched by it.
+  status: 30_000,
   // Deliberately the longest, and deliberately longer than the SERVER's own
   // submit ceilings (nanoBanana.server 45s, higgsfield.server 30s). A shorter
   // deadline here would abort submissions that were about to succeed, turning
@@ -1623,7 +1633,31 @@ export function AIStudioPanel() {
               // read "no change" for a genuine change back to the default,
               // leaving the approval in place and snapping the control
               // straight back to the variant the visitor just moved off.
-              if (e.target.value !== displayedStyleVariant) recordApprovedSource(null);
+              if (e.target.value !== displayedStyleVariant) {
+                recordApprovedSource(null);
+                // The displayed result has to be settled too, not just its
+                // source record. Dropping the source alone left the button
+                // below still reading "✓ Approved" for an image that was no
+                // longer the approved source — and still clickable, so that
+                // apparently-informational badge re-ran the approval handler,
+                // restored the old image AND its old variant, and silently
+                // put the selector back on the material the visitor had just
+                // moved off (displayedStyleVariant reads the approval).
+                //
+                // Settling it the way Reject does is safe here precisely
+                // because styleLockedToPendingJob disables this control in
+                // every other case: if it is live and a job exists, that job
+                // is completed AND already approved, so this is acknowledging
+                // a decided result, never discarding an undecided (possibly
+                // billed, unacknowledged) one. Leaving it displayed and
+                // merely un-approving would instead re-arm that same lock and
+                // demand a decision on the result they had just moved on from.
+                if (job !== null) {
+                  setJob(null);
+                  setApproved(false);
+                  clearOwnRecoveryEntry(jobRecoveryId(job.jobId), 'proceed');
+                }
+              }
             }}
             className="rounded-xl border border-limestone/60 bg-ivory px-3 py-2 text-charcoal disabled:cursor-not-allowed disabled:opacity-45"
           >
@@ -1922,7 +1956,13 @@ export function AIStudioPanel() {
                       });
                     }
                   }}
-                  className={`rounded-full px-4 py-2 text-xs font-semibold ${approved ? 'bg-olive text-ivory' : 'border border-limestone/60 text-charcoal hover:bg-limestone/30'}`}
+                  // Once approved this is a statement, not an action: there is
+                  // nothing a second click can usefully add (it would re-record
+                  // the same source), and a live button that looks like a badge
+                  // is exactly how stale state gets re-applied by someone who
+                  // read it as information. Reject remains the way back.
+                  disabled={approved}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold ${approved ? 'bg-olive text-ivory disabled:cursor-default' : 'border border-limestone/60 text-charcoal hover:bg-limestone/30'}`}
                 >
                   {approved ? '✓ Approved' : 'Approve'}
                 </button>

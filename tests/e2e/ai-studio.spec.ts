@@ -397,6 +397,65 @@ test.describe('AI Design Studio (demo mode)', () => {
     expect(String(body.sourceAssetPath ?? '')).not.toContain('/api/generation/result/');
   });
 
+  // Dropping the approved SOURCE on a style change used to leave the result
+  // card's button still reading "✓ Approved" — and still clickable. Read as
+  // information and clicked, that badge re-ran the approval handler, restored
+  // the old image AND its old variant, and silently put the selector back on
+  // the material the visitor had just moved off (displayedStyleVariant reads
+  // the approval). Driven through a NON-mock completed job because Approve
+  // only records a source for a real provider result.
+  test('changing style settles the approved result rather than leaving a stale "✓ Approved" badge (regression)', async ({ page }) => {
+    await page.route('**/api/generation/status/**', (route) => {
+      // Echo the REAL job id back — a fabricated one would not match the
+      // recovery entry this run wrote (see the test above).
+      const jobId = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop() ?? '');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          jobId,
+          provider: 'nano-banana',
+          outputType: 'image',
+          roomId: 'living',
+          status: 'completed',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          resultUrl: '/api/generation/result/stale-badge-result-id',
+          meta: { model: 'nano-banana', styleVariant: 'warm-oak', prompt: 'p', approved: false },
+        }),
+      });
+    });
+
+    await page.goto('/#ai-studio');
+    await page.getByRole('button', { name: /Generate concept image/i }).click();
+    await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible({ timeout: 20_000 });
+    await page.getByRole('button', { name: 'Approve' }).click();
+
+    const badge = page.getByRole('button', { name: '✓ Approved' });
+    await expect(badge).toBeVisible();
+    // Once approved it is a statement, not an action: nothing a second click
+    // can usefully add, and a live button that looks like a badge is how
+    // stale state gets re-applied by someone who read it as information.
+    await expect(badge).toBeDisabled();
+
+    const selector = page.getByLabel('Style variation');
+    const options = await selector.locator('option').evaluateAll((els) =>
+      els.map((e) => (e as HTMLOptionElement).value),
+    );
+    const originalVariant = await selector.inputValue();
+    const newVariant = options.find((o) => o !== originalVariant)!;
+    await selector.selectOption(newVariant);
+
+    // The result is settled, not left claiming an approval it no longer has.
+    await expect(badge).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+    // And the selector stays where the visitor put it.
+    await expect(selector).toHaveValue(newVariant);
+    // Still live, so a second change is possible — the old result must not
+    // have re-armed the "decide this first" lock on the way out.
+    await expect(selector).toBeEnabled();
+  });
+
   test('the style selector cannot drift from the job it will be attributed to (regression)', async ({ page }) => {
     // The scenario: start a warm-oak generation, switch the selector to
     // cool-stone before it finishes, then Approve. Approve correctly records

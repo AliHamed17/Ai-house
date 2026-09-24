@@ -4,14 +4,17 @@ import { useMemo, useState } from 'react';
 import { Html } from '@react-three/drei';
 import { houseModel } from '@/data/house';
 import { useViewerStore } from '@/lib/store/viewerStore';
-import type { RoomId } from '@/lib/types';
-
-const NAVIGABLE_KINDS = new Set(['door', 'open_threshold', 'exterior_opening']);
+import { doorHotspotsFrom } from '@/lib/geometry/doorHotspots';
 
 /**
- * Door / threshold hotspots: a small floor marker at every navigable opening
- * that teleports (with a short store-driven fade, see TeleportFade.tsx) to
- * whichever side of the doorway the visitor isn't currently standing on.
+ * Door / threshold hotspots: a small floor marker on every navigable opening
+ * OUT OF the room the visitor is standing in, which teleports (with a short
+ * store-driven fade, see TeleportFade.tsx) to the far side of it.
+ *
+ * Which openings those are, and where each one leads, both come from
+ * doorHotspotsFrom — one adjacency check, so a marker cannot exist without an
+ * unambiguous destination. See that module for what rendering every opening
+ * in the house instead used to do in the open social zone.
  */
 export function DoorHotspots() {
   const activeRoomId = useViewerStore((s) => s.activeRoomId);
@@ -20,27 +23,21 @@ export function DoorHotspots() {
   const mode = useViewerStore((s) => s.mode);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
-  const doorOpenings = useMemo(
-    () => houseModel.openings.filter((o) => NAVIGABLE_KINDS.has(o.kind) && o.roomA && o.roomB),
-    [],
-  );
+  const doorHotspots = useMemo(() => doorHotspotsFrom(activeRoomId, houseModel.openings), [activeRoomId]);
 
-  // "Whichever side I'm not on" only means something when the visitor is
-  // actually standing in one specific room — in orbit/Dollhouse, every door
-  // marker in the whole house renders at once with activeRoomId matching
-  // neither side for nearly all of them, so the ternary below silently
-  // picked roomA regardless of which side a visitor would expect (e.g.
-  // clicking the parents-bedroom doorway from the exterior approach jumped
-  // to hall_south instead). RoomLabelHotspots already covers unambiguous
-  // room-to-room jumping from orbit mode, so door markers are floorplan-only
-  // in the other direction too: both are "not walking through a door" views.
+  // Walking through a doorway only means something from inside a room. In
+  // orbit/Dollhouse the camera is above the whole house and in floorplan it
+  // is looking at a drawing of it, so neither is a view a door marker belongs
+  // in; RoomLabelHotspots and the floor plan already cover room-to-room
+  // jumping from those, unambiguously. (The adjacency filter above would now
+  // leave only the active room's own doorways visible from overhead, which
+  // reads as arbitrary rather than useful.)
   if (mode === 'floorplan' || mode === 'orbit') return null;
 
   return (
     <group>
-      {doorOpenings.map((o) => {
-        const other: RoomId | undefined = o.roomA === activeRoomId ? (o.roomB as RoomId) : (o.roomA as RoomId);
-        const targetRoom = houseModel.rooms.find((r) => r.id === other);
+      {doorHotspots.map(({ opening: o, destinationRoomId }) => {
+        const targetRoom = houseModel.rooms.find((r) => r.id === destinationRoomId);
         if (!targetRoom) return null;
         const isHovered = hoveredId === o.id;
         return (

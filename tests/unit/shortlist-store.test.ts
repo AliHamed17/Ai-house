@@ -12,7 +12,7 @@ function stored(): string[] | null {
 
 beforeEach(() => {
   localStorage.clear();
-  useShortlistStore.setState({ ids: [], hydrated: false });
+  useShortlistStore.setState({ ids: [], hydrated: false, storageHoldsList: true });
 });
 
 afterEach(() => {
@@ -90,7 +90,7 @@ describe('shortlist hydration', () => {
   // hydrate that overwrote rather than merged would silently eat that save.
   it('keeps pieces saved before it ran', () => {
     localStorage.setItem(SHORTLIST_STORAGE_KEY, JSON.stringify([a.id]));
-    useShortlistStore.setState({ ids: [b.id], hydrated: false });
+    useShortlistStore.setState({ ids: [b.id], hydrated: false, storageHoldsList: true });
     useShortlistStore.getState().hydrate();
     expect(useShortlistStore.getState().ids).toEqual([a.id, b.id]);
   });
@@ -118,6 +118,39 @@ describe('shortlist concurrency', () => {
     useShortlistStore.getState().remove(a.id);
     expect(stored()).toEqual([c.id]);
   });
+
+  // Which way a click toggles must follow the button the visitor actually
+  // read, not the stored list they cannot see. Deciding from storage would
+  // make "+ Save" remove the piece — the exact opposite of what it offers.
+  it('saves a piece another tab already saved, instead of removing it', () => {
+    useShortlistStore.getState().hydrate();
+    localStorage.setItem(SHORTLIST_STORAGE_KEY, JSON.stringify([a.id]));
+
+    // This tab still shows nothing saved, so its button still offers Save.
+    expect(useShortlistStore.getState().ids).toEqual([]);
+    useShortlistStore.getState().toggle(a.id);
+
+    expect(useShortlistStore.getState().ids).toEqual([a.id]);
+    expect(stored()).toEqual([a.id]);
+  });
+
+  it('removes a piece another tab already removed, instead of re-adding it', () => {
+    useShortlistStore.getState().toggle(a.id);
+    localStorage.removeItem(SHORTLIST_STORAGE_KEY);
+
+    // This tab still shows it saved, so its button still offers Saved/undo.
+    useShortlistStore.getState().toggle(a.id);
+
+    expect(useShortlistStore.getState().ids).toEqual([]);
+    expect(localStorage.getItem(SHORTLIST_STORAGE_KEY)).toBeNull();
+  });
+
+  it('saving a piece already stored does not duplicate it or drop its siblings', () => {
+    useShortlistStore.getState().hydrate();
+    localStorage.setItem(SHORTLIST_STORAGE_KEY, JSON.stringify([c.id, a.id]));
+    useShortlistStore.getState().toggle(a.id);
+    expect(stored()).toEqual([c.id, a.id]);
+  });
 });
 
 describe('shortlist without storage', () => {
@@ -127,6 +160,51 @@ describe('shortlist without storage', () => {
     });
     useShortlistStore.getState().toggle(a.id);
     expect(useShortlistStore.getState().ids).toEqual([a.id]);
+  });
+
+  // The dangerous shape is a browser that lets reads through and refuses
+  // writes — an exhausted quota, typically. Storage then answers with a
+  // snapshot from before the failed write, and a second save computed
+  // against it would silently drop the first. (One toggle cannot catch
+  // this; it takes two.)
+  it('does not lose an earlier save when writes fail but reads still work', () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota exceeded');
+    });
+    useShortlistStore.getState().toggle(a.id);
+    useShortlistStore.getState().toggle(b.id);
+    expect(useShortlistStore.getState().ids).toEqual([a.id, b.id]);
+  });
+
+  it('keeps every save across a whole run of failed writes', () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota exceeded');
+    });
+    useShortlistStore.getState().toggle(a.id);
+    useShortlistStore.getState().toggle(b.id);
+    useShortlistStore.getState().toggle(c.id);
+    useShortlistStore.getState().remove(b.id);
+    expect(useShortlistStore.getState().ids).toEqual([a.id, c.id]);
+  });
+
+  // Storage coming back is not a reason to keep ignoring it: once a write
+  // lands, the stored record matches again and is the right base once more.
+  it('trusts storage again once a write succeeds', () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+      throw new Error('quota exceeded');
+    });
+    useShortlistStore.getState().toggle(a.id);
+    expect(useShortlistStore.getState().storageHoldsList).toBe(false);
+
+    useShortlistStore.getState().toggle(b.id);
+    expect(useShortlistStore.getState().storageHoldsList).toBe(true);
+    expect(stored()).toEqual([a.id, b.id]);
+
+    // A concurrent save from another tab is honoured again from here on.
+    setItem.mockRestore();
+    localStorage.setItem(SHORTLIST_STORAGE_KEY, JSON.stringify([a.id, b.id, c.id]));
+    useShortlistStore.getState().remove(a.id);
+    expect(stored()).toEqual([b.id, c.id]);
   });
 
   it('still tracks saves in memory when reading throws', () => {

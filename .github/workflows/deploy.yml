@@ -15,11 +15,25 @@
 #        VERCEL_TOKEN       the token from step 2
 #        VERCEL_ORG_ID      "orgId"     from .vercel/project.json
 #        VERCEL_PROJECT_ID  "projectId" from .vercel/project.json
-#   4. Run this workflow: Actions -> Deploy -> Run workflow.
+#   4. Give the VERCEL PROJECT (not this repository) a stable
+#      JOB_ID_SIGNING_SECRET, for every environment you deploy to:
+#        Vercel -> the project -> Settings -> Environment Variables
+#        JOB_ID_SIGNING_SECRET = any long random string, e.g. openssl rand -hex 32
+#      Vercel runs the app as concurrent serverless instances, and without a
+#      shared secret each one signs job ids with its own random per-process
+#      key (see src/lib/ai/jobId.ts). A status poll then lands on a different
+#      instance than the submit did and rejects a legitimate id — which breaks
+#      the AI Studio even in demo mode, the only mode this deployment runs in.
+#      The deploy below refuses to publish without it rather than shipping a
+#      site whose advertised Studio is quietly broken.
+#   5. Run this workflow: Actions -> Deploy -> Run workflow.
 #      The deployment URL is printed in the job summary.
 #
-# Until those secrets exist the workflow SKIPS rather than fails, so a fork or
-# a clone that never intends to deploy is never shown a red X for it.
+# Until the three repository secrets exist the workflow SKIPS rather than
+# fails, so a fork or a clone that never intends to deploy is never shown a red
+# X for it. A missing JOB_ID_SIGNING_SECRET is different and is a hard failure:
+# by then the repository has said it wants to deploy, and the only question is
+# whether what gets published actually works.
 #
 # The deployment gets NO AI credentials, which is deliberate: with none set the
 # app serves its full demo mode (see src/lib/ai/registry.server.ts), so the
@@ -117,6 +131,43 @@ jobs:
         run: |
           set -euo pipefail
           npx --yes vercel@latest pull --yes --environment="$TARGET"
+
+          # `vercel pull` writes the project's own environment for this target
+          # to a dotenv file, which is the only view this job gets of what the
+          # deployed functions will actually run with. Checking it here means
+          # the check is against the real deployment configuration rather than
+          # against a repository secret standing in for it.
+          #
+          # Nothing below ever prints the value — only whether there is one.
+          ENV_FILE=".vercel/.env.${TARGET}.local"
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "::error::vercel pull did not write $ENV_FILE, so the deployment's runtime configuration cannot be verified."
+            exit 1
+          fi
+          MISSING_SECRET=''
+          if SECRET_LINE=$(grep -m1 '^JOB_ID_SIGNING_SECRET=' "$ENV_FILE"); then
+            SECRET_VALUE=${SECRET_LINE#JOB_ID_SIGNING_SECRET=}
+            # Vercel quotes dotenv values; an empty one signs with the same
+            # random per-process fallback as no value at all, so both fail.
+            SECRET_VALUE=${SECRET_VALUE%\"}; SECRET_VALUE=${SECRET_VALUE#\"}
+            SECRET_VALUE=${SECRET_VALUE%\'}; SECRET_VALUE=${SECRET_VALUE#\'}
+            [ -n "$SECRET_VALUE" ] || MISSING_SECRET='empty'
+          else
+            MISSING_SECRET='absent'
+          fi
+          if [ -n "$MISSING_SECRET" ]; then
+            {
+              echo "### Deploy stopped: no stable JOB_ID_SIGNING_SECRET"
+              echo
+              echo "The Vercel project has no usable \`JOB_ID_SIGNING_SECRET\` for the \`$TARGET\` environment (it is $MISSING_SECRET)."
+              echo "Vercel runs this app as concurrent serverless instances; without a shared secret each signs job ids with its own random per-process key, so a status poll landing on a different instance rejects a legitimate id and the AI Studio fails **even in demo mode**."
+              echo
+              echo "Set it under **Settings -> Environment Variables** on the Vercel project (any long random string, e.g. \`openssl rand -hex 32\`), then re-run."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::No usable JOB_ID_SIGNING_SECRET on the Vercel project for '$TARGET' ($MISSING_SECRET) — refusing to publish a deployment whose AI Studio cannot work. See the job summary."
+            exit 1
+          fi
+
           if [ "$TARGET" = 'production' ]; then
             npx --yes vercel@latest build --prod
           else

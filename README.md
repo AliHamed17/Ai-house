@@ -78,11 +78,25 @@ Actions**), taking the last two straight from `.vercel/project.json`:
 | `VERCEL_ORG_ID` | `orgId` |
 | `VERCEL_PROJECT_ID` | `projectId` |
 
+Then give the **Vercel project** — not this repository — a stable
+`JOB_ID_SIGNING_SECRET`, under **Settings → Environment Variables**, for every
+environment you deploy to. Any long random string works
+(`openssl rand -hex 32`). This one is not optional on Vercel: the platform runs
+the app as concurrent serverless instances, and without a shared secret each
+signs job ids with its own random per-process key, so a status poll landing on
+a different instance than the submit rejects a legitimate id — which breaks the
+AI Studio **even in demo mode** (see "Known prototype limitations"). The deploy
+workflow checks for it after `vercel pull` and refuses to publish without it,
+rather than shipping a site whose Studio is quietly broken.
+
 Run it from **Actions → Deploy → Run workflow** (choose `preview` for a
 throwaway URL or `production` for the project domain); the URL appears in the
-job summary. Pushes to `main` deploy a preview automatically. Until those
-secrets exist the workflow skips instead of failing, so a fork never sees a red
-X for a deployment it was never going to do.
+job summary. Note that a `workflow_dispatch` workflow is only registered once
+it exists on the repository's **default branch**, so the Deploy entry does not
+appear in the Actions tab until this branch is merged — until then, use the
+manual route below. Pushes to `main` deploy a preview automatically. Until the
+three repository secrets exist the workflow skips instead of failing, so a fork
+never sees a red X for a deployment it was never going to do.
 
 The deployment is given **no AI credentials on purpose**: with none set the app
 serves its full demo mode, so the published site is completely usable and
@@ -90,9 +104,10 @@ cannot spend money. Enabling real generation is a separate decision — see
 `AI_ALLOW_LIVE` below, and read its warning about putting authentication and
 quotas in front of the `/api/*/generate` routes first.
 
-Deploying by hand instead works the same way: `npx vercel deploy` from a
-machine logged into a Vercel account, no environment variables needed for demo
-mode.
+Deploying by hand instead works the same way, and needs no repository secrets:
+`npx vercel deploy` from a machine logged into a Vercel account. The same
+`JOB_ID_SIGNING_SECRET` caveat applies — set it on the project first, or the
+published Studio will fail its first status poll.
 
 ## Commands
 

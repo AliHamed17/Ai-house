@@ -20,10 +20,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from qa_report import (  # noqa: E402
+    MAX_DURATION_DRIFT_SEC,
     MIN_LIGHTING_ARC_CORRELATION,
     MIN_LIGHTING_ARC_SAMPLES,
+    duration_problems,
     json_number,
     lighting_arc_problems,
+    parse_ffmpeg_duration,
 )
 
 # The value the committed report actually carries, so the tests below fail if
@@ -135,6 +138,24 @@ class TestCommittedReport(unittest.TestCase):
         # setUp does the asserting; reaching here at all is the assertion.
         self.assertIn("lightingArcCorrelation", self.report)
 
+    def test_the_committed_report_measured_the_published_file(self):
+        # Not just "a duration is present": the point of the measurement is
+        # that it came from the MP4 rather than from the manifest describing
+        # it, so the report has to carry BOTH and they have to agree.
+        durations = self.report["durationSec"]
+        self.assertIsNotNone(
+            durations.get("resultMeasured"),
+            "a published report must carry the video's own measured duration",
+        )
+        self.assertEqual(
+            duration_problems(
+                float(durations["resultMeasured"]),
+                float(durations["reference"]),
+                durations.get("resultManifest"),
+            ),
+            [],
+        )
+
     def test_the_committed_report_passes_its_own_lighting_rule(self):
         correlation = self.report["lightingArcCorrelation"]
         samples = sum(1 for s in self.report["stages"] if s["referenceLighting"] != "daylight")
@@ -155,3 +176,64 @@ class TestCommittedReport(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestParseFfmpegDuration(unittest.TestCase):
+    BANNER = "  Duration: 00:00:13.37, start: 0.000000, bitrate: 925 kb/s"
+
+    def test_it_reads_the_duration_ffmpeg_prints(self):
+        self.assertAlmostEqual(parse_ffmpeg_duration(self.BANNER), 13.37, places=6)
+
+    def test_it_finds_the_line_among_others(self):
+        stderr = "\n".join(["Input #0, mov,mp4", self.BANNER, "  Stream #0:0: Video: h264"])
+        self.assertAlmostEqual(parse_ffmpeg_duration(stderr), 13.37, places=6)
+
+    def test_it_handles_hours_and_minutes(self):
+        self.assertAlmostEqual(
+            parse_ffmpeg_duration("Duration: 01:02:03.50,"), 3723.5, places=6
+        )
+
+    # None, not an exception: the caller reports "could not measure" as its
+    # own problem rather than crashing partway through an audit.
+    def test_missing_or_malformed_input_measures_nothing(self):
+        for stderr in ["", "no duration here", "Duration: N/A,", "Duration: 00:13.37,", "Duration: a:b:c,"]:
+            self.assertIsNone(parse_ffmpeg_duration(stderr), stderr)
+
+
+class TestDurationProblems(unittest.TestCase):
+    REFERENCE = 13.37
+
+    def test_a_correct_file_has_no_problems(self):
+        self.assertEqual(duration_problems(13.37, self.REFERENCE, 13.37), [])
+
+    def test_rounding_within_tolerance_passes(self):
+        # round(13.37 * 30) / 30 = 13.3667, which ffmpeg reports as 13.37.
+        self.assertEqual(duration_problems(13.3667, self.REFERENCE, 13.37), [])
+
+    # The finding: a truncated master kept passing because every check read
+    # the manifest, and luminance is sampled at stage midpoints — a file cut
+    # just after the last one still has every sample the arc needs.
+    def test_a_truncated_file_fails_even_when_its_manifest_looks_right(self):
+        problems = duration_problems(9.0, self.REFERENCE, 13.37)
+        self.assertTrue(any("9.00s" in p and "13.37s" in p for p in problems))
+
+    def test_an_extended_file_fails_too(self):
+        self.assertNotEqual(duration_problems(20.0, self.REFERENCE, 13.37), [])
+
+    def test_a_file_disagreeing_with_its_own_manifest_is_reported(self):
+        problems = duration_problems(13.37, self.REFERENCE, 9.0)
+        self.assertTrue(any("come apart" in p for p in problems))
+
+    def test_an_unmeasurable_file_is_a_problem_rather_than_a_pass(self):
+        problems = duration_problems(None, self.REFERENCE, 13.37)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("unverified", problems[0])
+
+    def test_a_missing_manifest_duration_does_not_mask_a_good_measurement(self):
+        self.assertEqual(duration_problems(13.37, self.REFERENCE, None), [])
+
+    def test_the_tolerance_boundary_is_inclusive(self):
+        self.assertEqual(duration_problems(self.REFERENCE + MAX_DURATION_DRIFT_SEC, self.REFERENCE, None), [])
+        self.assertNotEqual(
+            duration_problems(self.REFERENCE + MAX_DURATION_DRIFT_SEC * 2, self.REFERENCE, None), []
+        )

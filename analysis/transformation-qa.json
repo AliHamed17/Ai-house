@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-16T20:22:42.360590+00:00",
+  "generatedAt": "2026-09-24T11:23:24.157533+00:00",
   "method": "Stage-by-stage comparison of the measured reference against the assembled result; luminance sampled at each stage midpoint from a 4 fps extraction.",
   "whatIsCompared": [
     "stage order",
@@ -13,7 +13,9 @@
   ],
   "durationSec": {
     "reference": 13.37,
-    "result": 13.37
+    "resultManifest": 13.37,
+    "resultMeasured": 13.37,
+    "toleranceSec": 0.05
   },
   "stageCount": {
     "reference": 12,

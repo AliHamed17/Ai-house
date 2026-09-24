@@ -144,6 +144,20 @@ def main() -> int:
         print(f"Unknown room id(s): {', '.join(unknown)}\nKnown: {', '.join(FRAME)}", file=sys.stderr)
         return 2
 
+    # Each room below is a BILLED Gemini generation writing one PNG named for
+    # that room, so `generate-concepts.py living living` used to pay twice and
+    # then overwrite the first render with the second — money spent on an image
+    # nothing can ever read. De-duplicated in place, preserving the order the
+    # rooms were asked for, and said out loud rather than silently: a repeated
+    # id is far more likely a typo than an intent, and the operator should know
+    # which of their arguments did nothing.
+    seen: set[str] = set()
+    deduped = [r for r in rooms if not (r in seen or seen.add(r))]
+    if len(deduped) != len(rooms):
+        repeated = sorted({r for r in rooms if rooms.count(r) > 1})
+        print(f"Ignoring repeated room id(s): {', '.join(repeated)} (each room is generated once).")
+    rooms = deduped
+
     if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
         print(
             "No Gemini credentials found. Set GEMINI_API_KEY or GOOGLE_API_KEY and re-run:\n"

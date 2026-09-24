@@ -39,13 +39,34 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from qa_report import (  # noqa: E402
+    MAX_DURATION_DRIFT_SEC,
     MIN_LIGHTING_ARC_CORRELATION,
+    duration_problems,
     json_number,
     lighting_arc_problems,
+    parse_ffmpeg_duration,
 )
 
 REFERENCE_ANALYSIS = Path("analysis/reference-transformation-video.json")
 RESULT_MP4 = Path("public/transformation/kitchen-transformation.mp4")
+
+
+def measure_duration(video: Path) -> float | None:
+    """
+    The published file's OWN duration, read back from ffmpeg.
+
+    Everything else in this audit is derived from the sidecar manifest the
+    compositor wrote, which cannot notice a master truncated, extended or
+    swapped afterwards. This is the one reading that comes from the artifact
+    that actually ships.
+    """
+    import imageio_ffmpeg
+
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    # No -f/-o: ffmpeg describes the input, reports "at least one output file
+    # must be specified" and exits non-zero. The banner on stderr is the point.
+    proc = subprocess.run([ffmpeg, "-hide_banner", "-i", str(video)], capture_output=True, text=True)
+    return parse_ffmpeg_duration(proc.stderr)
 
 
 def extract(video: Path, out_dir: Path, fps: float) -> list[Path]:
@@ -90,6 +111,7 @@ def main() -> int:
     # nearest whole second lands in the NEXT stage, which made the lighting
     # measurement below compare the wrong frames entirely. Measurement gets
     # its own denser sampling.
+    measured_duration = measure_duration(RESULT_MP4)
     measure_fps = max(args.fps, 4.0)
     measure_frames = (
         out_frames if measure_fps == args.fps else extract(RESULT_MP4, tmp / "measure", measure_fps)
@@ -238,6 +260,12 @@ def main() -> int:
                 f"Produced duration {produced.get('durationSec')} != reference duration {duration}."
             )
 
+    # Measured against the file, not the manifest — see duration_problems.
+    length_problems = duration_problems(
+        measured_duration, duration, (produced or {}).get("durationSec")
+    )
+    timing_problems = timing_problems + length_problems
+
     timing_exact = not timing_problems
 
     report = {
@@ -255,7 +283,11 @@ def main() -> int:
         ],
         "durationSec": {
             "reference": duration,
-            "result": (produced or {}).get("durationSec"),
+            # What the manifest says, and what the published file actually is.
+            # Reported separately on purpose: they agreeing is itself a check.
+            "resultManifest": (produced or {}).get("durationSec"),
+            "resultMeasured": json_number(measured_duration) if measured_duration is not None else None,
+            "toleranceSec": MAX_DURATION_DRIFT_SEC,
         },
         "stageCount": {"reference": len(ref_stages), "result": len(produced_stage_ids)},
         "stageOrder": produced_stage_ids,

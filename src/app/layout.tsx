@@ -1,18 +1,35 @@
 import type { Metadata, Viewport } from 'next';
-import { Fraunces, Inter } from 'next/font/google';
+import localFont from 'next/font/local';
 import './globals.css';
 
-const fraunces = Fraunces({
+/**
+ * Self-hosted rather than pulled through `next/font/google`.
+ *
+ * `next/font/google` fetches the font CSS and binaries from Google at BUILD
+ * time, which makes every build depend on a third-party service being
+ * reachable and well-behaved from the builder. When that call fails,
+ * Turbopack never emits its internal font module and the build dies with
+ * dozens of `Can't resolve '@vercel/turbopack-next/internal/font/google/font'`
+ * errors that name no file in this repo — which is exactly what took down
+ * CI and the Vercel deploy while local builds kept passing.
+ *
+ * These are the same families and the same `latin` subset as before, as
+ * variable woff2 files committed next to this module, so the build is now
+ * hermetic. Both are SIL Open Font License 1.1; see fonts/OFL.txt.
+ */
+const fraunces = localFont({
   variable: '--font-fraunces',
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  style: ['normal', 'italic'],
+  display: 'swap',
+  src: [
+    { path: './fonts/fraunces-latin-normal.woff2', weight: '400 600', style: 'normal' },
+    { path: './fonts/fraunces-latin-italic.woff2', weight: '400 600', style: 'italic' },
+  ],
 });
 
-const inter = Inter({
+const inter = localFont({
   variable: '--font-inter',
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+  src: [{ path: './fonts/inter-latin.woff2', weight: '400 700', style: 'normal' }],
 });
 
 export const metadata: Metadata = {

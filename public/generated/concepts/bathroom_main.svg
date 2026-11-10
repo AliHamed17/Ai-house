@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F3EFE7" />
+      <stop offset="100%" stop-color="#C9C1B4" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#bg)" />
+  <rect x="16" y="16" width="768" height="568" fill="none" stroke="#4B4037" stroke-opacity="0.35" stroke-width="1.5" />
+  <rect x="99.3" y="334.7" width="195.8" height="108.0" rx="14.1" fill="#4B4037" opacity="0.10" />
+      <rect x="314.0" y="283.3" width="144.3" height="121.3" rx="7.9" fill="#4B4037" opacity="0.10" />
+      <rect x="22.0" y="410.2" width="125.4" height="87.2" rx="10.6" fill="#4B4037" opacity="0.10" />
+      <rect x="49.9" y="366.3" width="111.9" height="80.6" rx="7.1" fill="#4B4037" opacity="0.10" />
+      <rect x="264.9" y="297.5" width="140.8" height="66.2" rx="13.8" fill="#4B4037" opacity="0.10" />
+  <line x1="60" y1="240" x2="740" y2="240" stroke="#4B4037" stroke-opacity="0.25" stroke-width="1" />
+  <text x="400" y="150" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="40" fill="#24221F">Main Bathroom</text>
+  <text x="400" y="190" text-anchor="middle" font-family="Georgia, serif" font-size="17" font-style="italic" fill="#73745F">Warm-modern-luxury concept — placeholder</text>
+  <rect x="290" y="520" width="220" height="34" rx="17" fill="#24221F" opacity="0.85" />
+  <text x="400" y="543" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" letter-spacing="0.5" fill="#F3EFE7">DEMO MODE — NOT AI-GENERATED</text>
+</svg>

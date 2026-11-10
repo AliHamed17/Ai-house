@@ -1,0 +1,216 @@
+'use client';
+
+import { useMemo } from 'react';
+import * as THREE from 'three';
+import { houseModel } from '@/data/house';
+import type { BuiltWall, WallVoid } from '@/lib/geometry/wallPanels';
+import { builtWalls } from '@/lib/geometry/builtHouse';
+import { resolveFloorColor, resolveWallColor } from '@/data/materials';
+import { useMaterialTexture } from '@/lib/textures';
+import type { RoomDef } from '@/lib/types';
+
+function polygonShape(polygon: { x: number; z: number }[]): THREE.Shape {
+  const shape = new THREE.Shape();
+  polygon.forEach((p, i) => {
+    if (i === 0) shape.moveTo(p.x, p.z);
+    else shape.lineTo(p.x, p.z);
+  });
+  shape.closePath();
+  return shape;
+}
+
+/** Bounding-box footprint of a polygon, used only to scale texture repeat
+ * to the surface's real size — never affects the rendered geometry. */
+function polygonBounds(polygon: { x: number; z: number }[]): { widthM: number; depthM: number } {
+  const xs = polygon.map((p) => p.x);
+  const zs = polygon.map((p) => p.z);
+  return { widthM: Math.max(...xs) - Math.min(...xs), depthM: Math.max(...zs) - Math.min(...zs) };
+}
+
+function Floor({ room, variantId }: { room: RoomDef; variantId: string }) {
+  const geometry = useMemo(() => new THREE.ShapeGeometry(polygonShape(room.floorPolygon)), [room.floorPolygon]);
+  const color = resolveFloorColor(room.floorMaterialId, variantId);
+  const { widthM, depthM } = polygonBounds(room.floorPolygon);
+  const map = useMaterialTexture(room.floorMaterialId, widthM, depthM);
+  return (
+    <mesh geometry={geometry} rotation={[Math.PI / 2, 0, 0]} receiveShadow position={[0, 0, 0]}>
+      <meshStandardMaterial map={map ?? undefined} color={color} roughness={0.6} metalness={0.02} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
+function Ceiling({ room, variantId }: { room: RoomDef; variantId: string }) {
+  // wallHeightOverrideM (a low parapet, on the exterior rooms that set it)
+  // is a WALL height, not a ceiling one — a covered terrace's roof sits at
+  // the normal building ceiling line above those short railing-height
+  // walls, not at railing height itself, so this always uses ceilingHeightM
+  // regardless of any wall-height override.
+  const height = room.ceilingHeightM;
+  const geometry = useMemo(() => new THREE.ShapeGeometry(polygonShape(room.floorPolygon)), [room.floorPolygon]);
+  const color = resolveWallColor(room.wallMaterialId, variantId);
+  const { widthM, depthM } = polygonBounds(room.floorPolygon);
+  const map = useMaterialTexture(room.wallMaterialId, widthM, depthM);
+  // A genuinely open-air exterior space (the entry approach, a balcony) has
+  // no ceiling at all; a covered one (a terrace/loggia) does, and opts back
+  // in via hasCeiling. This check runs after the hooks above so every
+  // Ceiling instance calls the same hooks in the same order regardless of
+  // which room it's for (conditionally skipping hooks would violate the
+  // rules of hooks and desync texture loading across re-renders).
+  if (room.isExterior && !room.hasCeiling) return null;
+  return (
+    <mesh geometry={geometry} rotation={[Math.PI / 2, 0, 0]} position={[0, height, 0]}>
+      <meshStandardMaterial map={map ?? undefined} color={color} roughness={0.95} metalness={0} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
+function WindowGlazing({ wall, voidDef }: { wall: BuiltWall; voidDef: WallVoid }) {
+  const tMid = (voidDef.t0 + voidDef.t1) / 2;
+  const width = voidDef.t1 - voidDef.t0;
+  const height = voidDef.y1 - voidDef.y0;
+  const x = wall.start.x + wall.ux * tMid;
+  const z = wall.start.z + wall.uz * tMid;
+  const y = (voidDef.y0 + voidDef.y1) / 2;
+  // Three.js rotation.y rotates local +X toward world +Z, but our wall
+  // angle is measured as the tangent direction (atan2(dx,dz), i.e. from
+  // world +Z toward +X) — the two conventions are offset by 90 degrees.
+  const rotY = wall.angleRad - Math.PI / 2;
+  return (
+    <group position={[x, y, z]} rotation={[0, rotY, 0]}>
+      <mesh>
+        <planeGeometry args={[Math.max(width - 0.06, 0.05), Math.max(height - 0.06, 0.05)]} />
+        <meshPhysicalMaterial
+          color="#bcd6e0"
+          transparent
+          opacity={0.28}
+          roughness={0.05}
+          metalness={0}
+          transmission={0.6}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {/* Slim four-sided frame. This was previously a single `wireframe` box,
+          which three.js draws as the box's triangulated edges — including the
+          diagonals across each face, so every window read as a white-crossed
+          placeholder rather than a window. Four thin bars is both correct and
+          cheaper than the wireframe pass. */}
+      {(
+        [
+          [0, height / 2 - 0.03, width, 0.06],
+          [0, -height / 2 + 0.03, width, 0.06],
+          [-width / 2 + 0.03, 0, 0.06, height],
+          [width / 2 - 0.03, 0, 0.06, height],
+        ] as const
+      ).map(([fx, fy, fw, fh], i) => (
+        <mesh key={i} position={[fx, fy, 0]}>
+          <boxGeometry args={[fw, fh, 0.06]} />
+          <meshStandardMaterial color="#4B4037" roughness={0.6} metalness={0.1} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/** One wall segment's own texture, scaled to ITS OWN widthM/heightM — not
+ * the whole wall's. Every renderPanel is its own boxGeometry with normalized
+ * [0,1] UVs, so sharing one wall-length-scaled texture clone across a
+ * narrow lintel strip and the full-width panel beside it would repeat the
+ * pattern the same number of times over a much smaller physical size,
+ * making the material's real-world scale shrink and jump at every
+ * door/window edge (regression fixed here: each panel gets its own clone). */
+function WallPanelMesh({
+  panel,
+  baseMaterialId,
+  color,
+  roughness,
+  castShadow,
+  receiveShadow,
+}: {
+  panel: BuiltWall['renderPanels'][number];
+  baseMaterialId: string;
+  color: string;
+  roughness: number;
+  castShadow: boolean;
+  receiveShadow: boolean;
+}) {
+  const map = useMaterialTexture(baseMaterialId, panel.widthM, panel.heightM);
+  return (
+    <mesh
+      position={[panel.center.x, panel.center.y, panel.center.z]}
+      rotation={[0, panel.rotationYRad, 0]}
+      castShadow={castShadow}
+      receiveShadow={receiveShadow}
+    >
+      <boxGeometry args={[panel.widthM, panel.heightM, panel.depthM]} />
+      <meshStandardMaterial map={map ?? undefined} color={color} roughness={roughness} metalness={0} />
+    </mesh>
+  );
+}
+
+function WallMesh({ wall, variantId, isProtected }: { wall: BuiltWall; variantId: string; isProtected: boolean }) {
+  const room = houseModel.rooms.find((r) => r.id === wall.roomId)!;
+  const baseMaterialId = wall.exterior ? 'exterior-render' : room.wallMaterialId;
+  const color = resolveWallColor(baseMaterialId, variantId);
+  const windows = wall.voids.filter((v) => v.kind === 'window');
+  return (
+    <group>
+      {wall.renderPanels.map((panel, i) => (
+        <WallPanelMesh
+          key={i}
+          panel={panel}
+          baseMaterialId={baseMaterialId}
+          color={isProtected ? '#8a6a4a' : color}
+          roughness={wall.exterior ? 0.85 : 0.9}
+          castShadow
+          receiveShadow
+        />
+      ))}
+      {windows.map((v) => (
+        <WindowGlazing key={v.openingId} wall={wall} voidDef={v} />
+      ))}
+    </group>
+  );
+}
+
+function StructuralColumns() {
+  return (
+    <>
+      {houseModel.structuralFeatures.map((f) => (
+        <mesh key={f.id} position={[f.position.x, f.heightM / 2, f.position.z]} castShadow>
+          <cylinderGeometry args={[f.radiusM, f.radiusM, f.heightM, 16]} />
+          <meshStandardMaterial color="#e7e2d6" roughness={0.7} />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
+export function HouseGeometry({ variantId, hideCeilings }: { variantId: string; hideCeilings?: boolean }) {
+  const protectedWallIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const w of builtWalls) {
+      if (w.voids.some((v) => v.isProtected)) ids.add(`${w.roomId}:${w.wallId}`);
+    }
+    return ids;
+  }, []);
+
+  return (
+    <group>
+      {houseModel.rooms.map((room) => (
+        <group key={room.id}>
+          <Floor room={room} variantId={variantId} />
+          {!hideCeilings && <Ceiling room={room} variantId={variantId} />}
+        </group>
+      ))}
+      {builtWalls.map((wall) => (
+        <WallMesh
+          key={`${wall.roomId}:${wall.wallId}`}
+          wall={wall}
+          variantId={variantId}
+          isProtected={protectedWallIds.has(`${wall.roomId}:${wall.wallId}`)}
+        />
+      ))}
+      <StructuralColumns />
+    </group>
+  );
+}

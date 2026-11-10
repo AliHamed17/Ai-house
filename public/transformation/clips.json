@@ -1,0 +1,11 @@
+{
+  "$comment": "Approved Higgsfield micro-clips consumed by scripts/compose-transformation.py. A clip is used for its stage's motion ONLY when it is listed here AND approved is true, so a billed-but-rejected generation never silently reaches the master video. Exposure, hand compositing and every cut point stay compositor-controlled regardless. Generate a clip with POST /api/transformation/clip, download the completed result into public/transformation/clips/, then add its entry here.",
+  "schema": {
+    "stageId": "a transformation stage id that introduces objects (see GET /api/transformation/clip for the plan)",
+    "file": "site-relative path to the downloaded clip, e.g. /transformation/clips/island.mp4",
+    "approved": "boolean — only true clips are composited",
+    "jobId": "optional: the generation job id this came from, for traceability",
+    "prompt": "optional: the exact prompt used, for reproducibility"
+  },
+  "clips": []
+}

@@ -1,0 +1,171 @@
+{
+  "generatedAt": "2026-09-24T11:23:24.157533+00:00",
+  "method": "Stage-by-stage comparison of the measured reference against the assembled result; luminance sampled at each stage midpoint from a 4 fps extraction.",
+  "whatIsCompared": [
+    "stage order",
+    "beat timing",
+    "lighting state per stage",
+    "shape of the luminance arc"
+  ],
+  "whatIsNotCompared": [
+    "literal room geometry - this house's kitchen is not the reference's kitchen and is not meant to match it",
+    "surface colours and materials - driven by this house's own palette"
+  ],
+  "durationSec": {
+    "reference": 13.37,
+    "resultManifest": 13.37,
+    "resultMeasured": 13.37,
+    "toleranceSec": 0.05
+  },
+  "stageCount": {
+    "reference": 12,
+    "result": 12
+  },
+  "stageOrder": [
+    "empty",
+    "upper-cabinets",
+    "backsplash",
+    "cabinet-wall",
+    "counter-details",
+    "suspended-feature",
+    "island",
+    "stools",
+    "decor",
+    "daylight-hold",
+    "dusk",
+    "warm-reveal"
+  ],
+  "beatTimingExact": true,
+  "beatTimingProblems": [],
+  "timingVerifiedAgainst": "public/transformation/manifest.json",
+  "lightingArcCorrelation": 0.9969,
+  "allStageLuminanceCorrelation": 0.6118,
+  "minLightingArcCorrelation": 0.9,
+  "lightingArcAcceptable": true,
+  "lightingArcProblems": [],
+  "correlationCaveat": "allStageLuminanceCorrelation is expected to be weak and is reported only for completeness: most of the reference's early luminance movement is content entering frame (dark joinery), not a lighting change, and two different kitchens cannot agree on that. lightingArcCorrelation covers the stages where lighting is the only variable.",
+  "stages": [
+    {
+      "stageId": "empty",
+      "referenceStart": 0.0,
+      "referenceEnd": 0.75,
+      "referenceLuminance": 154.6,
+      "resultLuminance": 115.3,
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
+      "gesture": "open-hand sweep along the ceiling/wall junction, fingers spread, entering from the top of frame"
+    },
+    {
+      "stageId": "upper-cabinets",
+      "referenceStart": 0.75,
+      "referenceEnd": 1.5,
+      "referenceLuminance": 140.7,
+      "resultLuminance": 106.7,
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
+      "gesture": "pinch at the right edge of the new cabinet block, dragging right to extend the run"
+    },
+    {
+      "stageId": "backsplash",
+      "referenceStart": 1.5,
+      "referenceEnd": 3.1,
+      "referenceLuminance": 138.6,
+      "resultLuminance": 106.7,
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
+      "gesture": "horizontal sweep left-to-right beneath the upper cabinets"
+    },
+    {
+      "stageId": "cabinet-wall",
+      "referenceStart": 3.1,
+      "referenceEnd": 3.75,
+      "referenceLuminance": 96.8,
+      "resultLuminance": 112.7,
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
+      "gesture": "two-sided placement - hand indicates each flank in turn"
+    },
+    {
+      "stageId": "counter-details",
+      "referenceStart": 3.75,
+      "referenceEnd": 5.75,
+      "referenceLuminance": 115.0,
+      "resultLuminance": 102.9,
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
+      "gesture": "repeated small pinches along the worktop"
+    },
+    {
+      "stageId": "suspended-feature",
+      "referenceStart": 5.75,
+      "referenceEnd": 6.9,
+      "referenceLuminance": 113.0,
+      "resultLuminance": 101.7,
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
+      "gesture": "pinch at the ceiling, drawing a horizontal element downward into place"
+    },
+    {
+      "stageId": "island",
+      "referenceStart": 6.9,
+      "referenceEnd": 7.7,
+      "referenceLuminance": 108.7,
+      "resultLuminance": 113.3,
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
+      "gesture": "two-finger placement in the foreground, then drag right to extend the mass"
+    },
+    {
+      "stageId": "stools",
+      "referenceStart": 7.7,
+      "referenceEnd": 8.7,
+      "referenceLuminance": 95.0,
+      "resultLuminance": 116.2,
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
+      "gesture": "successive pinch-placements along the island face, one per seat"
+    },
+    {
+      "stageId": "decor",
+      "referenceStart": 8.7,
+      "referenceEnd": 10.15,
+      "referenceLuminance": 101.8,
+      "resultLuminance": 112.6,
+      "referenceLighting": "daylight",
+      "resultLighting": "daylight",
+      "gesture": "final delicate pinch-placements at worktop and island centre, then hands exit frame"
+    },
+    {
+      "stageId": "daylight-hold",
+      "referenceStart": 10.15,
+      "referenceEnd": 11.15,
+      "referenceLuminance": 90.0,
+      "resultLuminance": 71.3,
+      "referenceLighting": "daylight-dimming",
+      "resultLighting": "daylight-dimming",
+      "gesture": "none - hands absent"
+    },
+    {
+      "stageId": "dusk",
+      "referenceStart": 11.15,
+      "referenceEnd": 11.95,
+      "referenceLuminance": 65.5,
+      "resultLuminance": 46.1,
+      "referenceLighting": "dusk",
+      "resultLighting": "dusk",
+      "gesture": "none - hands absent"
+    },
+    {
+      "stageId": "warm-reveal",
+      "referenceStart": 11.95,
+      "referenceEnd": 13.37,
+      "referenceLuminance": 121.8,
+      "resultLuminance": 96.1,
+      "referenceLighting": "warm-evening",
+      "resultLighting": "warm-evening",
+      "gesture": "none - hands absent"
+    }
+  ],
+  "referenceImageryRedistributed": false,
+  "note": "The side-by-side sheet including reference frames is generated locally into .transformation-work/qa/ and is deliberately not committed; only our own frames are published."
+}

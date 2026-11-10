@@ -1,0 +1,523 @@
+{
+  "$comment": "Forensic frame-level analysis of the supplied reference transformation video. Every timestamp in `stages` and `lighting` was MEASURED from decoded frames (20 fps sampling = 50 ms resolution), not estimated. This file is reference-only: it describes the transformation GRAMMAR that src/data/kitchenTransformation.ts reproduces against the real house. The reference room's geometry is NOT authoritative for this house.",
+  "source": {
+    "originalFilename": "WhatsApp Video 2026-09-13 at 22.55.01.mp4",
+    "analysedAt": "2026-09-13T21:10:00Z",
+    "method": "ffmpeg 7.0.2 (imageio-ffmpeg static build) frame extraction at 20 fps + numpy/Pillow per-frame luminance, frame-difference and template-matching analysis",
+    "licence": "Third-party social-media recording supplied by the house owner as a style reference. Its imagery, branding, on-screen watermark and audio are NOT redistributed: no frame, overlay or audio track from it is copied into this repository or into any generated asset. Only measured numeric timings survive into the manifest."
+  },
+  "metadata": {
+    "durationSec": 13.37,
+    "container": "mov,mp4,m4a,3gp,3g2,mj2",
+    "videoCodec": "h264 (Baseline, avc1)",
+    "widthPx": 384,
+    "heightPx": 848,
+    "aspectRatio": "9:19.875 (portrait)",
+    "frameRate": 59.99,
+    "pixelFormat": "yuv420p",
+    "colourSpace": "bt709",
+    "bitrateKbps": 1610,
+    "audio": {
+      "codec": "aac",
+      "sampleRateHz": 44100,
+      "channels": 2,
+      "bitrateKbps": 64
+    },
+    "analysisSampleRateFps": 20,
+    "analysisFrameCount": 267
+  },
+  "contentCrop": {
+    "$comment": "The recording is a phone screen capture: the architectural content is full-bleed with social-media chrome composited ON TOP of it, so the chrome cannot be cropped away without also losing content. Measured by per-row temporal standard deviation over all 267 frames (a static overlay has ~0 temporal variance).",
+    "deadOverlayRegions": [
+      {
+        "id": "reply-bar",
+        "y0": 772,
+        "y1": 848,
+        "measuredRowStdDev": 0.45,
+        "note": "Fully static chrome - zero architectural content."
+      },
+      {
+        "id": "status-and-header",
+        "y0": 0,
+        "y1": 95,
+        "measuredRowStdDev": 8.7,
+        "note": "Phone status bar + account header overlaid on live content; content is partially visible behind it."
+      },
+      {
+        "id": "caption-and-follow",
+        "y0": 700,
+        "y1": 772,
+        "measuredRowStdDev": 14.5,
+        "note": "Hashtags/follow row overlaid on live floor content."
+      }
+    ],
+    "usableArchitecturalFrame": {
+      "x": 0,
+      "y": 96,
+      "width": 384,
+      "height": 604
+    },
+    "overlaysNotReproduced": [
+      "phone status bar",
+      "account name and avatar",
+      "like / comment / share / save icons",
+      "follow button",
+      "hashtags and caption",
+      "reply bar",
+      "centre watermark",
+      "creator identity"
+    ]
+  },
+  "camera": {
+    "movement": "locked",
+    "measuredMaxDriftPx": 0,
+    "measurementMethod": "Normalised cross-correlation template matching (40x40 px windows, +/-6 px search radius) on the five highest-gradient architectural features, sampled every 0.2 s across t=10.0-13.3 s where the finished room provides real texture.",
+    "measurementCaveat": "During t=0-3 s the frame is near-featureless flat plaster, so automated global-motion estimation is not meaningful there (both FFT phase correlation and low-gradient template matching returned noise). Camera lock for that span is established by frame-by-frame visual inspection: the ceiling line, wall corner and floor joint hold identical pixel positions.",
+    "framing": "portrait, eye-level, full cabinet-wall elevation with open foreground for the island",
+    "perspective": "one-point, horizon approximately 45% down the usable frame, verticals parallel (no visible keystone)",
+    "approxLensEquivalent": "~24-28 mm full-frame equivalent (moderately wide architectural, no fisheye curvature at frame edges)",
+    "zoom": "none",
+    "shake": "none",
+    "focusBreathing": "none"
+  },
+  "scene": {
+    "roomType": "kitchen",
+    "startState": "bare architectural shell - plain warm-white plaster wall, pale stone floor, no cabinetry, no furniture",
+    "endState": "complete warm-modern-luxury kitchen under warm integrated evening lighting",
+    "palette": [
+      "warm ivory plaster",
+      "muted taupe cabinetry",
+      "pale veined marble",
+      "natural oak",
+      "dark bronze / near-black slim details"
+    ],
+    "compositionPrinciple": "Locked viewpoint; visual satisfaction comes entirely from progressive object introduction, never from camera motion. Layering builds back-to-front: wall plane, then cabinet wall, then suspended element, then foreground island, then seating, then styling."
+  },
+  "transitionDetection": {
+    "method": "Mean absolute frame-to-frame luminance difference on 96x212 downsampled frames; baseline mean 1.57, std 3.37.",
+    "significantSpikes": [
+      {
+        "tSec": 0.7,
+        "magnitude": 10.75
+      },
+      {
+        "tSec": 1.5,
+        "magnitude": 7.26
+      },
+      {
+        "tSec": 3.1,
+        "magnitude": 31.46
+      },
+      {
+        "tSec": 3.75,
+        "magnitude": 17.04
+      },
+      {
+        "tSec": 5.75,
+        "magnitude": 6.75
+      },
+      {
+        "tSec": 6.8,
+        "magnitude": 13.78
+      },
+      {
+        "tSec": 7.65,
+        "magnitude": 9.0
+      },
+      {
+        "tSec": 8.6,
+        "magnitude": 17.2
+      },
+      {
+        "tSec": 9.2,
+        "magnitude": 7.05
+      },
+      {
+        "tSec": 11.1,
+        "magnitude": 13.0
+      },
+      {
+        "tSec": 11.95,
+        "magnitude": 24.0
+      }
+    ]
+  },
+  "stages": [
+    {
+      "id": "empty",
+      "index": 0,
+      "start": 0.0,
+      "end": 0.75,
+      "gesture": "open-hand sweep along the ceiling/wall junction, fingers spread, entering from the top of frame",
+      "gestureWindow": [
+        0.0,
+        0.75
+      ],
+      "objectsAdded": [],
+      "lighting": "daylight",
+      "measuredLuminance": 154.6,
+      "notes": "Establishes the bare shell and the visual contract that the hand controls reality. No architecture is added yet.",
+      "confidence": "high"
+    },
+    {
+      "id": "upper-cabinets",
+      "index": 1,
+      "start": 0.75,
+      "end": 1.5,
+      "gesture": "pinch at the right edge of the new cabinet block, dragging right to extend the run",
+      "gestureWindow": [
+        0.8,
+        1.45
+      ],
+      "objectsAdded": [
+        "upper wall cabinetry (planar taupe slab fronts, handleless)"
+      ],
+      "lighting": "daylight",
+      "measuredLuminance": 140.7,
+      "notes": "Cabinet block appears between t=0.70 and t=0.80 (measured spike at 0.70). The pinch-drag then visibly lengthens the run rightward rather than re-generating it.",
+      "confidence": "high"
+    },
+    {
+      "id": "backsplash",
+      "index": 2,
+      "start": 1.5,
+      "end": 3.1,
+      "gesture": "horizontal sweep left-to-right beneath the upper cabinets",
+      "gestureWindow": [
+        1.55,
+        2.6
+      ],
+      "objectsAdded": [
+        "pale veined marble backsplash slab"
+      ],
+      "lighting": "daylight",
+      "measuredLuminance": 138.6,
+      "notes": "Long architectural surface introduced by a sweep rather than a pinch - the gesture grammar distinguishes discrete objects (pinch) from continuous surfaces (sweep).",
+      "confidence": "high"
+    },
+    {
+      "id": "cabinet-wall",
+      "index": 3,
+      "start": 3.1,
+      "end": 3.75,
+      "gesture": "two-sided placement - hand indicates each flank in turn",
+      "gestureWindow": [
+        3.1,
+        3.7
+      ],
+      "objectsAdded": [
+        "tall glass-front display cabinets at both flanks",
+        "lower base cabinetry",
+        "worktop"
+      ],
+      "lighting": "daylight",
+      "measuredLuminance": 96.8,
+      "notes": "Largest single frame-difference of the whole clip (31.46). Luminance drops 137 -> 97 because dark display joinery enters the frame - a CONTENT change, not a lighting change.",
+      "confidence": "high"
+    },
+    {
+      "id": "counter-details",
+      "index": 4,
+      "start": 3.75,
+      "end": 5.75,
+      "gesture": "repeated small pinches along the worktop",
+      "gestureWindow": [
+        3.8,
+        5.6
+      ],
+      "objectsAdded": [
+        "sink and slim dark tap",
+        "cooktop",
+        "restrained worktop accessories",
+        "potted greenery"
+      ],
+      "lighting": "daylight",
+      "measuredLuminance": 115.0,
+      "notes": "The longest stage. Several small objects rather than one large one; each pinch reads as one object.",
+      "confidence": "high"
+    },
+    {
+      "id": "suspended-feature",
+      "index": 5,
+      "start": 5.75,
+      "end": 6.9,
+      "gesture": "pinch at the ceiling, drawing a horizontal element downward into place",
+      "gestureWindow": [
+        5.75,
+        6.85
+      ],
+      "objectsAdded": [
+        "slim suspended display shelf / rail on thin dark ceiling supports"
+      ],
+      "lighting": "daylight",
+      "measuredLuminance": 113.0,
+      "notes": "Important beat: adds a mid-height horizontal layer between the cabinet wall and the (still empty) foreground, increasing vertical layering before the island lands.",
+      "confidence": "high"
+    },
+    {
+      "id": "island",
+      "index": 6,
+      "start": 6.9,
+      "end": 7.7,
+      "gesture": "two-finger placement in the foreground, then drag right to extend the mass",
+      "gestureWindow": [
+        6.85,
+        7.6
+      ],
+      "objectsAdded": [
+        "central island with fluted/ribbed base and pale stone worktop"
+      ],
+      "lighting": "daylight",
+      "measuredLuminance": 108.7,
+      "notes": "Island appears between t=6.80 and t=6.90. The foreground is deliberately kept empty until this beat so the island delivers a large depth/parallax jump.",
+      "confidence": "high"
+    },
+    {
+      "id": "stools",
+      "index": 7,
+      "start": 7.7,
+      "end": 8.7,
+      "gesture": "successive pinch-placements along the island face, one per seat",
+      "gestureWindow": [
+        7.7,
+        8.6
+      ],
+      "objectsAdded": [
+        "upholstered counter stools on slim bronze legs"
+      ],
+      "lighting": "daylight",
+      "measuredLuminance": 95.0,
+      "notes": "First stool lands at t=7.70; the set completes by t=8.60 (measured spike 17.2). Seating always follows the island - never the reverse.",
+      "confidence": "high"
+    },
+    {
+      "id": "decor",
+      "index": 8,
+      "start": 8.7,
+      "end": 10.15,
+      "gesture": "final delicate pinch-placements at worktop and island centre, then hands exit frame",
+      "gestureWindow": [
+        8.7,
+        9.95
+      ],
+      "objectsAdded": [
+        "sculptural vase with branches",
+        "low bowl",
+        "final styling objects"
+      ],
+      "lighting": "daylight",
+      "measuredLuminance": 101.8,
+      "notes": "Last furnishing beat. Hands leave frame at approximately t=9.95 and never return.",
+      "confidence": "high"
+    },
+    {
+      "id": "daylight-hold",
+      "index": 9,
+      "start": 10.15,
+      "end": 11.15,
+      "gesture": "none - hands absent",
+      "gestureWindow": null,
+      "objectsAdded": [],
+      "lighting": "daylight-dimming",
+      "measuredLuminance": 90.0,
+      "notes": "Completed room holds, then the exposure begins stepping down. Measured as DISCRETE steps (dL of -5.26 at 10.15, -3.94 at 10.55, -4.37 at 10.65) rather than a smooth ramp - consistent with cross-dissolves between graded states, which is what the compositor reproduces.",
+      "confidence": "high"
+    },
+    {
+      "id": "dusk",
+      "index": 10,
+      "start": 11.15,
+      "end": 11.95,
+      "gesture": "none - hands absent",
+      "gestureWindow": null,
+      "objectsAdded": [],
+      "lighting": "dusk",
+      "measuredLuminance": 65.5,
+      "notes": "Darkest state of the clip (measured floor L=65.3 at t=11.15, flat until 11.60). The first warm glow appears inside the display cabinets at t=11.65 (dL +2.92) as a pre-beat before the main reveal.",
+      "confidence": "high"
+    },
+    {
+      "id": "warm-reveal",
+      "index": 11,
+      "start": 11.95,
+      "end": 13.37,
+      "gesture": "none - hands absent",
+      "gestureWindow": null,
+      "objectsAdded": [],
+      "lighting": "warm-evening",
+      "measuredLuminance": 121.8,
+      "notes": "The payoff. Sharpest positive luminance change in the clip: +6.26 at t=11.95 then +26.30 at t=12.00 (L 69 -> 101.6) as integrated lighting switches on, followed by a slow warm bloom to L=121.8 by t=13.25 and a final hold. Ends brighter AND warmer than the dusk state but with far deeper shadow contrast than the flat daylight opening.",
+      "confidence": "high"
+    }
+  ],
+  "lighting": {
+    "measurementRegion": "content rows y=120..700, mean luminance per frame",
+    "keyframes": [
+      {
+        "tSec": 0.0,
+        "luminance": 154.6,
+        "state": "flat daylight"
+      },
+      {
+        "tSec": 3.25,
+        "luminance": 96.8,
+        "state": "daylight (darker joinery enters frame)"
+      },
+      {
+        "tSec": 10.1,
+        "luminance": 99.0,
+        "state": "finished daylight hold"
+      },
+      {
+        "tSec": 10.15,
+        "luminance": 93.8,
+        "state": "dim step 1"
+      },
+      {
+        "tSec": 10.55,
+        "luminance": 83.0,
+        "state": "dim step 2"
+      },
+      {
+        "tSec": 10.65,
+        "luminance": 78.5,
+        "state": "dim step 3"
+      },
+      {
+        "tSec": 11.15,
+        "luminance": 65.4,
+        "state": "dusk floor"
+      },
+      {
+        "tSec": 11.65,
+        "luminance": 68.6,
+        "state": "display-cabinet glow ignites"
+      },
+      {
+        "tSec": 11.95,
+        "luminance": 75.3,
+        "state": "lighting ramp begins"
+      },
+      {
+        "tSec": 12.0,
+        "luminance": 101.6,
+        "state": "full warm switch-on"
+      },
+      {
+        "tSec": 13.25,
+        "luminance": 121.8,
+        "state": "warm bloom settled, final hold"
+      }
+    ],
+    "finalColourTemperatureK": "2700-3000 (warm interior) coexisting with a cooler residual exterior source",
+    "finalFixtures": [
+      "display-cabinet interior glow",
+      "under-cabinet task strip",
+      "suspended-shelf accent",
+      "ceiling pendants over the island"
+    ]
+  },
+  "gestureGrammar": {
+    "$comment": "Reverse-engineered semantic mapping between hand action and transformation. This is the part of the reference that is reproduced; the room it is applied to is this house's own kitchen.",
+    "rules": [
+      {
+        "gesture": "open-hand sweep along a junction",
+        "meaning": "establish / prime the surface",
+        "usedAtStages": [
+          "empty"
+        ]
+      },
+      {
+        "gesture": "pinch and drag",
+        "meaning": "introduce a discrete object, then extend its run",
+        "usedAtStages": [
+          "upper-cabinets",
+          "island"
+        ]
+      },
+      {
+        "gesture": "horizontal sweep",
+        "meaning": "reveal a continuous architectural surface",
+        "usedAtStages": [
+          "backsplash"
+        ]
+      },
+      {
+        "gesture": "two-sided placement",
+        "meaning": "introduce symmetrical flanking volumes",
+        "usedAtStages": [
+          "cabinet-wall"
+        ]
+      },
+      {
+        "gesture": "repeated small pinch",
+        "meaning": "add one small object per pinch",
+        "usedAtStages": [
+          "counter-details",
+          "stools",
+          "decor"
+        ]
+      },
+      {
+        "gesture": "pinch from ceiling downward",
+        "meaning": "introduce a suspended element",
+        "usedAtStages": [
+          "suspended-feature"
+        ]
+      },
+      {
+        "gesture": "absent",
+        "meaning": "the room is finished; only light may change",
+        "usedAtStages": [
+          "daylight-hold",
+          "dusk",
+          "warm-reveal"
+        ]
+      }
+    ],
+    "synchronisation": "The object appears within the same perceptual instant as the gesture peak - measured gap between gesture arrival and object appearance is at most one 50 ms analysis sample at every stage boundary. There is never a visible delay between hand action and result.",
+    "handContinuity": "Hands enter from a frame edge, stay close to the lens (large in frame, shallow depth), act once, and exit. They never occlude and re-reveal a region in a way that would hide a geometry change."
+  },
+  "invariants": {
+    "$comment": "Properties the recreation must preserve. Violating any of these is a failed reproduction.",
+    "rules": [
+      "Camera position, orientation and lens are identical in every frame.",
+      "Once an object appears it never moves, rescales or restyles for the rest of the clip.",
+      "Architecture (wall planes, ceiling height, floor, openings) never changes at any stage.",
+      "Object introduction is back-to-front: wall surfaces, then wall joinery, then suspended element, then foreground island, then seating, then styling.",
+      "Seating is always introduced after the surface it belongs to.",
+      "Lighting only changes after all objects are placed and the hands have left.",
+      "The final state is warmer and higher-contrast than the opening daylight state."
+    ]
+  },
+  "appliedToThisHouse": {
+    "$comment": "How the reference grammar maps onto real geometry. See src/data/kitchenTransformation.ts for the executable version.",
+    "roomId": "kitchen",
+    "cabinetWall": "kitchen_w (x=0, z=4.0..7.3) - the only solid wall in this kitchen; the south wall carries the terrace opening and the north/east edges are open thresholds to living and dining.",
+    "adaptations": [
+      {
+        "referenceElement": "suspended display shelf spanning the full kitchen width",
+        "constraint": "This kitchen is 3.1 m x 3.3 m with a 2.7 m ceiling, an open east threshold to dining, and a real window (window_kitchen_1, z 5.10-6.10 at y 1.0-2.1) in the middle of the only solid wall. A full-span ceiling-hung shelf would foul the dining threshold head height, and a wall-mounted one at the reference's height would cross the window.",
+        "adaptation": "A slim ceiling-hung shelf on thin dark rods, set just in front of the worktop at 1.95 m so a visitor still walks under it, clear of both the window and the bridge cabinets. The beat -- a hand introducing a suspended horizontal feature that adds a mid-height layer -- is preserved exactly; only its position changes.",
+        "ceilingModified": false
+      },
+      {
+        "referenceElement": "continuous upper cabinetry above the worktop",
+        "constraint": "window_kitchen_1 occupies the middle of the run at exactly the height conventional upper cabinets would sit.",
+        "adaptation": "The upper run becomes a bridging cabinet ABOVE the window head (2.15-2.60 m), with full-height stone splashback returns flanking the window instead of one slab across it. The window stays completely uncovered and the elevation keeps an unbroken horizontal band at the top, which reads well in portrait.",
+        "ceilingModified": false
+      },
+      {
+        "referenceElement": "four counter stools",
+        "constraint": "Island length is set by this kitchen's real depth, not the reference's.",
+        "adaptation": "Four stools, derived from the authored 2.10 m island length at a 0.52 m seat pitch and validated against the room polygon -- the count matches the reference only because the measurement happened to agree.",
+        "ceilingModified": false
+      }
+    ],
+    "realArchitectureRespected": [
+      "window_kitchen_1 is never covered by joinery (asserted by tests/unit/transformation.test.ts).",
+      "Ceiling height, wall planes, floor and every opening are untouched: the stage renders are the same scene graph as the walkable explorer.",
+      "The 0.99 m walkway between worktop front (x=0.63) and island back (x=1.62) exceeds the 0.9 m minimum."
+    ]
+  }
+}

@@ -1,0 +1,1612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="A scroll-driven film of Ali&#39;s House, rendered live from the architect&#39;s floor plan.">
+<title>Ali's House</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300&family=Archivo:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a fixed live-3D stage behind a tall scroll track; each chapter holds,
+   then the camera flies to the next. Committed single dark world — this is a
+   night film of a house, and a light variant would read as a different product. */
+:root {
+  --black: #0B0A09;
+  --night: #121110;
+  --raise: #1C1A17;
+  --line: #2E2A25;
+  --text: #EFEAE1;
+  --muted: #9A9183;
+  --brass: #C8A96A;
+  --limestone: #D8CFC2;
+  --protect: #D98C56;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--black);
+  color: var(--text);
+  font-family: Archivo, system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.gut {
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+}
+.mono {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+}
+.serif { font-family: "Cormorant Garamond", Georgia, serif; }
+
+/* ---------- fixed stage ---------- */
+#stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: var(--black);
+}
+#view { display: block; width: 100%; height: 100%; pointer-events: none; }
+body.explore #view { pointer-events: auto; cursor: grab; }
+body.explore #view.walking { cursor: crosshair; }
+#vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom, rgba(11,10,9,0.72) 0%, rgba(11,10,9,0) 26%, rgba(11,10,9,0) 54%, rgba(11,10,9,0.9) 100%);
+}
+/* A little grain so the render reads as film rather than a clean raster. */
+#grain {
+  position: fixed;
+  inset: -40px;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0.22;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  animation: grainShift 0.7s steps(3) infinite;
+}
+@keyframes grainShift {
+  0% { transform: translate(0, 0); }
+  33% { transform: translate(-14px, 9px); }
+  66% { transform: translate(11px, -12px); }
+  100% { transform: translate(0, 0); }
+}
+body.explore #grain { display: none; }
+@media (prefers-reduced-motion: reduce) { #grain { animation: none; } }
+
+#boot {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-content: center;
+  gap: 14px;
+  justify-items: center;
+  background: var(--black);
+  transition: opacity 0.6s ease;
+}
+#boot .ttl { font-size: clamp(34px, 9vw, 64px); font-weight: 300; letter-spacing: 0.02em; }
+#boot .bar { width: 120px; height: 1px; background: var(--line); position: relative; overflow: hidden; }
+#boot .bar i { position: absolute; inset: 0; background: var(--brass); transform: scaleX(0); transform-origin: left; }
+
+/* ---------- nav ---------- */
+#nav {
+  position: fixed;
+  top: env(safe-area-inset-top, 0px);
+  left: 0; right: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-block: 14px;
+  background: linear-gradient(to bottom, rgba(11,10,9,0.86), rgba(11,10,9,0));
+}
+#nav .logo { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+#nav .logo .mk { font-size: 17px; font-weight: 400; letter-spacing: 0.08em; }
+#nav .logo .he { color: var(--muted); font-size: 13px; }
+#nav .spacer { margin-left: auto; }
+#nav .links { display: flex; gap: 18px; }
+#nav .links a { color: var(--muted); text-decoration: none; }
+#nav .links a:hover { color: var(--text); }
+@media (max-width: 760px) { #nav .links { display: none; } }
+.cta {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  padding: 9px 15px;
+  border: 1px solid var(--brass);
+  background: none;
+  color: var(--brass);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cta:hover { background: var(--brass); color: var(--black); }
+.cta.solid { background: var(--brass); color: var(--black); }
+.cta.solid:hover { background: var(--text); border-color: var(--text); }
+button:focus-visible, a:focus-visible, input:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 3px;
+}
+
+/* ---------- chapter captions ---------- */
+#caps { position: fixed; inset: 0; z-index: 20; pointer-events: none; }
+/* An absolutely-positioned child sits against the padding box, so it has to
+   carry the gutter itself or the serif display runs off the left edge. */
+.cap {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: calc(136px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+  opacity: 0;
+  will-change: opacity, transform;
+}
+.cap .inner {
+  max-width: 760px;
+  text-shadow: 0 1px 24px rgba(11, 10, 9, 0.85), 0 1px 3px rgba(11, 10, 9, 0.6);
+}
+.cap .kick { color: var(--brass); margin-bottom: 10px; }
+.cap h2 {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-weight: 300;
+  font-size: clamp(38px, 10vw, 86px);
+  line-height: 0.95;
+  letter-spacing: 0.01em;
+  margin: 0 0 10px;
+  text-wrap: balance;
+}
+.cap h2 .num {
+  display: block;
+  font-size: clamp(56px, 15vw, 130px);
+  line-height: 0.82;
+  color: var(--brass);
+  font-weight: 300;
+}
+.cap p { margin: 0 0 10px; max-width: 46ch; color: var(--text); }
+.cap .data {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  color: var(--muted);
+}
+.cap .data b { color: var(--text); font-weight: 500; }
+.cap .prot { color: var(--protect); }
+@media (max-width: 560px) {
+  .cap { bottom: calc(118px + env(safe-area-inset-bottom, 0px)); }
+  .cap p { font-size: 14px; }
+}
+
+/* ---------- filmstrip ---------- */
+#strip {
+  position: fixed;
+  left: 0; right: 0;
+  bottom: env(safe-area-inset-bottom, 0px);
+  z-index: 30;
+  padding-block: 12px 14px;
+  background: linear-gradient(to top, rgba(11,10,9,0.94), rgba(11,10,9,0));
+}
+#strip .row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+#strip .row::-webkit-scrollbar { display: none; }
+.thumb {
+  flex: 0 0 auto;
+  width: 104px;
+  border: 1px solid var(--line);
+  background: var(--raise) center/cover no-repeat;
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+  aspect-ratio: 16 / 10;
+  opacity: 0.5;
+  transition: opacity 0.25s ease, border-color 0.25s ease;
+}
+.thumb:hover { opacity: 0.85; }
+.thumb[aria-current="true"] { opacity: 1; border-color: var(--brass); }
+.thumb span {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 4px 5px;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: linear-gradient(to top, rgba(11,10,9,0.92), rgba(11,10,9,0));
+  text-align: left;
+}
+@media (max-width: 560px) { .thumb { width: 84px; } }
+#track {
+  position: fixed;
+  left: 0; top: 0;
+  height: 2px;
+  background: var(--brass);
+  z-index: 40;
+  width: 0;
+}
+
+/* ---------- scroll track ---------- */
+#scroller { position: relative; z-index: 10; pointer-events: none; }
+
+/* ---------- closing dossier ---------- */
+#dossier {
+  position: relative;
+  z-index: 15;
+  background: var(--black);
+  border-top: 1px solid var(--line);
+  padding-block: 64px 90px;
+  pointer-events: auto;
+}
+#dossier .wrap { max-width: 1100px; margin: 0 auto; }
+#dossier h3 {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-weight: 300;
+  font-size: clamp(30px, 6vw, 52px);
+  margin: 0 0 6px;
+  text-wrap: balance;
+}
+#dossier .lede { color: var(--muted); max-width: 62ch; margin: 0 0 34px; }
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  margin-bottom: 34px;
+}
+.stat { background: var(--black); padding: 16px 14px; }
+.stat .v {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 40px;
+  line-height: 1;
+  font-weight: 300;
+  color: var(--brass);
+  font-variant-numeric: tabular-nums;
+}
+.stat .k { color: var(--muted); margin-top: 6px; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 26px; }
+.col h4 {
+  margin: 0 0 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-weight: 500;
+}
+.col ul { margin: 0; padding-left: 16px; }
+.col li { margin-bottom: 6px; }
+.col li b { font-weight: 500; }
+.note { color: var(--muted); font-size: 13px; margin-top: 30px; max-width: 70ch; }
+.note b { color: var(--text); font-weight: 500; }
+
+/* ---------- explore mode ---------- */
+body.explore { overflow: hidden; }
+body.explore #caps, body.explore #strip, body.explore #vignette, body.explore #track { display: none; }
+#explorer { position: fixed; inset: 0; z-index: 25; display: none; pointer-events: none; }
+body.explore #explorer { display: block; }
+#explorer .panel {
+  position: absolute;
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  left: max(16px, env(safe-area-inset-left, 0px));
+  width: 232px;
+  max-height: calc(100% - 150px);
+  overflow: auto;
+  background: rgba(18,17,16,0.93);
+  border: 1px solid var(--line);
+  padding: 12px;
+  pointer-events: auto;
+}
+#explorer .panel.right {
+  left: auto;
+  right: max(16px, env(safe-area-inset-right, 0px));
+  width: 266px;
+}
+@media (max-width: 900px) {
+  #explorer .panel { width: 190px; font-size: 13px; }
+  #explorer .panel.right { display: none; }
+}
+@media (max-width: 560px) {
+  #explorer .panel { width: calc(100% - 32px); max-height: 38%; }
+}
+#explorer h5 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+#explorer h5 .n { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--brass); }
+.rowbtn {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  width: 100%;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 6px 2px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.rowbtn:hover { background: var(--raise); }
+.rowbtn[aria-current="true"] { box-shadow: inset 3px 0 0 var(--brass); background: var(--raise); }
+.rowbtn .he { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; padding-left: 6px; }
+.rowbtn .sw { width: 10px; height: 10px; flex: 0 0 auto; border: 1px solid var(--line); }
+.rowbtn .ret {
+  margin-left: auto;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  padding-left: 6px;
+}
+.rowbtn .star { color: var(--brass); }
+.ebar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: auto;
+  padding-inline: 12px;
+}
+.seg { display: inline-flex; border: 1px solid var(--line); background: rgba(18,17,16,0.93); }
+.seg button {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 8px 12px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--brass); color: var(--black); }
+.slide {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  background: rgba(18,17,16,0.93);
+}
+.slide label { color: var(--muted); }
+input[type="range"] { width: 96px; accent-color: var(--brass); }
+.ro {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 4.2em;
+}
+.detail { border-left: 2px solid var(--brass); padding-left: 10px; margin-top: 10px; }
+.detail .nm { font-size: 15px; }
+.detail .meta {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--muted);
+  margin: 4px 0 9px;
+  font-variant-numeric: tabular-nums;
+}
+.detail .acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.detail .acts a, .detail .acts button {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+}
+.detail .acts a:hover, .detail .acts button:hover { border-color: var(--brass); color: var(--brass); }
+.empty { color: var(--muted); font-size: 12.5px; font-style: italic; }
+#ehud {
+  position: absolute;
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgba(18,17,16,0.8);
+  padding: 6px 11px;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div id="stage"><canvas id="view"></canvas></div>
+<div id="grain"></div>
+<div id="vignette"></div>
+
+<nav id="nav" class="gut">
+  <div class="logo">
+    <span class="mk serif">Ali&rsquo;s House</span>
+    <span class="he" dir="rtl">בית עלי</span>
+  </div>
+  <span class="spacer"></span>
+  <div class="links mono" id="navLinks"></div>
+  <button type="button" class="cta solid" id="exploreBtn">Explore in 3D</button>
+</nav>
+
+<div id="track"></div>
+<div id="caps"></div>
+
+<div id="strip" class="gut">
+  <div class="row" id="stripRow"></div>
+</div>
+
+<div id="scroller"></div>
+
+<section id="dossier" class="gut">
+  <div class="wrap">
+    <h3>Everything above is the model, not a render</h3>
+    <p class="lede">
+      The film you just scrolled is a live 3D scene rebuilt from the architect&rsquo;s floor-plan photograph
+      and a site walkthrough. Nothing is a photograph, and nothing is traced over one.
+    </p>
+    <div class="stats" id="stats"></div>
+    <div class="cols">
+      <div class="col">
+        <h4 class="mono">Measured from the plan</h4>
+        <ul id="colHigh"></ul>
+      </div>
+      <div class="col">
+        <h4 class="mono">Inferred from the walkthrough</h4>
+        <ul id="colLow"></ul>
+      </div>
+      <div class="col">
+        <h4 class="mono">Still open</h4>
+        <ul id="colQ"></ul>
+      </div>
+    </div>
+    <p class="note">
+      <b>The MAMAD</b> (<span dir="rtl">מ.מ.ד</span>) is Israel&rsquo;s mandatory reinforced protected room. Its single
+      door and single window are flagged protected in the model and are never altered by a material scheme —
+      a restyle that moved them would describe a house that could not be built.
+    </p>
+  </div>
+</section>
+
+<div id="explorer">
+  <div class="panel" id="roomPanel"></div>
+  <div class="panel right" id="sidePanel"></div>
+  <div id="ehud">Dollhouse</div>
+  <div class="ebar">
+    <span class="seg">
+      <button type="button" id="mDoll" aria-pressed="true">Dollhouse</button>
+      <button type="button" id="mWalk" aria-pressed="false">Walk</button>
+    </span>
+    <span class="slide">
+      <label class="mono" for="timeRange">Sun</label>
+      <input type="range" id="timeRange" min="5" max="22" step="0.25" value="18">
+      <span class="ro" id="timeOut">18:00</span>
+    </span>
+    <button type="button" class="cta" id="backBtn">Back to film</button>
+  </div>
+</div>
+
+<div id="boot">
+  <div class="ttl serif">Ali&rsquo;s House</div>
+  <div class="mono" style="color:var(--muted)">Building the model</div>
+  <div class="bar"><i id="bootBar"></i></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three/0.160.0/three.min.js"></script>
+<script>
+"use strict";
+const DATA = {"consts":{"WALL_THICKNESS_M":0.2,"CEILING_HEIGHT_M":2.7,"PARAPET_HEIGHT_M":1.1,"DOOR_HEIGHT_M":2.1,"EYE_HEIGHT_M":1.62,"PLAYER_RADIUS_M":0.28,"ENTRY_ROOM_ID":"stair_landing"},"house":{"rooms":[{"id":"stair_landing","nameEn":"Exterior Approach & Stair","nameHe":null,"function":"Exterior circulation from the street up to the entry landing.","dimensions":{"widthM":2.07,"depthM":3.18},"dimensionSource":"assumption — not dimensioned on plan; derived from video framing only","confidence":"low","floorPolygon":[{"x":4.9,"z":-5.5},{"x":6.97,"z":-5.5},{"x":6.97,"z":-2.32},{"x":4.9,"z":-2.32}],"walls":[{"id":"stair_n","start":{"x":4.9,"z":-5.5},"end":{"x":6.97,"z":-5.5},"exterior":true},{"id":"stair_e","start":{"x":6.97,"z":-5.5},"end":{"x":6.97,"z":-2.32},"exterior":true},{"id":"stair_w","start":{"x":4.9,"z":-2.32},"end":{"x":4.9,"z":-5.5},"exterior":true}],"ceilingHeightM":2.7,"wallHeightOverrideM":1.1,"floorMaterialId":"exterior-stone","wallMaterialId":"exterior-render","isWetRoom":false,"isProtected":false,"isExterior":true,"connectedRoomIds":["balcony_service"],"visibleFeatures":["textured render exterior wall","stone/tile steps","neighborhood + hillside view"],"unresolvedQuestions":["Exact stair rise/run and total flight length are not legible in either source."],"cameraSpawn":{"x":5.93,"z":-3.9},"cameraSpawnYaw":3.141592653589793,"hotspotLabel":"Exterior Approach"},{"id":"balcony_service","nameEn":"Balcony / Service Landing","nameHe":"מרפסת","function":"Small exterior balcony or service area beside the stair; exact use configurable.","dimensions":{"widthM":2.07,"depthM":2.32},"dimensionSource":"plan labels 207 / 232 (cm) near the stair","confidence":"high","floorPolygon":[{"x":4.9,"z":-2.32},{"x":6.97,"z":-2.32},{"x":6.97,"z":0},{"x":4.9,"z":0}],"walls":[{"id":"balc_n","start":{"x":4.9,"z":-2.32},"end":{"x":6.97,"z":-2.32},"exterior":true},{"id":"balc_e","start":{"x":6.97,"z":-2.32},"end":{"x":6.97,"z":0},"exterior":true},{"id":"balc_w","start":{"x":4.9,"z":0},"end":{"x":4.9,"z":-2.32},"exterior":true}],"ceilingHeightM":2.7,"wallHeightOverrideM":1.1,"floorMaterialId":"exterior-stone","wallMaterialId":"exterior-render","isWetRoom":false,"isProtected":false,"isExterior":true,"connectedRoomIds":["stair_landing","entry_hall"],"visibleFeatures":["adjoins exterior stair","compact footprint"],"unresolvedQuestions":["Leisure vs. laundry/service use is not confirmed; kept configurable."],"cameraSpawn":{"x":5.93,"z":-1.16},"cameraSpawnYaw":3.141592653589793,"hotspotLabel":"Balcony / Landing"},{"id":"entry_hall","nameEn":"Entry & Central Hall","nameHe":null,"function":"Arrival circulation linking the exterior, social zone, MAMAD, and private wing.","dimensions":{"widthM":2.4,"depthM":3},"dimensionSource":"assumption — circulation footprint inferred from adjacency","confidence":"low","floorPolygon":[{"x":4.9,"z":0},{"x":7.3,"z":0},{"x":7.3,"z":3},{"x":4.9,"z":3}],"walls":[{"id":"entry_n","start":{"x":4.9,"z":0},"end":{"x":7.3,"z":0},"exterior":true},{"id":"entry_s","start":{"x":7.3,"z":3},"end":{"x":4.9,"z":3},"exterior":false},{"id":"entry_w","start":{"x":4.9,"z":3},"end":{"x":4.9,"z":0},"exterior":false}],"ceilingHeightM":2.7,"floorMaterialId":"stone-entry","wallMaterialId":"wall-warm-plaster","isWetRoom":false,"isProtected":false,"isExterior":false,"connectedRoomIds":["balcony_service","living","mamad","hall_south"],"visibleFeatures":["threshold into open social zone","wet-room doorway visible in walkthrough 00:06-00:12"],"unresolvedQuestions":[],"cameraSpawn":{"x":6.1,"z":1.5},"cameraSpawnYaw":1.5707963267948966,"hotspotLabel":"Entry Hall"},{"id":"living","nameEn":"Living Room","nameHe":"סלון","function":"Principal lounge, open to kitchen and dining.","dimensions":{"widthM":4.67,"depthM":3.96},"dimensionSource":"plan labels 467 / 396 (cm)","confidence":"high","floorPolygon":[{"x":0,"z":1.3},{"x":1.3,"z":0},{"x":4.9,"z":0},{"x":4.9,"z":4},{"x":0,"z":4}],"walls":[{"id":"living_chamfer","start":{"x":0,"z":1.3},"end":{"x":1.3,"z":0},"exterior":true},{"id":"living_n","start":{"x":1.3,"z":0},"end":{"x":4.9,"z":0},"exterior":true},{"id":"living_e_lower","start":{"x":4.9,"z":3},"end":{"x":4.9,"z":4},"exterior":false},{"id":"living_w","start":{"x":0,"z":4},"end":{"x":0,"z":1.3},"exterior":true}],"ceilingHeightM":2.7,"floorMaterialId":"limestone-social","wallMaterialId":"wall-warm-plaster","isWetRoom":false,"isProtected":false,"isExterior":false,"connectedRoomIds":["entry_hall","kitchen","dining"],"visibleFeatures":["curved/angled exterior facade corner","multiple tall window openings","sofa group drawn on plan","structural column visible in walkthrough 00:12-00:20"],"unresolvedQuestions":["Exact facade curve radius is not legible; modeled as a configurable ~1.3 m chamfer."],"cameraSpawn":{"x":2.5,"z":3},"cameraSpawnYaw":1.5707963267948966,"hotspotLabel":"Living Room"},{"id":"kitchen","nameEn":"Kitchen","nameHe":"מטבח","function":"Open kitchen attached to the social space.","dimensions":{"widthM":3.1,"depthM":3.22},"dimensionSource":"plan labels 322 / 300 (cm)","confidence":"high","floorPolygon":[{"x":0,"z":4},{"x":3.1,"z":4},{"x":3.1,"z":7.3},{"x":0,"z":7.3}],"walls":[{"id":"kitchen_s","start":{"x":3.1,"z":7.3},"end":{"x":0,"z":7.3},"exterior":true},{"id":"kitchen_w","start":{"x":0,"z":7.3},"end":{"x":0,"z":4},"exterior":true}],"ceilingHeightM":2.7,"floorMaterialId":"limestone-social","wallMaterialId":"wall-warm-plaster","isWetRoom":false,"isProtected":false,"isExterior":false,"connectedRoomIds":["living","dining","terrace_social"],"visibleFeatures":["L-shaped counter outline","double-sink symbol"],"unresolvedQuestions":["Island feasibility not confirmed; drawn L-shaped logic preserved by default."],"cameraSpawn":{"x":1.55,"z":5.65},"cameraSpawnYaw":1.5707963267948966,"hotspotLabel":"Kitchen"},{"id":"dining","nameEn":"Dining Area","nameHe":null,"function":"Six-seat dining position, circulation hinge to the private wing.","dimensions":{"widthM":1.8,"depthM":3.3},"dimensionSource":"plan labels 232 / 300 (cm) near the oval table","confidence":"medium","floorPolygon":[{"x":3.1,"z":4},{"x":4.9,"z":4},{"x":4.9,"z":7.3},{"x":3.1,"z":7.3}],"walls":[{"id":"dining_e","start":{"x":4.9,"z":4},"end":{"x":4.9,"z":7.3},"exterior":true},{"id":"dining_s","start":{"x":4.9,"z":7.3},"end":{"x":3.1,"z":7.3},"exterior":true}],"ceilingHeightM":2.7,"floorMaterialId":"limestone-social","wallMaterialId":"wall-warm-plaster","isWetRoom":false,"isProtected":false,"isExterior":false,"connectedRoomIds":["living","kitchen","terrace_social"],"visibleFeatures":["oval/round 6-seat table drawn on plan"],"unresolvedQuestions":[],"cameraSpawn":{"x":4,"z":5.65},"cameraSpawnYaw":3.141592653589793,"hotspotLabel":"Dining"},{"id":"terrace_social","nameEn":"Covered Terrace","nameHe":"מרפסת","function":"Covered exterior space opening off the social zone.","dimensions":{"widthM":4.9,"depthM":2.2},"dimensionSource":"assumption — inferred from walkthrough 00:20-00:25","confidence":"low","floorPolygon":[{"x":0,"z":7.3},{"x":4.9,"z":7.3},{"x":4.9,"z":9.5},{"x":0,"z":9.5}],"walls":[{"id":"terrace_e","start":{"x":4.9,"z":7.3},"end":{"x":4.9,"z":9.5},"exterior":true},{"id":"terrace_s","start":{"x":4.9,"z":9.5},"end":{"x":0,"z":9.5},"exterior":true},{"id":"terrace_w","start":{"x":0,"z":9.5},"end":{"x":0,"z":7.3},"exterior":true}],"ceilingHeightM":2.7,"wallHeightOverrideM":1.1,"floorMaterialId":"exterior-stone","wallMaterialId":"exterior-render","isWetRoom":false,"isProtected":false,"isExterior":true,"hasCeiling":true,"connectedRoomIds":["kitchen","dining"],"visibleFeatures":["covered recess/loggia","parapet-height openings","neighborhood view"],"unresolvedQuestions":["Exact depth and parapet height are not confirmed."],"cameraSpawn":{"x":2.45,"z":8.4},"cameraSpawnYaw":0,"hotspotLabel":"Terrace"},{"id":"mamad","nameEn":"MAMAD (Protected Room)","nameHe":"מ.מ.ד","function":"Israeli protected room; usable as bedroom, office, or flexible guest room without altering protected elements.","dimensions":{"widthM":3.5,"depthM":3},"dimensionSource":"plan labels 350 / 300 (cm); reinforced perimeter indicated on plan","confidence":"high","floorPolygon":[{"x":7.3,"z":0},{"x":10.8,"z":0},{"x":10.8,"z":3},{"x":7.3,"z":3}],"walls":[{"id":"mamad_n","start":{"x":7.3,"z":0},"end":{"x":10.8,"z":0},"exterior":true},{"id":"mamad_e","start":{"x":10.8,"z":0},"end":{"x":10.8,"z":3},"exterior":false},{"id":"mamad_s","start":{"x":10.8,"z":3},"end":{"x":7.3,"z":3},"exterior":false},{"id":"mamad_w","start":{"x":7.3,"z":3},"end":{"x":7.3,"z":0},"exterior":false}],"ceilingHeightM":2.7,"floorMaterialId":"oak-bedroom","wallMaterialId":"wall-warm-plaster","isWetRoom":false,"isProtected":true,"isExterior":false,"connectedRoomIds":["entry_hall"],"visibleFeatures":["single protected door to entry hall only","single protected window on exterior wall"],"unresolvedQuestions":[],"cameraSpawn":{"x":9.05,"z":1.5},"cameraSpawnYaw":0,"hotspotLabel":"MAMAD"},{"id":"twin_bed","nameEn":"Twin / Children's Bedroom","nameHe":"ח. שינה","function":"Children's, siblings', or flexible guest bedroom.","dimensions":{"widthM":4.39,"depthM":3.5},"dimensionSource":"plan labels 439 / 350 (cm)","confidence":"high","floorPolygon":[{"x":10.8,"z":0},{"x":15.19,"z":0},{"x":15.19,"z":3.5},{"x":10.8,"z":3.5}],"walls":[{"id":"twin_n","start":{"x":10.8,"z":0},"end":{"x":15.19,"z":0},"exterior":true},{"id":"twin_e","start":{"x":15.19,"z":0},"end":{"x":15.19,"z":3.5},"exterior":true},{"id":"twin_s","start":{"x":15.19,"z":3.5},"end":{"x":11.6,"z":3.5},"exterior":false}],"ceilingHeightM":2.7,"floorMaterialId":"oak-bedroom","wallMaterialId":"wall-warm-plaster","isWetRoom":false,"isProtected":false,"isExterior":false,"connectedRoomIds":["hall_south"],"visibleFeatures":["two single beds drawn on plan","view-facing window in walkthrough 00:42-00:47"],"unresolvedQuestions":[],"cameraSpawn":{"x":13,"z":1.75},"cameraSpawnYaw":-1.5707963267948966,"hotspotLabel":"Twin Bedroom"},{"id":"hall_south","nameEn":"Private Corridor","nameHe":null,"function":"Circulation connecting the bedrooms and wet rooms.","dimensions":{"widthM":5.9,"depthM":6.85},"dimensionSource":"assumption — corridor footprint inferred from adjacency","confidence":"low","floorPolygon":[{"x":4.9,"z":3},{"x":10.8,"z":3},{"x":10.8,"z":3.7},{"x":11.9,"z":3.7},{"x":11.9,"z":9.85},{"x":10.8,"z":9.85},{"x":10.8,"z":4.3},{"x":4.9,"z":4.3}],"walls":[{"id":"hs_twin","start":{"x":10.8,"z":3},"end":{"x":10.8,"z":3.7},"exterior":false},{"id":"hs_link_top","start":{"x":11.6,"z":3.7},"end":{"x":11.9,"z":3.7},"exterior":true},{"id":"hs_link_e_void","start":{"x":11.9,"z":3.7},"end":{"x":11.9,"z":6.35},"exterior":true},{"id":"hs_link_e_parents","start":{"x":11.9,"z":6.35},"end":{"x":11.9,"z":9.85},"exterior":false},{"id":"hs_link_bottom","start":{"x":11.9,"z":9.85},"end":{"x":10.8,"z":9.85},"exterior":true},{"id":"hs_link_w_void","start":{"x":10.8,"z":9.85},"end":{"x":10.8,"z":5.2},"exterior":true},{"id":"hs_link_w_wc","start":{"x":10.8,"z":5.2},"end":{"x":10.8,"z":4.3},"exterior":false},{"id":"hs_south","start":{"x":10.8,"z":4.3},"end":{"x":4.9,"z":4.3},"exterior":false}],"ceilingHeightM":2.7,"floorMaterialId":"stone-entry","wallMaterialId":"wall-warm-plaster","isWetRoom":false,"isProtected":false,"isExterior":false,"connectedRoomIds":["entry_hall","twin_bed","bathroom_main","bathroom_ensuite","wc_guest","parents_bed"],"visibleFeatures":["junction of unfinished door openings visible in walkthrough 00:33-00:38"],"unresolvedQuestions":[],"cameraSpawn":{"x":6.1,"z":3.5},"cameraSpawnYaw":-1.5707963267948966,"hotspotLabel":"Private Corridor"},{"id":"bathroom_main","nameEn":"Main Bathroom","nameHe":"מקלחת","function":"Shared full bathroom.","dimensions":{"widthM":1.5,"depthM":2.35},"dimensionSource":"plan label ~2.35 x 1.50 (m) per evidence brief interpretation","confidence":"medium-high","floorPolygon":[{"x":7.3,"z":4.3},{"x":8.8,"z":4.3},{"x":8.8,"z":6.65},{"x":7.3,"z":6.65}],"walls":[{"id":"bathmain_e","start":{"x":8.8,"z":4.3},"end":{"x":8.8,"z":6.65},"exterior":false},{"id":"bathmain_s","start":{"x":8.8,"z":6.65},"end":{"x":7.3,"z":6.65},"exterior":true},{"id":"bathmain_w","start":{"x":7.3,"z":6.65},"end":{"x":7.3,"z":4.3},"exterior":true}],"ceilingHeightM":2.7,"floorMaterialId":"stone-wet","wallMaterialId":"stone-wet","isWetRoom":true,"isProtected":false,"isExterior":false,"connectedRoomIds":["hall_south"],"visibleFeatures":["toilet, basin, shower/bath fixtures drawn on plan","dark waterproofing visible in walkthrough 00:25-00:33"],"unresolvedQuestions":["Exact door swing and fixture layout to be confirmed on site."],"cameraSpawn":{"x":8.05,"z":5.2},"cameraSpawnYaw":0,"hotspotLabel":"Main Bathroom"},{"id":"bathroom_ensuite","nameEn":"Parents' En-suite","nameHe":"מקלחת","function":"Probable en-suite bathroom serving the parents' bedroom.","dimensions":{"widthM":1.1,"depthM":1.5},"dimensionSource":"assumption — adjacency-based; exact dimensions not legible on the supplied plan crop","confidence":"medium","floorPolygon":[{"x":8.8,"z":4.3},{"x":9.9,"z":4.3},{"x":9.9,"z":5.8},{"x":8.8,"z":5.8}],"walls":[{"id":"bathensuite_e","start":{"x":9.9,"z":4.3},"end":{"x":9.9,"z":5.8},"exterior":false},{"id":"bathensuite_s","start":{"x":9.9,"z":5.8},"end":{"x":8.8,"z":5.8},"exterior":true}],"ceilingHeightM":2.7,"floorMaterialId":"stone-wet","wallMaterialId":"stone-wet","isWetRoom":true,"isProtected":false,"isExterior":false,"connectedRoomIds":["hall_south"],"visibleFeatures":["second waterproofed wet area visible in walkthrough 00:47-00:51"],"unresolvedQuestions":["Direct en-suite connection to parents_bed vs. hall access only is not confirmed; modeled with hall access only."],"cameraSpawn":{"x":9.35,"z":4.75},"cameraSpawnYaw":0,"hotspotLabel":"Parents' En-suite"},{"id":"wc_guest","nameEn":"Guest WC","nameHe":null,"function":"Separate powder room.","dimensions":{"widthM":0.9,"depthM":0.9},"dimensionSource":"assumption — adjacency-based; exact dimensions not legible on the supplied plan crop","confidence":"medium","floorPolygon":[{"x":9.9,"z":4.3},{"x":10.8,"z":4.3},{"x":10.8,"z":5.2},{"x":9.9,"z":5.2}],"walls":[{"id":"wcguest_s","start":{"x":10.8,"z":5.2},"end":{"x":9.9,"z":5.2},"exterior":true}],"ceilingHeightM":2.7,"floorMaterialId":"stone-wet","wallMaterialId":"stone-wet","isWetRoom":true,"isProtected":false,"isExterior":false,"connectedRoomIds":["hall_south"],"visibleFeatures":["small WC compartment opens near social circulation"],"unresolvedQuestions":[],"cameraSpawn":{"x":10.35,"z":4.75},"cameraSpawnYaw":0,"hotspotLabel":"Guest WC"},{"id":"parents_bed","nameEn":"Parents' Bedroom","nameHe":"ח. הורים","function":"Main bedroom.","dimensions":{"widthM":3.83,"depthM":3.5},"dimensionSource":"plan labels 383 / 350 (cm)","confidence":"high","floorPolygon":[{"x":11.9,"z":6.35},{"x":15.73,"z":6.35},{"x":15.73,"z":9.85},{"x":11.9,"z":9.85}],"walls":[{"id":"parents_n","start":{"x":11.9,"z":6.35},"end":{"x":15.73,"z":6.35},"exterior":true},{"id":"parents_e","start":{"x":15.73,"z":6.35},"end":{"x":15.73,"z":9.85},"exterior":true},{"id":"parents_s","start":{"x":15.73,"z":9.85},"end":{"x":11.9,"z":9.85},"exterior":true}],"ceilingHeightM":2.7,"floorMaterialId":"oak-bedroom","wallMaterialId":"wall-warm-plaster","isWetRoom":false,"isProtected":false,"isExterior":false,"connectedRoomIds":["hall_south"],"visibleFeatures":["double bed drawn on plan","construction bags/materials and window visible in walkthrough 00:51-00:57"],"unresolvedQuestions":["Bathroom door relationship (direct en-suite vs. hall-only access) not confirmed."],"cameraSpawn":{"x":13.8,"z":8.1},"cameraSpawnYaw":-1.5707963267948966,"hotspotLabel":"Parents' Bedroom"}],"openings":[{"id":"door_stair_balcony","kind":"door","position":{"x":5.93,"z":-2.32},"widthM":1.2,"sillM":0,"headM":2.1,"roomA":"stair_landing","roomB":"balcony_service","confidence":"low"},{"id":"door_balcony_entry","kind":"door","position":{"x":5.93,"z":0},"widthM":1,"sillM":0,"headM":2.1,"roomA":"balcony_service","roomB":"entry_hall","confidence":"medium"},{"id":"opening_entry_living","kind":"open_threshold","position":{"x":4.9,"z":1.5},"widthM":1.6,"sillM":0,"headM":2.4,"roomA":"entry_hall","roomB":"living","confidence":"medium"},{"id":"door_entry_mamad","kind":"door","position":{"x":7.3,"z":1.5},"widthM":1,"sillM":0,"headM":2.1,"roomA":"entry_hall","roomB":"mamad","confidence":"high","isProtected":true,"note":"MAMAD protected door — never remove, resize, or relocate."},{"id":"opening_entry_hallsouth","kind":"open_threshold","position":{"x":6.1,"z":3},"widthM":1.5,"sillM":0,"headM":2.4,"roomA":"entry_hall","roomB":"hall_south","confidence":"low"},{"id":"door_hallsouth_twin","kind":"door","position":{"x":10.8,"z":3.25},"widthM":1,"sillM":0,"headM":2.1,"roomA":"hall_south","roomB":"twin_bed","confidence":"medium"},{"id":"door_hallsouth_bathmain","kind":"door","position":{"x":8.05,"z":4.3},"widthM":0.9,"sillM":0,"headM":2.1,"roomA":"hall_south","roomB":"bathroom_main","confidence":"medium"},{"id":"door_hallsouth_bathensuite","kind":"door","position":{"x":9.35,"z":4.3},"widthM":0.9,"sillM":0,"headM":2.1,"roomA":"hall_south","roomB":"bathroom_ensuite","confidence":"low"},{"id":"door_hallsouth_wcguest","kind":"door","position":{"x":10.8,"z":4.6},"widthM":1.3,"sillM":0,"headM":2.1,"roomA":"hall_south","roomB":"wc_guest","confidence":"low"},{"id":"door_hallsouth_parents","kind":"door","position":{"x":11.9,"z":8.1},"widthM":1,"sillM":0,"headM":2.1,"roomA":"hall_south","roomB":"parents_bed","confidence":"medium"},{"id":"opening_living_kitchen","kind":"open_threshold","position":{"x":1.55,"z":4},"widthM":3.1,"sillM":0,"headM":2.7,"roomA":"living","roomB":"kitchen","confidence":"high","note":"Open social zone — no dividing wall."},{"id":"opening_kitchen_dining","kind":"open_threshold","position":{"x":3.1,"z":5.65},"widthM":3.3,"sillM":0,"headM":2.7,"roomA":"kitchen","roomB":"dining","confidence":"medium"},{"id":"opening_living_dining","kind":"open_threshold","position":{"x":4,"z":4},"widthM":1.8,"sillM":0,"headM":2.7,"roomA":"living","roomB":"dining","confidence":"medium"},{"id":"exterior_opening_kitchen_terrace","kind":"exterior_opening","position":{"x":1.775,"z":7.3},"widthM":2.65,"sillM":0,"headM":2.2,"roomA":"kitchen","roomB":"terrace_social","confidence":"low","note":"Kitchen-side portion of the large opening toward the covered exterior space seen at 00:20-00:25."},{"id":"exterior_opening_dining_terrace","kind":"exterior_opening","position":{"x":3.775,"z":7.3},"widthM":1.35,"sillM":0,"headM":2.2,"roomA":"dining","roomB":"terrace_social","confidence":"low","note":"Dining-side portion of the large opening toward the covered exterior space seen at 00:20-00:25."},{"id":"window_living_1","kind":"window","position":{"x":0,"z":2},"widthM":1.2,"sillM":0.4,"headM":2.3,"roomId":"living","confidence":"medium"},{"id":"window_living_2","kind":"window","position":{"x":0,"z":3.4},"widthM":1.2,"sillM":0.4,"headM":2.3,"roomId":"living","confidence":"medium"},{"id":"window_kitchen_1","kind":"window","position":{"x":0,"z":5.6},"widthM":1,"sillM":1,"headM":2.1,"roomId":"kitchen","confidence":"low"},{"id":"window_mamad_1","kind":"window","position":{"x":9.05,"z":0},"widthM":1,"sillM":1.4,"headM":1.9,"roomId":"mamad","confidence":"medium","isProtected":true,"note":"MAMAD protected window — never remove, resize, or relocate."},{"id":"window_twin_1","kind":"window","position":{"x":15.19,"z":1},"widthM":1.2,"sillM":0.9,"headM":2.1,"roomId":"twin_bed","confidence":"medium"},{"id":"window_twin_2","kind":"window","position":{"x":15.19,"z":2.5},"widthM":1.2,"sillM":0.9,"headM":2.1,"roomId":"twin_bed","confidence":"low"},{"id":"window_parents_1","kind":"window","position":{"x":15.73,"z":7.5},"widthM":1.1,"sillM":0.9,"headM":2.1,"roomId":"parents_bed","confidence":"medium"},{"id":"window_parents_2","kind":"window","position":{"x":15.73,"z":9},"widthM":1.1,"sillM":0.9,"headM":2.1,"roomId":"parents_bed","confidence":"low"},{"id":"window_bathmain_1","kind":"window","position":{"x":7.3,"z":5.2},"widthM":0.6,"sillM":1.5,"headM":2,"roomId":"bathroom_main","confidence":"low"}],"structuralFeatures":[{"id":"column_living","kind":"column","position":{"x":2.3,"z":2},"radiusM":0.22,"heightM":2.7,"roomId":"living"}]},"palette":{"ivory":"#F3EFE7","limestone":"#D8CFC2","oak":"#9A7656","taupe":"#8B7C6C","bronze":"#4B4037","charcoal":"#24221F","olive":"#73745F"},"baseMaterials":{"limestone-social":{"id":"limestone-social","label":"Warm Limestone Porcelain","colorHex":"#D8CFC2","roughness":0.55,"metalness":0.02},"oak-bedroom":{"id":"oak-bedroom","label":"Matte Natural Oak","colorHex":"#9A7656","roughness":0.6,"metalness":0},"stone-wet":{"id":"stone-wet","label":"Stone-look Wet-room Porcelain","colorHex":"#C9C1B4","roughness":0.4,"metalness":0.02},"stone-entry":{"id":"stone-entry","label":"Pale Entry Stone","colorHex":"#DDD5C8","roughness":0.5,"metalness":0.02},"exterior-stone":{"id":"exterior-stone","label":"Exterior-grade Stone","colorHex":"#C7BFAF","roughness":0.75,"metalness":0},"wall-warm-plaster":{"id":"wall-warm-plaster","label":"Warm Mineral Plaster","colorHex":"#F3EFE7","roughness":0.85,"metalness":0},"exterior-render":{"id":"exterior-render","label":"Exterior Render","colorHex":"#C2B9AB","roughness":0.9,"metalness":0}},"materialVariants":[{"id":"warm-oak","label":"Warm Oak & Limestone","description":"The house-wide default: pale limestone social floors, matte oak bedrooms, dark-bronze metal accents.","floorOverrides":{},"wallOverrides":{},"accentHex":"#73745F","metalHex":"#4B4037"},{"id":"cool-stone","label":"Cool Stone & Champagne","description":"A cooler quartzite-grey social floor with a champagne metal accent, oak tone unchanged.","floorOverrides":{"limestone-social":"#CBCDC8","stone-entry":"#D2D3CC"},"wallOverrides":{"wall-warm-plaster":"#EFEFEA"},"accentHex":"#8A8F86","metalHex":"#B7A27C"},{"id":"sand-linen","label":"Sand & Linen","description":"A softer sand-toned social floor with deeper taupe walls for a cocooning, textile-led mood.","floorOverrides":{"limestone-social":"#E3D6C3"},"wallOverrides":{"wall-warm-plaster":"#EAE0D2"},"accentHex":"#8B7C6C","metalHex":"#4B4037"}],"lightingPresets":{"day":{"id":"day","label":"Daylight","skyColorHex":"#CFE3F0","ambientIntensity":0.55,"sunColorHex":"#FFF6E5","sunIntensity":2.4,"sunPositionM":[12,14,-6],"interiorColorTempK":3000,"interiorIntensity":0.35,"fogColorHex":"#E9E4D8","fogNearM":18,"fogFarM":46},"evening":{"id":"evening","label":"Evening","skyColorHex":"#1B1F2B","ambientIntensity":0.12,"sunColorHex":"#5B6A93","sunIntensity":0.25,"sunPositionM":[-10,6,8],"interiorColorTempK":2700,"interiorIntensity":1.05,"fogColorHex":"#14141A","fogNearM":10,"fogFarM":34}},"furnitureByRoom":{"living":[{"id":"living-sofa","roomId":"living","kind":"sofa","position":{"x":0.55,"z":2.7},"rotationYRad":1.5707963267948966,"footprintM":{"widthM":2.2,"depthM":0.9},"heightM":0.75,"colorHex":"#8B7C6C","shopLabel":"Modular sofa","category":"Sofa","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/sofas-sectionals-fu003/"},{"id":"living-coffee-table","roomId":"living","kind":"coffee-table","position":{"x":1.3,"z":2.7},"rotationYRad":0,"footprintM":{"widthM":1.1,"depthM":0.6},"heightM":0.38,"colorHex":"#9A7656","shopLabel":"Oak coffee table","category":"Coffee table","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/coffee-tables-10716/"},{"id":"living-rug","roomId":"living","kind":"rug","position":{"x":1.8,"z":2.6},"rotationYRad":0,"footprintM":{"widthM":2.6,"depthM":2},"heightM":0.02,"colorHex":"#D8CFC2","shopLabel":"Wool area rug","category":"Rug","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/rugs-10653/"}],"kitchen":[{"id":"kitchen-wall-cabinets","roomId":"kitchen","kind":"wall-cabinet","position":{"x":0.2,"z":5.65},"rotationYRad":0,"footprintM":{"widthM":0.38,"depthM":2},"heightM":0.45,"mountYM":2.15,"colorHex":"#8B7C6C","transformationStage":"upper-cabinets","shopLabel":"Handleless wall cabinets","category":"Kitchen wall cabinet","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/wall-cabinets-23608/"},{"id":"kitchen-backsplash-north","roomId":"kitchen","kind":"backsplash","position":{"x":0.03,"z":4.875},"rotationYRad":0,"footprintM":{"widthM":0.04,"depthM":0.45},"heightM":1.23,"mountYM":0.92,"colorHex":"#E6DFD3","transformationStage":"backsplash","shopLabel":"Pale veined stone backsplash","category":"Kitchen worktop & splashback","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/sektion-kitchen-ka005/"},{"id":"kitchen-backsplash-south","roomId":"kitchen","kind":"backsplash","position":{"x":0.03,"z":6.375},"rotationYRad":0,"footprintM":{"widthM":0.04,"depthM":0.55},"heightM":1.23,"mountYM":0.92,"colorHex":"#E6DFD3","transformationStage":"backsplash","shopLabel":"Pale veined stone backsplash","category":"Kitchen worktop & splashback","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/sektion-kitchen-ka005/"},{"id":"kitchen-tall-cabinet-north","roomId":"kitchen","kind":"tall-cabinet","position":{"x":0.22,"z":4.35},"rotationYRad":0,"footprintM":{"widthM":0.42,"depthM":0.6},"heightM":2.45,"colorHex":"#4B4037","transformationStage":"cabinet-wall","shopLabel":"Tall glass-front display cabinet","category":"Kitchen tall cabinet","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/kitchen-cabinets-700292/"},{"id":"kitchen-tall-cabinet-south","roomId":"kitchen","kind":"tall-cabinet","position":{"x":0.22,"z":6.95},"rotationYRad":0,"footprintM":{"widthM":0.42,"depthM":0.6},"heightM":2.45,"colorHex":"#4B4037","transformationStage":"cabinet-wall","shopLabel":"Tall glass-front display cabinet","category":"Kitchen tall cabinet","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/kitchen-cabinets-700292/"},{"id":"kitchen-base-run","roomId":"kitchen","kind":"base-run","position":{"x":0.32,"z":5.65},"rotationYRad":0,"footprintM":{"widthM":0.62,"depthM":2},"heightM":0.92,"colorHex":"#8B7C6C","transformationStage":"cabinet-wall","shopLabel":"Base cabinet run with stone worktop","category":"Kitchen base cabinet","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/kitchen-cabinets-700292/"},{"id":"kitchen-sink","roomId":"kitchen","kind":"worktop-accessory","position":{"x":0.3,"z":5.6},"rotationYRad":0,"footprintM":{"widthM":0.5,"depthM":0.42},"heightM":0.3,"mountYM":0.92,"colorHex":"#24221F","transformationStage":"counter-details","shopLabel":"Undermount sink with dark tap","category":"Kitchen sink & tap","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/sektion-kitchen-ka005/"},{"id":"kitchen-cooktop","roomId":"kitchen","kind":"worktop-accessory","position":{"x":0.3,"z":6.3},"rotationYRad":0,"footprintM":{"widthM":0.5,"depthM":0.58},"heightM":0.04,"mountYM":0.92,"colorHex":"#24221F","transformationStage":"counter-details","shopLabel":"Integrated induction cooktop","category":"Kitchen appliance","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/kitchen-appliances-ka001/"},{"id":"kitchen-counter-plant","roomId":"kitchen","kind":"worktop-accessory","position":{"x":0.32,"z":4.85},"rotationYRad":0,"footprintM":{"widthM":0.2,"depthM":0.2},"heightM":0.34,"mountYM":0.92,"colorHex":"#73745F","transformationStage":"counter-details","shopLabel":"Potted greenery","category":"Decoration","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/vases-bowls-10769/"},{"id":"kitchen-suspended-shelf","roomId":"kitchen","kind":"suspended-shelf","position":{"x":0.89,"z":5.65},"rotationYRad":0,"footprintM":{"widthM":0.34,"depthM":1.5},"heightM":0.06,"mountYM":1.95,"colorHex":"#4B4037","transformationStage":"suspended-feature","shopLabel":"Ceiling-hung open display shelf","category":"Kitchen wall storage","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/kitchen-wall-storage-20676/"},{"id":"kitchen-island","roomId":"kitchen","kind":"island","position":{"x":2.07,"z":5.85},"rotationYRad":0,"footprintM":{"widthM":0.9,"depthM":2.1},"heightM":0.92,"colorHex":"#9A7656","transformationStage":"island","shopLabel":"Fluted-base island with stone worktop","category":"Kitchen island","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/sektion-kitchen-ka005/"},{"id":"kitchen-pendant-north","roomId":"kitchen","kind":"pendant","position":{"x":2.07,"z":5.25},"rotationYRad":0,"footprintM":{"widthM":0.26,"depthM":0.26},"heightM":0.28,"mountYM":1.95,"colorHex":"#4B4037","transformationStage":"island","shopLabel":"Dark bronze pendant light","category":"Pendant light","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/pendant-lights-18751/"},{"id":"kitchen-pendant-south","roomId":"kitchen","kind":"pendant","position":{"x":2.07,"z":6.45},"rotationYRad":0,"footprintM":{"widthM":0.26,"depthM":0.26},"heightM":0.28,"mountYM":1.95,"colorHex":"#4B4037","transformationStage":"island","shopLabel":"Dark bronze pendant light","category":"Pendant light","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/pendant-lights-18751/"},{"id":"kitchen-stool-1","roomId":"kitchen","kind":"counter-stool","position":{"x":2.8,"z":5.06},"rotationYRad":0,"footprintM":{"widthM":0.42,"depthM":0.42},"heightM":0.75,"colorHex":"#D8CFC2","transformationStage":"stools","shopLabel":"Upholstered counter stool","category":"Bar stool","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/bar-stools-chairs-20864/"},{"id":"kitchen-stool-2","roomId":"kitchen","kind":"counter-stool","position":{"x":2.8,"z":5.58},"rotationYRad":0,"footprintM":{"widthM":0.42,"depthM":0.42},"heightM":0.75,"colorHex":"#D8CFC2","transformationStage":"stools","shopLabel":"Upholstered counter stool","category":"Bar stool","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/bar-stools-chairs-20864/"},{"id":"kitchen-stool-3","roomId":"kitchen","kind":"counter-stool","position":{"x":2.8,"z":6.1},"rotationYRad":0,"footprintM":{"widthM":0.42,"depthM":0.42},"heightM":0.75,"colorHex":"#D8CFC2","transformationStage":"stools","shopLabel":"Upholstered counter stool","category":"Bar stool","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/bar-stools-chairs-20864/"},{"id":"kitchen-stool-4","roomId":"kitchen","kind":"counter-stool","position":{"x":2.8,"z":6.62},"rotationYRad":0,"footprintM":{"widthM":0.42,"depthM":0.42},"heightM":0.75,"colorHex":"#D8CFC2","transformationStage":"stools","shopLabel":"Upholstered counter stool","category":"Bar stool","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/bar-stools-chairs-20864/"},{"id":"kitchen-island-vase","roomId":"kitchen","kind":"worktop-accessory","position":{"x":2.07,"z":5.4},"rotationYRad":0,"footprintM":{"widthM":0.24,"depthM":0.24},"heightM":0.55,"mountYM":0.92,"colorHex":"#24221F","transformationStage":"decor","shopLabel":"Sculptural vase with branches","category":"Vase","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/vases-bowls-10769/"},{"id":"kitchen-island-bowl","roomId":"kitchen","kind":"worktop-accessory","position":{"x":2.07,"z":6.3},"rotationYRad":0,"footprintM":{"widthM":0.3,"depthM":0.3},"heightM":0.1,"mountYM":0.92,"colorHex":"#F3EFE7","transformationStage":"decor","shopLabel":"Low stone decorating bowl","category":"Decorative bowl","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/vases-bowls-10769/"}],"bathroom_main":[{"id":"bathmain-vanity","roomId":"bathroom_main","kind":"vanity","position":{"x":8.55,"z":5.5},"rotationYRad":-1.5707963267948966,"footprintM":{"widthM":1,"depthM":0.45},"heightM":0.15,"colorHex":"#9A7656","shopLabel":"Floating vanity unit","category":"Bathroom vanity","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/bathroom-vanities-20719/"}],"parents_bed":[{"id":"parents-bed","roomId":"parents_bed","kind":"bed","position":{"x":14.85,"z":7.48},"rotationYRad":0,"footprintM":{"widthM":1.6,"depthM":2.05},"heightM":0.55,"colorHex":"#F3EFE7","shopLabel":"Upholstered queen bed","category":"Bed frame","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/beds-bm003/"},{"id":"parents-nightstand","roomId":"parents_bed","kind":"nightstand","position":{"x":13.75,"z":6.7},"rotationYRad":0,"footprintM":{"widthM":0.45,"depthM":0.4},"heightM":0.5,"colorHex":"#9A7656","shopLabel":"Oak nightstand","category":"Nightstand","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/nightstands-20656/"},{"id":"parents-wardrobe","roomId":"parents_bed","kind":"wardrobe","position":{"x":14.5,"z":9.5},"rotationYRad":3.141592653589793,"footprintM":{"widthM":2,"depthM":0.6},"heightM":2.1,"colorHex":"#8B7C6C","shopLabel":"Fitted wardrobe","category":"Wardrobe","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/armoires-wardrobes-19053/"}],"mamad":[{"id":"mamad-bed","roomId":"mamad","kind":"bed","position":{"x":9.75,"z":2.05},"rotationYRad":-1.5707963267948966,"footprintM":{"widthM":0.9,"depthM":2},"heightM":0.5,"colorHex":"#F3EFE7","shopLabel":"Sofa bed","category":"Sofa bed","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/sleeper-sofas-10663/"},{"id":"mamad-desk","roomId":"mamad","kind":"desk","position":{"x":8,"z":2.7},"rotationYRad":0,"footprintM":{"widthM":1,"depthM":0.5},"heightM":0.73,"colorHex":"#9A7656","shopLabel":"Compact desk","category":"Desk","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/desks-for-home-20651/"},{"id":"mamad-storage","roomId":"mamad","kind":"wardrobe","position":{"x":7.7,"z":0.3},"rotationYRad":0,"footprintM":{"widthM":0.7,"depthM":0.4},"heightM":1,"colorHex":"#8B7C6C","shopLabel":"Closed storage cabinet","category":"Storage cabinet","retailer":"IKEA","productUrl":"https://www.ikea.com/us/en/cat/storage-organization-st001/"}]}};
+
+const C = DATA.consts;
+const ROOMS = DATA.house.rooms;
+const OPENINGS = DATA.house.openings;
+const FEATURES = DATA.house.structuralFeatures;
+const BASE = DATA.baseMaterials;
+const VARIANTS = DATA.materialVariants;
+const LIGHTS = DATA.lightingPresets;
+const FURN_BY_ROOM = DATA.furnitureByRoom;
+const ALL_FURN = Object.values(FURN_BY_ROOM).flat();
+const roomById = new Map(ROOMS.map(r => [r.id, r]));
+const furnById = new Map(ALL_FURN.map(f => [f.id, f]));
+const SHORTLIST_KEY = "ai-house:shortlist:v1";
+
+/* ------------------------------------------------------------------ *
+ * Wall panels — port of src/lib/geometry/wallPanels.ts, so openings are
+ * cut from the same authored coordinates the app itself uses.
+ * ------------------------------------------------------------------ */
+const EPS = 0.05, FLOOR_EPS = 0.02;
+function wallGeom(s, e) {
+  const dx = e.x - s.x, dz = e.z - s.z, length = Math.hypot(dx, dz);
+  return { ux: dx / length, uz: dz / length, length, angleRad: Math.atan2(dx, dz) };
+}
+function voidsForWall(wall, roomId) {
+  const { ux, uz, length } = wallGeom(wall.start, wall.end);
+  const out = [];
+  for (const o of OPENINGS) {
+    if (!(o.roomId === roomId || o.roomA === roomId || o.roomB === roomId)) continue;
+    const px = o.position.x - wall.start.x, pz = o.position.z - wall.start.z;
+    const t = px * ux + pz * uz;
+    if (Math.abs(-px * uz + pz * ux) > EPS) continue;
+    if (t < -EPS || t > length + EPS) continue;
+    const half = o.widthM / 2;
+    out.push({ t0: Math.max(0, t - half), t1: Math.min(length, t + half), y0: o.sillM, y1: o.headM, kind: o.kind, openingId: o.id });
+  }
+  return out.sort((a, b) => a.t0 - b.t0);
+}
+function mergeSpans(spans) {
+  if (!spans.length) return [];
+  const s = [...spans].sort((a, b) => a.t0 - b.t0), out = [{ ...s[0] }];
+  for (const x of s.slice(1)) {
+    const last = out[out.length - 1];
+    if (x.t0 <= last.t1 + EPS) last.t1 = Math.max(last.t1, x.t1); else out.push({ ...x });
+  }
+  return out;
+}
+function subtractSpans(full, holes) {
+  let rem = [{ ...full }];
+  for (const h of holes) {
+    const next = [];
+    for (const r of rem) {
+      if (h.t1 <= r.t0 + EPS || h.t0 >= r.t1 - EPS) { next.push(r); continue; }
+      if (h.t0 > r.t0 + EPS) next.push({ t0: r.t0, t1: h.t0 });
+      if (h.t1 < r.t1 - EPS) next.push({ t0: h.t1, t1: r.t1 });
+    }
+    rem = next;
+  }
+  return rem.filter(s => s.t1 - s.t0 > EPS);
+}
+function buildWall(wall, room) {
+  const { ux, uz, length, angleRad } = wallGeom(wall.start, wall.end);
+  const heightM = room.wallHeightOverrideM != null ? room.wallHeightOverrideM : room.ceilingHeightM;
+  const voids = voidsForWall(wall, room.id);
+  const breaks = new Set([0, length]);
+  for (const v of voids) { breaks.add(Math.max(0, v.t0)); breaks.add(Math.min(length, v.t1)); }
+  const ts = Array.from(breaks).sort((a, b) => a - b);
+  const panels = [];
+  for (let i = 0; i < ts.length - 1; i++) {
+    const ta = ts[i], tb = ts[i + 1];
+    if (tb - ta <= EPS) continue;
+    const tMid = (ta + tb) / 2;
+    const covering = voids.filter(v => v.t0 <= tMid && v.t1 >= tMid);
+    for (const y of subtractSpans({ t0: 0, t1: heightM }, covering.map(v => ({ t0: v.y0, t1: v.y1 })))) {
+      panels.push({
+        x: wall.start.x + ux * tMid, y: (y.t0 + y.t1) / 2, z: wall.start.z + uz * tMid,
+        w: tb - ta, h: y.t1 - y.t0, base: y.t0, d: C.WALL_THICKNESS_M, rotY: angleRad - Math.PI / 2,
+      });
+    }
+  }
+  const gaps = voids
+    .filter(v => v.y0 <= FLOOR_EPS && (v.kind === "door" || v.kind === "exterior_opening" || v.kind === "open_threshold"))
+    .map(v => ({ t0: v.t0, t1: v.t1 }));
+  // Glazing for every window void, in the wall's own frame, so panes land
+  // in the holes the opening list already cut.
+  const windows = voids.filter(v => v.kind === "window").map(v => {
+    const tMid = (v.t0 + v.t1) / 2;
+    return {
+      openingId: v.openingId,
+      x: wall.start.x + ux * tMid, y: (v.y0 + v.y1) / 2, z: wall.start.z + uz * tMid,
+      w: v.t1 - v.t0, h: v.y1 - v.y0, rotY: angleRad - Math.PI / 2,
+    };
+  });
+  return {
+    wallId: wall.id, roomId: room.id, start: wall.start, ux, uz, length, panels, windows,
+    solid: subtractSpans({ t0: 0, t1: length }, mergeSpans(gaps)),
+  };
+}
+const BUILT_WALLS = [];
+for (const room of ROOMS) for (const w of room.walls) BUILT_WALLS.push(buildWall(w, room));
+const BLOCKERS = [];
+for (const bw of BUILT_WALLS) for (const s of bw.solid) {
+  BLOCKERS.push({
+    ax: bw.start.x + bw.ux * s.t0, az: bw.start.z + bw.uz * s.t0,
+    bx: bw.start.x + bw.ux * s.t1, bz: bw.start.z + bw.uz * s.t1,
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Scene
+ * ------------------------------------------------------------------ */
+const canvas = document.getElementById("view");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(52, 16 / 9, 0.05, 260);
+const structureGroup = new THREE.Group(), furnGroup = new THREE.Group();
+scene.add(structureGroup, furnGroup);
+
+let variant = VARIANTS[0];
+let timeOfDay = 18;
+let selectedId = "living";
+let selectedPieceId = null;
+let exploring = false;
+let eMode = "doll";
+
+function floorColor(id) { return (variant.floorOverrides && variant.floorOverrides[id]) || (BASE[id] && BASE[id].colorHex) || "#CCC"; }
+function wallColor(id) { return (variant.wallOverrides && variant.wallOverrides[id]) || (BASE[id] && BASE[id].colorHex) || "#DDD"; }
+
+/* ------------------------------------------------------------------ *
+ * Procedural surfaces. Flat hex fills read as cardboard under a moving
+ * sun; a little grain is what makes limestone look like stone and oak
+ * look sawn. Drawn once per material into a canvas, then tiled in metres.
+ * ------------------------------------------------------------------ */
+const texCache = new Map();
+function surfaceTexture(hex, kind) {
+  const key = hex + "|" + kind;
+  if (texCache.has(key)) return texCache.get(key);
+  const S = 256;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = S;
+  const g = cv.getContext("2d");
+  g.fillStyle = hex;
+  g.fillRect(0, 0, S, S);
+  const base = new THREE.Color(hex);
+
+  function wash(amount, alpha) {
+    const c = base.clone().offsetHSL(0, 0, amount);
+    return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + "," + Math.round(c.b * 255) + "," + alpha + ")";
+  }
+
+  if (kind === "oak") {
+    // Sawn boards: long grain, with a seam every quarter of the tile.
+    for (let i = 0; i < 1400; i++) {
+      const y = Math.random() * S;
+      g.strokeStyle = wash((Math.random() - 0.5) * 0.14, 0.16);
+      g.lineWidth = Math.random() * 1.6 + 0.2;
+      g.beginPath();
+      g.moveTo(0, y);
+      for (let x = 0; x <= S; x += 32) g.lineTo(x, y + Math.sin((x + y) * 0.05) * 1.3);
+      g.stroke();
+    }
+    g.strokeStyle = wash(-0.1, 0.5);
+    g.lineWidth = 1;
+    for (let b = 1; b < 4; b++) {
+      g.beginPath();
+      g.moveTo(0, (S / 4) * b);
+      g.lineTo(S, (S / 4) * b);
+      g.stroke();
+    }
+  } else if (kind === "stone") {
+    // Porcelain/limestone: fine speckle plus soft cloudy blotches.
+    for (let i = 0; i < 2600; i++) {
+      g.fillStyle = wash((Math.random() - 0.5) * 0.16, 0.2);
+      g.fillRect(Math.random() * S, Math.random() * S, Math.random() * 2.4, Math.random() * 2.4);
+    }
+    for (let i = 0; i < 26; i++) {
+      const r = 18 + Math.random() * 54;
+      const x = Math.random() * S, y = Math.random() * S;
+      const grd = g.createRadialGradient(x, y, 0, x, y, r);
+      grd.addColorStop(0, wash((Math.random() - 0.5) * 0.09, 0.3));
+      grd.addColorStop(1, wash(0, 0));
+      g.fillStyle = grd;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+  } else {
+    // Mineral plaster and exterior render: low-frequency trowel mottling.
+    for (let i = 0; i < 70; i++) {
+      const r = 24 + Math.random() * 72;
+      const x = Math.random() * S, y = Math.random() * S;
+      const grd = g.createRadialGradient(x, y, 0, x, y, r);
+      grd.addColorStop(0, wash((Math.random() - 0.5) * 0.07, 0.4));
+      grd.addColorStop(1, wash(0, 0));
+      g.fillStyle = grd;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    for (let i = 0; i < 900; i++) {
+      g.fillStyle = wash((Math.random() - 0.5) * 0.1, 0.1);
+      g.fillRect(Math.random() * S, Math.random() * S, 1.6, 1.6);
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  texCache.set(key, tex);
+  return tex;
+}
+function textureKind(materialId) {
+  if (materialId === "oak-bedroom") return "oak";
+  if (materialId.indexOf("wall") === 0 || materialId.indexOf("exterior-render") === 0) return "plaster";
+  return "stone";
+}
+/* A texture shared between surfaces cannot carry per-surface tiling, so
+   each mesh gets its own clone with its own repeat in metres. */
+function tiled(hex, kind, repeatX, repeatY) {
+  const t = surfaceTexture(hex, kind).clone();
+  t.needsUpdate = true;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(Math.max(0.4, repeatX), Math.max(0.4, repeatY));
+  return t;
+}
+
+/* ---- ground and sky: without them the house hangs in an empty void ---- */
+let groundMesh = null, skyMesh = null, skyTex = null;
+function buildWorld() {
+  groundMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(400, 400),
+    new THREE.MeshStandardMaterial({ color: new THREE.Color("#6E6A5C"), roughness: 1 })
+  );
+  groundMesh.rotation.x = -Math.PI / 2;
+  groundMesh.position.y = -0.04;
+  groundMesh.receiveShadow = true;
+  scene.add(groundMesh);
+
+  const cv = document.createElement("canvas");
+  cv.width = 8; cv.height = 128;
+  skyTex = new THREE.CanvasTexture(cv);
+  skyTex.colorSpace = THREE.SRGBColorSpace;
+  skyMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(170, 24, 16),
+    new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false })
+  );
+  scene.add(skyMesh);
+}
+function paintSky(zenith, horizon, sunCol, elev) {
+  const cv = skyTex.image;
+  const g = cv.getContext("2d");
+  const grd = g.createLinearGradient(0, 0, 0, cv.height);
+  grd.addColorStop(0, "#" + zenith.getHexString());
+  grd.addColorStop(0.62, "#" + zenith.clone().lerp(horizon, 0.65).getHexString());
+  // A warm band hugs the horizon only while the sun is actually low.
+  grd.addColorStop(0.82, "#" + horizon.clone().lerp(sunCol, elev < 0.35 ? 0.55 : 0.12).getHexString());
+  grd.addColorStop(1, "#" + horizon.getHexString());
+  g.fillStyle = grd;
+  g.fillRect(0, 0, cv.width, cv.height);
+  skyTex.needsUpdate = true;
+}
+
+const roomFloorMeshes = [], wallMeshes = [], furnMeshes = [], glassSpecs = [];
+function buildStructure() {
+  for (const room of ROOMS) {
+    const shape = new THREE.Shape(room.floorPolygon.map(p => new THREE.Vector2(p.x, -p.z)));
+    const fb = BASE[room.floorMaterialId] || {};
+    const xs = room.floorPolygon.map(p => p.x), zs = room.floorPolygon.map(p => p.z);
+    const spanX = Math.max(...xs) - Math.min(...xs), spanZ = Math.max(...zs) - Math.min(...zs);
+    const fhex = floorColor(room.floorMaterialId);
+    const floor = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshStandardMaterial({
+      color: new THREE.Color(fhex),
+      map: tiled(fhex, textureKind(room.floorMaterialId), spanX / 1.1, spanZ / 1.1),
+      roughness: fb.roughness != null ? fb.roughness : 0.6,
+      metalness: fb.metalness != null ? fb.metalness : 0,
+      side: THREE.DoubleSide,
+    }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = 0.001;
+    floor.receiveShadow = true;
+    floor.userData.roomId = room.id;
+    structureGroup.add(floor);
+    roomFloorMeshes.push(floor);
+
+    const whex = wallColor(room.wallMaterialId);
+    const wcol = new THREE.Color(whex);
+    const wmat = new THREE.MeshStandardMaterial({
+      color: wcol,
+      map: tiled(whex, textureKind(room.wallMaterialId), 1.6, 1.6),
+      roughness: 0.88,
+    });
+    if (!room.isExterior || room.hasCeiling) {
+      const ceil = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshStandardMaterial({
+        color: wcol, roughness: 0.95, side: THREE.DoubleSide,
+      }));
+      ceil.rotation.x = Math.PI / 2;
+      ceil.position.y = room.ceilingHeightM;
+      ceil.userData.ceiling = true;
+      structureGroup.add(ceil);
+    }
+    for (const w of room.walls) {
+      const bw = BUILT_WALLS.find(b => b.wallId === w.id && b.roomId === room.id);
+      for (const p of bw.panels) {
+        const box = new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, p.d), wmat);
+        box.position.set(p.x, p.y, p.z);
+        box.rotation.y = p.rotY;
+        box.castShadow = true;
+        box.receiveShadow = true;
+        box.userData.base = p.base;
+        box.userData.fullH = p.h;
+        structureGroup.add(box);
+        wallMeshes.push(box);
+      }
+      for (const g of bw.windows) {
+        if (glassSpecs.indexOf(g.openingId) !== -1) continue;
+        glassSpecs.push(g.openingId);
+        const pane = new THREE.Mesh(
+          new THREE.PlaneGeometry(g.w, g.h),
+          new THREE.MeshStandardMaterial({
+            color: new THREE.Color("#AFC6D2"),
+            roughness: 0.08, metalness: 0.1,
+            transparent: true, opacity: 0.26,
+            side: THREE.DoubleSide, depthWrite: false,
+          })
+        );
+        pane.position.set(g.x, g.y, g.z);
+        pane.rotation.y = g.rotY;
+        pane.userData.glass = true;
+        structureGroup.add(pane);
+      }
+    }
+  }
+  for (const f of FEATURES) {
+    if (f.kind !== "column") continue;
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(f.radiusM, f.radiusM, f.heightM, 20),
+      new THREE.MeshStandardMaterial({ color: new THREE.Color(wallColor("wall-warm-plaster")), roughness: 0.8 }));
+    col.position.set(f.position.x, f.heightM / 2, f.position.z);
+    col.castShadow = true;
+    col.userData.base = 0;
+    col.userData.fullH = f.heightM;
+    structureGroup.add(col);
+    wallMeshes.push(col);
+  }
+}
+function buildFurniture() {
+  for (const it of ALL_FURN) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(it.footprintM.widthM, it.heightM, it.footprintM.depthM),
+      new THREE.MeshStandardMaterial({ color: new THREE.Color(it.colorHex), roughness: 0.68, metalness: 0.04 })
+    );
+    const base = it.mountYM != null ? it.mountYM : 0;
+    mesh.position.set(it.position.x, base + it.heightM / 2, it.position.z);
+    mesh.rotation.y = it.rotationYRad || 0;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.furnId = it.id;
+    furnGroup.add(mesh);
+    furnMeshes.push(mesh);
+
+    // A soft contact patch where the piece meets the floor. The sun's own
+    // shadow is sharp and misses the grounding a short-range occlusion gives.
+    if (base < 0.05 && it.kind !== "rug") {
+      const blob = new THREE.Mesh(
+        new THREE.PlaneGeometry(it.footprintM.widthM * 1.7, it.footprintM.depthM * 1.7),
+        new THREE.MeshBasicMaterial({
+          map: contactTexture(), transparent: true, opacity: 0.42,
+          depthWrite: false, color: 0x000000,
+        })
+      );
+      blob.rotation.x = -Math.PI / 2;
+      blob.rotation.z = it.rotationYRad || 0;
+      blob.position.set(it.position.x, 0.006, it.position.z);
+      blob.renderOrder = -1;
+      furnGroup.add(blob);
+    }
+  }
+}
+let _contactTex = null;
+function contactTexture() {
+  if (_contactTex) return _contactTex;
+  const S = 64;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = S;
+  const g = cv.getContext("2d");
+  const grd = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  grd.addColorStop(0, "rgba(255,255,255,1)");
+  grd.addColorStop(0.45, "rgba(255,255,255,0.55)");
+  grd.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grd;
+  g.fillRect(0, 0, S, S);
+  _contactTex = new THREE.CanvasTexture(cv);
+  _contactTex.colorSpace = THREE.SRGBColorSpace;
+  return _contactTex;
+}
+let hoverId = null;
+function paintFurniture() {
+  for (const m of furnMeshes) {
+    const id = m.userData.furnId;
+    const sel = id === selectedPieceId, hov = id === hoverId;
+    m.material.emissive = new THREE.Color(sel ? 0x6b5a30 : hov ? 0x332d1c : 0x000000);
+    m.material.emissiveIntensity = sel || hov ? 1 : 0;
+    const s = sel ? 1.06 : 1;
+    m.scale.set(s, s, s);
+  }
+}
+/* Ceilings lift away in the dollhouse; inside, they close over you. */
+function setCeilings(v) { for (const c of structureGroup.children) if (c.userData.ceiling) c.visible = v; }
+
+/* Room names floating over the opened plan, the way a drawing is annotated. */
+const labelGroup = new THREE.Group();
+labelGroup.visible = false;
+scene.add(labelGroup);
+function buildRoomLabels() {
+  for (const r of ROOMS) {
+    const cx = r.floorPolygon.reduce((a, p) => a + p.x, 0) / r.floorPolygon.length;
+    const cz = r.floorPolygon.reduce((a, p) => a + p.z, 0) / r.floorPolygon.length;
+    const W = 512, H = 136;
+    const cv = document.createElement("canvas");
+    cv.width = W; cv.height = H;
+    const g = cv.getContext("2d");
+    g.textAlign = "center";
+    g.fillStyle = r.isProtected ? "#D98C56" : "#F3EFE7";
+    g.font = "500 54px Archivo, system-ui, sans-serif";
+    g.fillText((r.hotspotLabel || r.nameEn).toUpperCase(), W / 2, 56);
+    g.fillStyle = "#C8A96A";
+    g.font = "400 38px 'IBM Plex Mono', monospace";
+    g.fillText(r.dimensions.widthM.toFixed(2) + " × " + r.dimensions.depthM.toFixed(2) + " m", W / 2, 110);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, transparent: true, depthTest: false, depthWrite: false, fog: false,
+    }));
+    sp.position.set(cx, 3.15, cz);
+    sp.scale.set(2.9, 0.77, 1);
+    sp.renderOrder = 10;
+    labelGroup.add(sp);
+  }
+}
+
+/* ---- lighting: one continuous day between the two authored presets ---- */
+let ambient, sun, interiorLights = [];
+function lerp(a, b, t) { return a + (b - a) * t; }
+function mixHex(a, b, t) { return new THREE.Color(a).lerp(new THREE.Color(b), t); }
+function buildLighting() {
+  if (ambient) scene.remove(ambient);
+  if (sun) scene.remove(sun);
+  interiorLights.forEach(l => scene.remove(l));
+  interiorLights = [];
+  const day = LIGHTS.day, eve = LIGHTS.evening;
+  const frac = Math.max(0, Math.min(1, (timeOfDay - 5) / 17));
+  const elev = Math.sin(Math.PI * frac);
+  const w = Math.max(0, Math.min(1, (0.34 - elev) / 0.34));
+  const sky = mixHex(day.skyColorHex, eve.skyColorHex, w), fog = mixHex(day.fogColorHex, eve.fogColorHex, w);
+  scene.background = sky;
+  scene.fog = new THREE.Fog(fog, lerp(day.fogNearM, eve.fogNearM, w), lerp(day.fogFarM, eve.fogFarM, w));
+  ambient = new THREE.HemisphereLight(sky, fog, lerp(day.ambientIntensity, eve.ambientIntensity, w) * 1.7);
+  scene.add(ambient);
+  const R = 24, az = Math.PI * frac;
+  sun = new THREE.DirectionalLight(mixHex(day.sunColorHex, eve.sunColorHex, w), lerp(day.sunIntensity, eve.sunIntensity, w));
+  sun.position.set(Math.cos(az) * R, 1.5 + elev * 20, -Math.sin(az) * R * 0.5 - 4);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  const d = 20;
+  sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
+  sun.shadow.camera.top = d; sun.shadow.camera.bottom = -d;
+  sun.shadow.camera.far = 80;
+  scene.add(sun);
+  if (skyTex) paintSky(sky, fog, mixHex(day.sunColorHex, eve.sunColorHex, w), elev);
+  if (groundMesh) groundMesh.material.color = new THREE.Color("#6E6A5C").lerp(new THREE.Color("#14151A"), w);
+
+  const interior = lerp(day.interiorIntensity, eve.interiorIntensity, w);
+  const warm = mixHex("#FFE3BC", "#FFB25E", w);
+  for (const room of ROOMS) {
+    if (room.isExterior) continue;
+    const pt = new THREE.PointLight(warm, interior * 2.4, 10, 2);
+    pt.position.set(room.cameraSpawn.x, room.ceilingHeightM - 0.35, room.cameraSpawn.z);
+    scene.add(pt);
+    interiorLights.push(pt);
+  }
+}
+
+const bounds = (() => {
+  let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity;
+  for (const r of ROOMS) for (const p of r.floorPolygon) {
+    a = Math.min(a, p.x); b = Math.max(b, p.x); c = Math.min(c, p.z); d = Math.max(d, p.z);
+  }
+  return { minX: a, maxX: b, minZ: c, maxZ: d, cx: (a + b) / 2, cz: (c + d) / 2 };
+})();
+
+/* ------------------------------------------------------------------ *
+ * The film: chapters, each a camera, an hour of the day, and a caption
+ * written from that room's own record.
+ * ------------------------------------------------------------------ */
+function room(id) { return roomById.get(id); }
+function dimLine(id) {
+  const r = room(id);
+  if (!r) return "";
+  return r.dimensions.widthM.toFixed(2) + " × " + r.dimensions.depthM.toFixed(2) + " m";
+}
+const CHAPTERS = [
+  {
+    id: "arrival", kick: "Unbuilt · a concept visualisation", title: "Ali's House", num: null,
+    body: "A house that exists as an architect's floor plan, a walkthrough video, and nothing else. This is it rebuilt to scale, lit, and walkable.",
+    data: ["<b>127.3</b> m² interior", "<b>14</b> rooms", "<b>2.70</b> m ceilings"],
+    cam: { p: [bounds.cx + 13, 8.5, bounds.maxZ + 10.5], l: [bounds.cx, 1.2, bounds.cz] }, time: 18.4, roomId: "living", ceil: false,
+  },
+  {
+    id: "approach", kick: "Chapter 01 · the way in", title: "The Approach", num: null,
+    body: "Stone steps climb from the street to the entry landing. Neither the rise nor the run is dimensioned on the plan — this flight is the one part of the house the sources never resolve.",
+    data: ["<b>low</b> confidence", "video framing only"],
+    cam: { p: [5.93, 1.9, -8.6], l: [5.93, 1.4, -2.6] }, time: 17.6, roomId: "stair_landing", ceil: false,
+  },
+  {
+    id: "entry", kick: "Chapter 02 · arrival", title: "The Entry", num: null,
+    body: "One hall does all the work: it meets the stair, opens west into the social floor, and holds the only door into the protected room.",
+    data: [dimLine("entry_hall"), "<b>4</b> ways out"],
+    cam: { p: [6.2, 1.62, -0.7], l: [4.3, 1.5, 2.4] }, time: 12.4, roomId: "entry_hall", ceil: true,
+  },
+  {
+    id: "social", kick: "Chapter 03 · the open floor", title: "The Social Floor", num: "18.5",
+    body: "Living, kitchen and dining are one undivided volume. The facade turns a chamfered corner here, and a structural column stands free in the room — both are on the plan, so both are in the model.",
+    data: [dimLine("living") + " living", "<b>high</b> confidence", "plan reads 467 / 396 cm"],
+    cam: { p: [4.75, 1.62, 3.9], l: [0.25, 1.35, 1.7] }, time: 11.4, roomId: "living", ceil: true,
+  },
+  {
+    id: "kitchen", kick: "Chapter 04 · the working wall", title: "The Kitchen", num: null,
+    body: "An L of base units against two walls, a suspended shelf, and two pendants over the island — each piece sits where the plan's furniture outline puts it.",
+    data: [dimLine("kitchen"), "<b>" + (FURN_BY_ROOM.kitchen || []).length + "</b> pieces specified"],
+    cam: { p: [2.98, 1.62, 4.25], l: [0.6, 1.25, 6.9] }, time: 10.2, roomId: "kitchen", ceil: true,
+  },
+  {
+    id: "dining", kick: "Chapter 05 · the hinge", title: "The Table", num: null,
+    body: "A six-seat oval, drawn on the plan, sitting between the kitchen and the door to the private wing. The narrowest room in the social floor, and the busiest.",
+    data: [dimLine("dining"), "<b>medium</b> confidence"],
+    cam: { p: [3.3, 1.62, 4.3], l: [4.6, 1.2, 7.0] }, time: 13.2, roomId: "dining", ceil: true,
+  },
+  {
+    id: "terrace", kick: "Chapter 06 · outside, covered", title: "The Terrace", num: null,
+    body: "The social floor runs straight out under a roof. A parapet instead of a wall, so the room keeps its ceiling but loses its enclosure.",
+    data: [dimLine("terrace_social"), "<b>1.10</b> m parapet", "roofed"],
+    cam: { p: [2.45, 1.62, 6.7], l: [2.45, 1.5, 9.6] }, time: 19.6, roomId: "terrace_social", ceil: true,
+  },
+  {
+    id: "mamad", kick: "Chapter 07 · required by law", title: "The Protected Room", num: null,
+    body: "Every Israeli dwelling has one: reinforced walls, one door, one window. It can be a bedroom, an office, a guest room — but those two openings can never move.",
+    data: [dimLine("mamad"), "<b>high</b> confidence", '<span class="prot">never restyled</span>'],
+    cam: { p: [7.65, 1.62, 2.5], l: [10.5, 1.4, 1.0] }, time: 14.2, roomId: "mamad", ceil: true,
+  },
+  {
+    id: "private", kick: "Chapter 08 · the far end", title: "The Private Wing", num: null,
+    body: "Past the long south hall: two bedrooms, three wet rooms, and the main bedroom in the far corner, as far from the entry as the plan allows.",
+    data: [dimLine("parents_bed") + " main bed", "<b>3</b> wet rooms"],
+    cam: { p: [12.1, 1.62, 6.9], l: [15.4, 1.3, 9.5] }, time: 20.4, roomId: "parents_bed", ceil: true,
+  },
+  {
+    id: "plan", kick: "Chapter 09 · all of it", title: "The Whole Plan", num: "14",
+    body: "Fourteen rooms, twenty-four openings, one column. Lift the roof and the house reads as what it is — a social floor facing the view, a protected core, and a private wing behind it.",
+    data: ["<b>8</b> doors", "<b>9</b> windows", "<b>5</b> open thresholds"],
+    cam: { p: [bounds.cx + 10, 20, bounds.cz + 13], l: [bounds.cx, 0.4, bounds.cz] }, time: 17.0, roomId: "living", ceil: false,
+  },
+];
+
+const caps = document.getElementById("caps");
+caps.innerHTML = CHAPTERS.map((c, i) =>
+  '<div class="cap" data-i="' + i + '"><div class="inner">' +
+  '<div class="kick mono">' + c.kick + "</div>" +
+  "<h2>" + (c.num ? '<span class="num">' + c.num + "</span>" : "") + c.title + "</h2>" +
+  "<p>" + c.body + "</p>" +
+  '<div class="data mono">' + c.data.map(d => "<span>" + d + "</span>").join("") + "</div>" +
+  "</div></div>"
+).join("");
+const capEls = Array.from(caps.querySelectorAll(".cap"));
+
+document.getElementById("navLinks").innerHTML = CHAPTERS
+  .filter(c => ["social", "mamad", "terrace", "plan"].includes(c.id))
+  .map(c => '<a href="#" data-go="' + c.id + '">' + c.title + "</a>").join("");
+
+const stripRow = document.getElementById("stripRow");
+stripRow.innerHTML = CHAPTERS.map((c, i) =>
+  '<button type="button" class="thumb" data-i="' + i + '" aria-current="false">' +
+  "<span>" + (i === 0 ? "Start" : String(i).padStart(2, "0") + " " + c.title) + "</span></button>"
+).join("");
+const thumbEls = Array.from(stripRow.querySelectorAll(".thumb"));
+
+const scroller = document.getElementById("scroller");
+function layoutScroller() { scroller.style.height = (CHAPTERS.length * 110) + "vh"; }
+layoutScroller();
+
+function smooth(t) { return t * t * (3 - 2 * t); }
+function camAt(seg) {
+  const i = Math.max(0, Math.min(CHAPTERS.length - 2, Math.floor(seg)));
+  const f = Math.max(0, Math.min(1, seg - i));
+  // Each chapter holds, then flies: the hold is what makes it read as a film.
+  const t = f < 0.45 ? 0 : smooth((f - 0.45) / 0.55);
+  const a = CHAPTERS[i], b = CHAPTERS[i + 1];
+  const out = { p: [0, 0, 0], l: [0, 0, 0], time: lerp(a.time, b.time, t) };
+  for (let k = 0; k < 3; k++) {
+    out.p[k] = lerp(a.cam.p[k], b.cam.p[k], t);
+    out.l[k] = lerp(a.cam.l[k], b.cam.l[k], t);
+  }
+  out.ceil = (t < 0.5 ? a : b).ceil;
+  out.roomId = (t < 0.5 ? a : b).roomId;
+  return out;
+}
+function capOpacity(idx, seg) {
+  const d = seg - idx;
+  if (d < -0.42) return 0;
+  if (d < -0.08) return (d + 0.42) / 0.34;
+  if (d <= 0.45) return 1;
+  if (d < 0.78) return 1 - (d - 0.45) / 0.33;
+  return 0;
+}
+
+let scrollSeg = 0;
+function readScroll() {
+  const max = Math.max(1, scroller.offsetHeight - innerHeight);
+  const p = Math.max(0, Math.min(1, scrollY / max));
+  scrollSeg = p * (CHAPTERS.length - 1);
+  document.getElementById("track").style.width = (p * 100) + "%";
+  let cur = 0, best = Infinity;
+  for (let i = 0; i < CHAPTERS.length; i++) {
+    const o = capOpacity(i, scrollSeg);
+    capEls[i].style.opacity = o;
+    capEls[i].style.transform = "translateY(" + ((1 - o) * 18) + "px)";
+    const d = Math.abs(scrollSeg - i);
+    if (d < best) { best = d; cur = i; }
+  }
+  thumbEls.forEach((t, i) => t.setAttribute("aria-current", String(i === cur)));
+  if (cur !== currentChapter) {
+    currentChapter = cur;
+    // A bare token is the only hash an artifact link carries back, so the
+    // chapter id alone makes the link shareable.
+    try { history.replaceState(null, "", "#" + CHAPTERS[cur].id); } catch (err) { /* nicety */ }
+  }
+}
+let currentChapter = -1;
+function scrollToChapter(i) {
+  const max = Math.max(1, scroller.offsetHeight - innerHeight);
+  scrollTo({ top: (i / (CHAPTERS.length - 1)) * max, behavior: "smooth" });
+}
+thumbEls.forEach(t => t.addEventListener("click", () => scrollToChapter(parseInt(t.dataset.i, 10))));
+document.getElementById("navLinks").addEventListener("click", e => {
+  const a = e.target.closest("a[data-go]");
+  if (!a) return;
+  e.preventDefault();
+  const i = CHAPTERS.findIndex(c => c.id === a.dataset.go);
+  if (i >= 0) scrollToChapter(i);
+});
+addEventListener("scroll", readScroll, { passive: true });
+
+/* ------------------------------------------------------------------ *
+ * Explore mode — free navigation of the same scene
+ * ------------------------------------------------------------------ */
+const orbit = { yaw: -0.62, pitch: 0.9, dist: 26, target: new THREE.Vector3(bounds.cx, 1.1, bounds.cz) };
+const walker = { x: 0, z: 0, yaw: 0, pitch: 0 };
+function applyOrbit() {
+  const cp = Math.cos(orbit.pitch);
+  camera.position.set(
+    orbit.target.x + orbit.dist * cp * Math.sin(orbit.yaw),
+    orbit.target.y + orbit.dist * Math.sin(orbit.pitch),
+    orbit.target.z + orbit.dist * cp * Math.cos(orbit.yaw)
+  );
+  camera.lookAt(orbit.target);
+}
+function applyWalk() {
+  camera.position.set(walker.x, C.EYE_HEIGHT_M, walker.z);
+  const d = new THREE.Vector3(
+    Math.sin(walker.yaw) * Math.cos(walker.pitch),
+    Math.sin(walker.pitch),
+    Math.cos(walker.yaw) * Math.cos(walker.pitch)
+  );
+  camera.lookAt(camera.position.clone().add(d));
+}
+function cross(ax, az, bx, bz, cx, cz, dx, dz) {
+  const d1 = (bx - ax) * (cz - az) - (bz - az) * (cx - ax);
+  const d2 = (bx - ax) * (dz - az) - (bz - az) * (dx - ax);
+  const d3 = (dx - cx) * (az - cz) - (dz - cz) * (ax - cx);
+  const d4 = (dx - cx) * (bz - cz) - (dz - cz) * (bx - cx);
+  return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+}
+function canMove(fx, fz, tx, tz) {
+  const n = Math.hypot(tx - fx, tz - fz);
+  if (n < 1e-6) return true;
+  const ox = -(tz - fz) / n * C.PLAYER_RADIUS_M, oz = (tx - fx) / n * C.PLAYER_RADIUS_M;
+  const ex = tx + (tx - fx) / n * C.PLAYER_RADIUS_M, ez = tz + (tz - fz) / n * C.PLAYER_RADIUS_M;
+  for (const b of BLOCKERS) {
+    if (cross(fx, fz, ex, ez, b.ax, b.az, b.bx, b.bz)) return false;
+    if (cross(fx + ox, fz + oz, ex + ox, ez + oz, b.ax, b.az, b.bx, b.bz)) return false;
+    if (cross(fx - ox, fz - oz, ex - ox, ez - oz, b.ax, b.az, b.bx, b.bz)) return false;
+  }
+  return true;
+}
+function pointInRoom(r, x, z) {
+  const poly = r.floorPolygon;
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, zi = poly[i].z, xj = poly[j].x, zj = poly[j].z;
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function roomAt(x, z) { for (const r of ROOMS) if (pointInRoom(r, x, z)) return r; return null; }
+
+const ray = new THREE.Raycaster();
+let dragging = false, lastX = 0, lastY = 0, moved = 0, pinch = null;
+function ndc(cx, cy) {
+  const r = canvas.getBoundingClientRect();
+  return new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+}
+function pickAt(cx, cy) {
+  ray.setFromCamera(ndc(cx, cy), camera);
+  const f = ray.intersectObjects(furnMeshes, false);
+  if (f.length) return { kind: "piece", id: f[0].object.userData.furnId };
+  const r = ray.intersectObjects(roomFloorMeshes, false);
+  if (r.length) return { kind: "room", id: r[0].object.userData.roomId };
+  return null;
+}
+canvas.addEventListener("pointerdown", e => {
+  if (!exploring) return;
+  dragging = true; moved = 0; lastX = e.clientX; lastY = e.clientY;
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* optional */ }
+});
+canvas.addEventListener("pointermove", e => {
+  if (!exploring) return;
+  if (!dragging) {
+    if (eMode === "doll") {
+      const hit = pickAt(e.clientX, e.clientY);
+      const next = hit && hit.kind === "piece" ? hit.id : null;
+      if (next !== hoverId) { hoverId = next; paintFurniture(); }
+    }
+    return;
+  }
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  moved += Math.abs(dx) + Math.abs(dy);
+  if (eMode === "doll") {
+    orbit.yaw -= dx * 0.006;
+    orbit.pitch = Math.max(0.1, Math.min(1.45, orbit.pitch + dy * 0.005));
+  } else if (document.pointerLockElement !== canvas) {
+    walker.yaw -= dx * 0.004;
+    walker.pitch = Math.max(-1.1, Math.min(1.1, walker.pitch - dy * 0.004));
+  }
+});
+canvas.addEventListener("pointerup", e => {
+  if (!exploring) return;
+  dragging = false;
+  if (moved >= 6) return;
+  const hit = pickAt(e.clientX, e.clientY);
+  if (hit && hit.kind === "piece") { selectPiece(hit.id); return; }
+  if (hit && hit.kind === "room" && eMode === "doll") { selectRoom(hit.id); return; }
+  if (eMode === "walk" && canvas.requestPointerLock) canvas.requestPointerLock();
+});
+canvas.addEventListener("pointercancel", () => { dragging = false; });
+canvas.addEventListener("wheel", e => {
+  if (!exploring || eMode !== "doll") return;
+  e.preventDefault();
+  orbit.dist = Math.max(5, Math.min(70, orbit.dist + e.deltaY * 0.02));
+}, { passive: false });
+canvas.addEventListener("touchmove", e => {
+  if (!exploring || e.touches.length !== 2 || eMode !== "doll") return;
+  const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+  if (pinch != null) orbit.dist = Math.max(5, Math.min(70, orbit.dist - (d - pinch) * 0.06));
+  pinch = d;
+}, { passive: true });
+canvas.addEventListener("touchend", () => { pinch = null; }, { passive: true });
+addEventListener("mousemove", e => {
+  if (!exploring || document.pointerLockElement !== canvas || eMode !== "walk") return;
+  walker.yaw -= e.movementX * 0.0022;
+  walker.pitch = Math.max(-1.1, Math.min(1.1, walker.pitch - e.movementY * 0.0022));
+});
+const keys = Object.create(null);
+addEventListener("keydown", e => {
+  const k = e.key.toLowerCase();
+  if (e.key === "Escape" && exploring) { setExplore(false); return; }
+  if (!exploring) {
+    // Arrow keys and space step chapter to chapter, like a slideshow.
+    if (k === "arrowdown" || k === "pagedown" || k === " ") {
+      e.preventDefault();
+      scrollToChapter(Math.min(CHAPTERS.length - 1, Math.round(scrollSeg) + 1));
+      return;
+    }
+    if (k === "arrowup" || k === "pageup") {
+      e.preventDefault();
+      scrollToChapter(Math.max(0, Math.round(scrollSeg) - 1));
+      return;
+    }
+  }
+  keys[k] = true;
+  if (exploring && eMode === "walk" && ["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) e.preventDefault();
+});
+addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
+
+/* ---- shortlist (same key and read discipline as src/lib/shortlist.ts) ---- */
+let shortlist = [];
+function loadShortlist() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SHORTLIST_KEY) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    const seen = new Set();
+    return parsed.filter(id => typeof id === "string" && furnById.has(id) && !seen.has(id) && seen.add(id));
+  } catch (err) { return []; }
+}
+function saveShortlist() {
+  try { localStorage.setItem(SHORTLIST_KEY, JSON.stringify(shortlist)); } catch (err) { /* private window */ }
+}
+function toggleShortlist(id) {
+  const i = shortlist.indexOf(id);
+  if (i === -1) shortlist.push(id); else shortlist.splice(i, 1);
+  saveShortlist();
+  renderSide();
+  renderRoomPanel();
+}
+
+const roomPanel = document.getElementById("roomPanel");
+const sidePanel = document.getElementById("sidePanel");
+const ehud = document.getElementById("ehud");
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function renderRoomPanel() {
+  let h = '<h5>Plan index<span class="n">' + ROOMS.length + "</span></h5>";
+  for (const r of ROOMS) {
+    h += '<button type="button" class="rowbtn" data-room="' + r.id + '" aria-current="' + (r.id === selectedId) + '">' +
+      "<span>" + esc(r.hotspotLabel || r.nameEn) + "</span>" +
+      (r.nameHe ? '<span class="he" dir="rtl">' + esc(r.nameHe) + "</span>" : "") + "</button>";
+  }
+  roomPanel.innerHTML = h;
+  roomPanel.querySelectorAll("[data-room]").forEach(b =>
+    b.addEventListener("click", () => selectRoom(b.dataset.room)));
+}
+function renderSide() {
+  const r = roomById.get(selectedId);
+  const furn = FURN_BY_ROOM[selectedId] || [];
+  let h = "<h5>" + esc(r.nameEn) + "</h5>";
+  h += '<div class="mono" style="color:var(--brass);margin-bottom:8px">' +
+    r.dimensions.widthM.toFixed(2) + " × " + r.dimensions.depthM.toFixed(2) + " m · " + r.confidence + "</div>";
+  h += '<p style="margin:0 0 10px;font-size:13px">' + esc(r.function) + "</p>";
+  if (furn.length) {
+    h += '<h5>Specified here<span class="n">' + furn.length + "</span></h5>";
+    for (const it of furn) h += pieceRow(it);
+  }
+  if (selectedPieceId && furnById.has(selectedPieceId)) {
+    const it = furnById.get(selectedPieceId);
+    const saved = shortlist.includes(it.id);
+    h += '<div class="detail"><div class="nm">' + esc(it.shopLabel) + "</div>" +
+      '<div class="meta">' + esc(it.category) + " · " + esc(it.retailer) + "<br>" +
+      it.footprintM.widthM.toFixed(2) + " × " + it.footprintM.depthM.toFixed(2) + " m · h " + it.heightM.toFixed(2) + " m</div>" +
+      '<div class="acts"><button type="button" id="shortBtn">' + (saved ? "Remove" : "★ Shortlist") + "</button>" +
+      '<a href="' + esc(it.productUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(it.retailer) + " ↗</a></div></div>";
+  }
+  h += '<h5 style="margin-top:14px">Your shortlist<span class="n">' + shortlist.length + "</span></h5>";
+  if (!shortlist.length) h += '<p class="empty">Click any piece in the model to save it.</p>';
+  else for (const id of shortlist) { const it = furnById.get(id); if (it) h += pieceRow(it); }
+  sidePanel.innerHTML = h;
+  sidePanel.querySelectorAll("[data-piece]").forEach(b =>
+    b.addEventListener("click", () => selectPiece(b.dataset.piece)));
+  const sb = document.getElementById("shortBtn");
+  if (sb) sb.addEventListener("click", () => toggleShortlist(selectedPieceId));
+}
+function pieceRow(it) {
+  return '<button type="button" class="rowbtn" data-piece="' + it.id + '" aria-current="' + (it.id === selectedPieceId) + '">' +
+    '<span class="sw" style="background:' + esc(it.colorHex) + '"></span>' +
+    "<span>" + esc(it.shopLabel) + "</span>" +
+    (shortlist.includes(it.id) ? '<span class="star">★</span>' : "") +
+    '<span class="ret">' + esc(it.retailer) + "</span></button>";
+}
+function selectPiece(id) {
+  selectedPieceId = selectedPieceId === id ? null : id;
+  const it = furnById.get(id);
+  if (it && selectedPieceId) selectedId = it.roomId;
+  paintFurniture();
+  renderRoomPanel();
+  renderSide();
+}
+function selectRoom(id) {
+  if (!roomById.has(id)) return;
+  selectedId = id;
+  const r = roomById.get(id);
+  if (eMode === "doll") orbit.target.set(r.cameraSpawn.x, 1.1, r.cameraSpawn.z);
+  else {
+    walker.x = r.cameraSpawn.x; walker.z = r.cameraSpawn.z;
+    walker.yaw = r.cameraSpawnYaw || 0; walker.pitch = 0;
+    ehud.textContent = "Walking · " + (r.hotspotLabel || r.nameEn);
+  }
+  renderRoomPanel();
+  renderSide();
+}
+function setEMode(m) {
+  eMode = m;
+  const walking = m === "walk";
+  document.getElementById("mDoll").setAttribute("aria-pressed", String(!walking));
+  document.getElementById("mWalk").setAttribute("aria-pressed", String(walking));
+  canvas.classList.toggle("walking", walking);
+  setCeilings(walking);
+  if (!walking && document.exitPointerLock) document.exitPointerLock();
+  const r = roomById.get(selectedId);
+  if (walking) {
+    walker.x = r.cameraSpawn.x; walker.z = r.cameraSpawn.z;
+    walker.yaw = r.cameraSpawnYaw || 0; walker.pitch = 0;
+    ehud.textContent = "Walking · " + (r.hotspotLabel || r.nameEn) + " — W A S D, drag to look, Esc to leave";
+  } else {
+    orbit.target.set(r.cameraSpawn.x, 1.1, r.cameraSpawn.z);
+    ehud.textContent = "Dollhouse — drag to orbit, scroll to zoom, click a room or a piece";
+  }
+}
+document.getElementById("mDoll").addEventListener("click", () => setEMode("doll"));
+document.getElementById("mWalk").addEventListener("click", () => setEMode("walk"));
+
+let savedScroll = 0;
+function setExplore(on) {
+  exploring = on;
+  document.body.classList.toggle("explore", on);
+  if (on) {
+    savedScroll = scrollY;
+    const near = CHAPTERS[Math.round(Math.max(0, Math.min(CHAPTERS.length - 1, scrollSeg)))];
+    selectedId = near ? near.roomId : "living";
+    setEMode("doll");
+    renderRoomPanel();
+    renderSide();
+  } else {
+    if (document.exitPointerLock) document.exitPointerLock();
+    scrollTo(0, savedScroll);
+    readScroll();
+  }
+}
+document.getElementById("exploreBtn").addEventListener("click", () => setExplore(true));
+document.getElementById("backBtn").addEventListener("click", () => setExplore(false));
+
+const timeRange = document.getElementById("timeRange");
+const timeOut = document.getElementById("timeOut");
+function setTime(v) {
+  timeOfDay = v;
+  const h = Math.floor(v), m = Math.round((v - h) * 60);
+  timeOut.textContent = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+  buildLighting();
+}
+timeRange.addEventListener("input", () => setTime(parseFloat(timeRange.value)));
+
+/* ------------------------------------------------------------------ *
+ * Closing dossier, written from the room records themselves
+ * ------------------------------------------------------------------ */
+(function buildDossier() {
+  const interior = ROOMS.filter(r => !r.isExterior).reduce((a, r) => a + r.dimensions.widthM * r.dimensions.depthM, 0);
+  const exterior = ROOMS.filter(r => r.isExterior).reduce((a, r) => a + r.dimensions.widthM * r.dimensions.depthM, 0);
+  const byKind = OPENINGS.reduce((a, o) => { a[o.kind] = (a[o.kind] || 0) + 1; return a; }, {});
+  const stats = [
+    [interior.toFixed(1), "m² interior"],
+    [exterior.toFixed(1), "m² exterior"],
+    [String(ROOMS.length), "rooms"],
+    [String(byKind.door || 0), "doors"],
+    [String(byKind.window || 0), "windows"],
+    [ALL_FURN.length.toString(), "pieces specified"],
+  ];
+  document.getElementById("stats").innerHTML = stats
+    .map(s => '<div class="stat"><div class="v">' + s[0] + '</div><div class="k mono">' + s[1] + "</div></div>").join("");
+
+  const li = r => "<li><b>" + esc(r.nameEn) + "</b> — " + esc(r.dimensionSource) + "</li>";
+  document.getElementById("colHigh").innerHTML =
+    ROOMS.filter(r => r.confidence === "high").map(li).join("");
+  document.getElementById("colLow").innerHTML =
+    ROOMS.filter(r => r.confidence === "low").map(li).join("");
+  const qs = [];
+  for (const r of ROOMS) for (const q of (r.unresolvedQuestions || [])) qs.push("<li>" + esc(q) + "</li>");
+  document.getElementById("colQ").innerHTML = qs.join("") || "<li>Nothing outstanding.</li>";
+})();
+
+/* ------------------------------------------------------------------ *
+ * Loop
+ * ------------------------------------------------------------------ */
+function resize() {
+  const w = Math.max(1, innerWidth), h = Math.max(1, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.setSize(w, h, false);
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", () => { resize(); readScroll(); });
+
+let lastTime = -1, prev = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - prev) / 1000);
+  prev = now;
+
+  if (exploring) {
+    labelGroup.visible = eMode === "doll";
+    if (eMode === "walk") {
+      const sp = 2.6 * dt;
+      let fw = 0, sd = 0;
+      if (keys.w || keys.arrowup) fw += 1;
+      if (keys.s || keys.arrowdown) fw -= 1;
+      if (keys.d || keys.arrowright) sd += 1;
+      if (keys.a || keys.arrowleft) sd -= 1;
+      if (fw || sd) {
+        const sy = Math.sin(walker.yaw), cy = Math.cos(walker.yaw);
+        const vx = (sy * fw + cy * sd) * sp, vz = (cy * fw - sy * sd) * sp;
+        if (canMove(walker.x, walker.z, walker.x + vx, walker.z + vz)) { walker.x += vx; walker.z += vz; }
+        else if (canMove(walker.x, walker.z, walker.x + vx, walker.z)) walker.x += vx;
+        else if (canMove(walker.x, walker.z, walker.x, walker.z + vz)) walker.z += vz;
+        const here = roomAt(walker.x, walker.z);
+        if (here && here.id !== selectedId) {
+          selectedId = here.id;
+          ehud.textContent = "Walking · " + (here.hotspotLabel || here.nameEn);
+          renderRoomPanel();
+          renderSide();
+        }
+      }
+      applyWalk();
+    } else {
+      applyOrbit();
+    }
+  } else {
+    const c = camAt(scrollSeg);
+    // A slow drift while a chapter holds, so a still frame is never quite still.
+    const drift = Math.sin(now * 0.00016) * 0.22;
+    camera.position.set(c.p[0] + drift, c.p[1], c.p[2] + drift * 0.4);
+    camera.lookAt(c.l[0], c.l[1], c.l[2]);
+    setCeilings(c.ceil);
+    // The annotations belong to the last chapter, where the roof comes off.
+    labelGroup.visible = scrollSeg > CHAPTERS.length - 1.75;
+    const rounded = Math.round(c.time * 4) / 4;
+    if (rounded !== lastTime) { lastTime = rounded; timeOfDay = rounded; buildLighting(); }
+  }
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+/* ---- boot ---- */
+shortlist = loadShortlist();
+buildWorld();
+buildStructure();
+buildFurniture();
+buildRoomLabels();
+setTime(18);
+resize();
+
+// A link that names a chapter opens on that chapter.
+const openAt = CHAPTERS.findIndex(c => c.id === (location.hash || "").replace(/^#/, ""));
+if (openAt > 0) {
+  const max = Math.max(1, scroller.offsetHeight - innerHeight);
+  scrollTo(0, (openAt / (CHAPTERS.length - 1)) * max);
+}
+readScroll();
+
+/* Real filmstrip thumbnails: render each chapter once, at thumbnail size. */
+function makeThumbs() {
+  const W = 208, H = 130;
+  const keepW = innerWidth, keepH = innerHeight;
+  renderer.setPixelRatio(1);
+  renderer.setSize(W, H, false);
+  camera.aspect = W / H;
+  camera.updateProjectionMatrix();
+  for (let i = 0; i < CHAPTERS.length; i++) {
+    const c = CHAPTERS[i];
+    timeOfDay = c.time;
+    buildLighting();
+    setCeilings(c.ceil);
+    camera.position.set(c.cam.p[0], c.cam.p[1], c.cam.p[2]);
+    camera.lookAt(c.cam.l[0], c.cam.l[1], c.cam.l[2]);
+    renderer.render(scene, camera);
+    try { thumbEls[i].style.backgroundImage = "url(" + canvas.toDataURL("image/jpeg", 0.72) + ")"; }
+    catch (err) { /* a tainted or lost context just leaves the plain tile */ }
+    document.getElementById("bootBar").style.transform = "scaleX(" + ((i + 1) / CHAPTERS.length) + ")";
+  }
+  renderer.setSize(keepW, keepH, false);
+  resize();
+  lastTime = -1;
+}
+
+requestAnimationFrame(() => {
+  makeThumbs();
+  const boot = document.getElementById("boot");
+  boot.style.opacity = "0";
+  setTimeout(() => { boot.hidden = true; }, 620);
+  requestAnimationFrame(frame);
+});
+</script>
+
+</body>
+</html>
